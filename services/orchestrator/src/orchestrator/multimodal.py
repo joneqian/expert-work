@@ -16,6 +16,7 @@ See ``docs/streams/STREAM-J-DESIGN.md`` § 13.
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Final, Protocol, runtime_checkable
@@ -131,3 +132,38 @@ class ObjectStoreImageResolver:
             raise ValueError(msg)
         data = await self.store.get(image_ref.storage_key)
         return ResolvedImage(media_type=media_type, data=data)
+
+
+@dataclass
+class CachingImageResolver:
+    """Wraps an :class:`ImageResolver` with a bounded LRU cache.
+
+    Image refs are content-addressed + immutable, so a resolved image never
+    goes stale; and a ref identifies exactly one image, so a ``ref ->
+    ResolvedImage`` cache can only ever return that ref's own bytes (it never
+    exposes anything a direct ``resolve(ref)`` would not). Without it, every LLM
+    turn of a run re-fetches every image in the whole history from the object
+    store — ``_human_content`` re-walks all messages on each ``complete`` call,
+    and this resolver outlives individual turns, so the cache spans them.
+
+    Failures are not cached (a raised lookup re-runs next time). ``max_size``
+    bounds retained images so the cache cannot grow without limit.
+    """
+
+    inner: ImageResolver
+    max_size: int = 32
+    _cache: OrderedDict[str, ResolvedImage] = field(
+        default_factory=OrderedDict, init=False, repr=False
+    )
+
+    async def resolve(self, ref: str) -> ResolvedImage:
+        cached = self._cache.get(ref)
+        if cached is not None:
+            self._cache.move_to_end(ref)
+            return cached
+        resolved = await self.inner.resolve(ref)
+        self._cache[ref] = resolved
+        self._cache.move_to_end(ref)
+        while len(self._cache) > self.max_size:
+            self._cache.popitem(last=False)
+        return resolved

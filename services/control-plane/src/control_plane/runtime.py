@@ -85,7 +85,11 @@ from orchestrator.llm import (
     HTTPEmbeddingClient,
     OpenAICompatibleEmbedder,
 )
-from orchestrator.multimodal import ImageResolver, ObjectStoreImageResolver
+from orchestrator.multimodal import (
+    CachingImageResolver,
+    ImageResolver,
+    ObjectStoreImageResolver,
+)
 from orchestrator.tools import (
     AllowlistProvider,
     HTTPSupervisorClient,
@@ -1222,8 +1226,13 @@ async def resolve_object_store_config(
 
 def make_image_resolver(store: ObjectStore) -> ImageResolver:
     """Build the J.6 image resolver over an object store — backs both
-    multimodal paths (Path A content blocks + Path B ``ask_image``)."""
-    return ObjectStoreImageResolver(store=store)
+    multimodal paths (Path A content blocks + Path B ``ask_image``).
+
+    Wrapped in a bounded LRU cache: the resolver is a single long-lived
+    instance, and every LLM turn re-resolves every image in the conversation
+    history, so caching stops the same image being re-fetched each turn.
+    """
+    return CachingImageResolver(ObjectStoreImageResolver(store=store))
 
 
 def build_middleware_env(

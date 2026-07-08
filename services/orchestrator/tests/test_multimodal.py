@@ -11,6 +11,7 @@ from expert_work.protocol.multimodal import ImageRef
 from expert_work.runtime.storage import InMemoryObjectStore, ObjectNotFoundError
 from orchestrator.multimodal import (
     IMAGE_REF_BLOCK_TYPE,
+    CachingImageResolver,
     ImageResolver,
     InMemoryImageResolver,
     ObjectStoreImageResolver,
@@ -139,3 +140,40 @@ async def test_object_store_resolver_rejects_malformed_ref() -> None:
 
 def test_object_store_resolver_satisfies_protocol() -> None:
     assert isinstance(ObjectStoreImageResolver(store=InMemoryObjectStore()), ImageResolver)
+
+
+class _CountingResolver:
+    """Inner resolver that counts fetches — to prove the cache short-circuits."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def resolve(self, ref: str) -> ResolvedImage:
+        self.calls += 1
+        return ResolvedImage(media_type="image/png", data=ref.encode())
+
+
+def test_caching_resolver_satisfies_protocol() -> None:
+    assert isinstance(CachingImageResolver(_CountingResolver()), ImageResolver)
+
+
+@pytest.mark.asyncio
+async def test_caching_resolver_memoizes_same_ref() -> None:
+    inner = _CountingResolver()
+    resolver = CachingImageResolver(inner)
+    first = await resolver.resolve("expert_work://image/a.png")
+    second = await resolver.resolve("expert_work://image/a.png")
+    assert first is second  # cache hit returns the same resolved object
+    assert inner.calls == 1  # the inner store was hit exactly once
+
+
+@pytest.mark.asyncio
+async def test_caching_resolver_lru_evicts_oldest() -> None:
+    inner = _CountingResolver()
+    resolver = CachingImageResolver(inner, max_size=2)
+    await resolver.resolve("a")
+    await resolver.resolve("b")
+    await resolver.resolve("c")  # cache full (max 2) → evicts the oldest, "a"
+    assert inner.calls == 3
+    await resolver.resolve("a")  # "a" was evicted → re-fetched
+    assert inner.calls == 4
