@@ -30,7 +30,7 @@ from uuid import UUID
 from control_plane.mcp_oauth_refresh import McpOAuthRefresher
 from control_plane.tenant_scope import bypass_rls_session
 from expert_work.persistence import McpConnectorCatalogStore, McpOAuthConnectionStore
-from expert_work.protocol import McpOAuthConnectionRecord
+from expert_work.protocol import McpConnectorCatalogRecord, McpOAuthConnectionRecord
 from orchestrator.tools.mcp import (
     MCPClient,
     MCPServerConfig,
@@ -99,11 +99,12 @@ class UserMcpOAuthPoolService:
             record.token_expires_at is not None and record.token_expires_at <= self._clock()
         )
 
-    async def _record_to_config(self, record: McpOAuthConnectionRecord) -> MCPServerConfig | None:
-        # Transport comes from the catalog entry (NULL-tenant → bypass RLS). The
-        # FK is ON DELETE CASCADE, so a live connection always has its entry.
-        async with bypass_rls_session():
-            entry = await self._catalog_store.get_by_id(record.catalog_id)
+    def _record_to_config(
+        self, record: McpOAuthConnectionRecord, entry: McpConnectorCatalogRecord | None
+    ) -> MCPServerConfig | None:
+        # ``entry`` is the record's catalog row, prefetched by the caller in one
+        # batch (was a per-record get_by_id here — the N+1). The FK is ON DELETE
+        # CASCADE, so a live connection always has its entry.
         if entry is None:
             return None
         return MCPServerConfig(
@@ -131,11 +132,16 @@ class UserMcpOAuthPoolService:
                 records = await self._oauth_store.list_for_user(
                     tenant_id=tenant_id, user_id=user_id
                 )
+                # One batched catalog lookup (platform NULL-tenant rows →
+                # bypass RLS) instead of a get_by_id per record inside the
+                # loop — that per-record read was the N+1 on this build path.
+                async with bypass_rls_session():
+                    entries = await self._catalog_store.get_by_ids([r.catalog_id for r in records])
                 for record in records:
                     usable = await self._resolve_usable(record)
                     if usable is None:
                         continue
-                    config = await self._record_to_config(usable)
+                    config = self._record_to_config(usable, entries.get(usable.catalog_id))
                     if config is None:
                         continue
                     try:

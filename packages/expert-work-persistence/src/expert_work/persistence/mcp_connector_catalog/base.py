@@ -10,6 +10,7 @@ import bypass; the control-plane caller applies it (W-3/W-4).
 from __future__ import annotations
 
 import abc
+from collections.abc import Sequence
 from uuid import UUID
 
 from expert_work.protocol import (
@@ -61,6 +62,13 @@ class McpConnectorCatalogStore(abc.ABC):
     @abc.abstractmethod
     async def get_by_id(self, catalog_id: UUID) -> McpConnectorCatalogRecord | None:
         """Return the entry, or None if absent."""
+
+    @abc.abstractmethod
+    async def get_by_ids(
+        self, catalog_ids: Sequence[UUID]
+    ) -> dict[UUID, McpConnectorCatalogRecord]:
+        """Batch :meth:`get_by_id` — one round trip for many ids, keyed by id
+        (missing ids absent). Replaces a per-id ``get_by_id`` loop (N+1)."""
 
     @abc.abstractmethod
     async def get_by_name(self, name: str) -> McpConnectorCatalogRecord | None:
