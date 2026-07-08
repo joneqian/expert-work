@@ -424,7 +424,14 @@ async def _fetch_evolved_skills(
             limit=100,
         )
         for skill in rows:
-            version = await skill_store.resolve_by_name(tenant_id=tenant_id, name=skill.name)
+            # ``skill`` (from list_skills, status=ACTIVE) already carries id +
+            # latest_version — resolve_by_name would re-fetch the row by name
+            # (a redundant query per evolved skill). Go straight to the version.
+            if skill.latest_version == 0:
+                continue
+            version = await skill_store.get_version_by_number(
+                skill_id=skill.id, tenant_id=tenant_id, version=skill.latest_version
+            )
             if version is not None and version.evolution_origin == "distilled":
                 evolved.append((skill, version))
         if cursor is None:
