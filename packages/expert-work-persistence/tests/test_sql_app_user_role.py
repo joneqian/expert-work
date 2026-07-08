@@ -60,13 +60,14 @@ def test_app_user_role_downgrade_drops_role(postgres_container: PostgresContaine
     cfg = Config(str(ALEMBIC_INI))
     cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
     command.upgrade(cfg, "head")
-    command.downgrade(cfg, "0120_supporting_files_cap")
     engine = create_engine(_sync_dsn(postgres_container), isolation_level="AUTOCOMMIT")
     try:
+        command.downgrade(cfg, "0120_supporting_files_cap")
         with engine.connect() as conn:
             row = conn.execute(
                 text("SELECT 1 FROM pg_roles WHERE rolname='app_user'")
             ).one_or_none()
             assert row is None, "app_user role still present after downgrade"
     finally:
+        command.upgrade(cfg, "head")  # restore shared session-scoped container
         engine.dispose()
