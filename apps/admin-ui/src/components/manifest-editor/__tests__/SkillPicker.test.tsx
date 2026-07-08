@@ -4,9 +4,28 @@ import userEvent from "@testing-library/user-event";
 import "../../../i18n";
 
 import { SkillPicker } from "../SkillPicker";
+import { listSkills, type SkillRecord } from "../../../api/skills";
 import type { AgentManifest } from "../form_model";
 
-function rec(over: Record<string, unknown>) {
+/** Open an antd Select (by its data-testid root) and click the option whose
+ *  visible content matches — a string (exact) or regex (language-tolerant,
+ *  since source labels are localized). Mirrors ModelSelect.test's helper. */
+async function pickOption(
+  user: ReturnType<typeof userEvent.setup>,
+  root: HTMLElement,
+  match: string | RegExp,
+): Promise<void> {
+  await user.click(root.querySelector(".ant-select-selector") as HTMLElement);
+  const item = await screen.findByText((_content, el) => {
+    if (el?.classList.contains("ant-select-item-option-content") !== true)
+      return false;
+    const txt = el.textContent ?? "";
+    return typeof match === "string" ? txt === match : match.test(txt);
+  });
+  await user.click(item);
+}
+
+function rec(over: Partial<SkillRecord> & { name: string }): SkillRecord {
   return {
     id: over.name,
     status: "active",
@@ -19,7 +38,7 @@ function rec(over: Record<string, unknown>) {
     created_at: "",
     updated_at: "",
     ...over,
-  };
+  } as SkillRecord;
 }
 
 vi.mock("../../../api/skills", () => ({
@@ -134,5 +153,110 @@ describe("SkillPicker", () => {
     await user.click(toggle);
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
     expect(last.spec?.auto_attach_evolved_skills).toBeUndefined();
+  });
+
+  // Filtering (category + source dropdowns) + a capped-height scroll area.
+  // A larger roster (>6) is what surfaces the filter controls at all.
+  const MANY = {
+    items: [
+      rec({
+        name: "t-office",
+        description: "tenant office",
+        category: "office",
+        source: "tenant",
+      }),
+      rec({
+        name: "t-data",
+        description: "tenant data",
+        category: "data",
+        source: "tenant",
+      }),
+    ],
+    platform_items: [
+      rec({
+        name: "p-med-1",
+        description: "med one",
+        category: "medical",
+        source: "platform",
+        entitled: true,
+      }),
+      rec({
+        name: "p-med-2",
+        description: "med two",
+        category: "medical",
+        source: "platform",
+        entitled: true,
+      }),
+      rec({
+        name: "p-med-3",
+        description: "med three",
+        category: "medical",
+        source: "platform",
+        entitled: true,
+      }),
+      rec({
+        name: "p-eff-1",
+        description: "eff one",
+        category: "efficiency",
+        source: "platform",
+        entitled: true,
+      }),
+      rec({
+        name: "p-eff-2",
+        description: "eff two",
+        category: "efficiency",
+        source: "platform",
+        entitled: true,
+      }),
+    ],
+    next_cursor: null,
+    cross_tenant: false,
+  };
+
+  it("category filter narrows the list to the chosen category", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listSkills).mockResolvedValueOnce(MANY);
+    render(<SkillPicker formData={SEED} onChange={vi.fn()} />);
+    expect(
+      await screen.findByTestId("af-skill-row-p-med-1"),
+    ).toBeInTheDocument();
+
+    await pickOption(user, screen.getByTestId("af-skills-category"), "medical");
+
+    expect(screen.getByTestId("af-skill-row-p-med-1")).toBeInTheDocument();
+    expect(screen.getByTestId("af-skill-row-p-med-3")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("af-skill-row-t-office"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("af-skill-row-p-eff-1"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("source filter narrows the list to the chosen source", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listSkills).mockResolvedValueOnce(MANY);
+    render(<SkillPicker formData={SEED} onChange={vi.fn()} />);
+    expect(
+      await screen.findByTestId("af-skill-row-t-office"),
+    ).toBeInTheDocument();
+
+    await pickOption(
+      user,
+      screen.getByTestId("af-skills-source"),
+      /^(租户|Tenant)$/,
+    );
+
+    expect(screen.getByTestId("af-skill-row-t-office")).toBeInTheDocument();
+    expect(screen.getByTestId("af-skill-row-t-data")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("af-skill-row-p-med-1"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("wraps the list in a capped-height scroll area", async () => {
+    render(<SkillPicker formData={SEED} onChange={vi.fn()} />);
+    const scroll = await screen.findByTestId("af-skills-scroll");
+    expect(scroll).toHaveStyle({ overflowY: "auto" });
   });
 });
