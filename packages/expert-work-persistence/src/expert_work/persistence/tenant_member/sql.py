@@ -125,10 +125,12 @@ class SqlTenantMemberStore(TenantMemberStore):
             rows = (await session.execute(stmt)).scalars().all()
             return [_row_to_member(r) for r in rows]
 
-    async def set_keycloak_user_id(self, *, member_id: UUID, keycloak_user_id: str) -> None:
+    async def set_keycloak_user_id(
+        self, *, member_id: UUID, tenant_id: UUID, keycloak_user_id: str
+    ) -> None:
         stmt = (
             update(TenantMemberRow)
-            .where(TenantMemberRow.id == member_id)
+            .where(TenantMemberRow.id == member_id, TenantMemberRow.tenant_id == tenant_id)
             .values(keycloak_user_id=keycloak_user_id)
         )
         async with self._sf() as session:

@@ -108,7 +108,7 @@ async def test_state_machine_and_active_consistency(sql_store: SqlStoreFixture) 
         assert not await store.transition(
             member_id=m.id, tenant_id=tenant, to="suspended", now=datetime.now(UTC)
         )
-        await store.set_keycloak_user_id(member_id=m.id, keycloak_user_id="kc-1")
+        await store.set_keycloak_user_id(member_id=m.id, tenant_id=tenant, keycloak_user_id="kc-1")
         user_id = uuid4()
         assert await store.transition(
             member_id=m.id,
@@ -140,7 +140,7 @@ async def test_kc_reverse_lookup_and_list(sql_store: SqlStoreFixture) -> None:
         a = await store.create(tenant_id=t1, email="a@co.com", role="viewer", invited_by="x")
         await store.create(tenant_id=t1, email="b@co.com", role="viewer", invited_by="x")
         await store.create(tenant_id=t2, email="c@co.com", role="viewer", invited_by="x")
-        await store.set_keycloak_user_id(member_id=a.id, keycloak_user_id="kc-a")
+        await store.set_keycloak_user_id(member_id=a.id, tenant_id=t1, keycloak_user_id="kc-a")
 
         found = await store.get_by_keycloak_user_id(keycloak_user_id="kc-a")
         assert found is not None and found.id == a.id
@@ -149,5 +149,28 @@ async def test_kc_reverse_lookup_and_list(sql_store: SqlStoreFixture) -> None:
         assert len(t1_members) == 2
         invited = await store.list_for_tenant(tenant_id=t1, status="invited")
         assert {x.email for x in invited} == {"a@co.com", "b@co.com"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_set_keycloak_user_id_is_tenant_scoped(sql_store: SqlStoreFixture) -> None:
+    """A wrong ``tenant_id`` must not back-fill the member. This harness connects
+    superuser (RLS bypassed), so the explicit ``tenant_id`` predicate is the sole
+    cross-tenant guard — exactly the runtime posture."""
+    store, engine = sql_store
+    try:
+        tenant, other = uuid4(), uuid4()
+        m = await store.create(tenant_id=tenant, email="e@co.com", role="operator", invited_by="a")
+        # Wrong tenant → no row updated (the member stays un-backfilled).
+        await store.set_keycloak_user_id(
+            member_id=m.id, tenant_id=other, keycloak_user_id="kc-wrong"
+        )
+        got = await store.get(tenant_id=tenant, member_id=m.id)
+        assert got is not None and got.keycloak_user_id is None
+        # Correct tenant → back-filled.
+        await store.set_keycloak_user_id(member_id=m.id, tenant_id=tenant, keycloak_user_id="kc-ok")
+        got = await store.get(tenant_id=tenant, member_id=m.id)
+        assert got is not None and got.keycloak_user_id == "kc-ok"
     finally:
         await engine.dispose()

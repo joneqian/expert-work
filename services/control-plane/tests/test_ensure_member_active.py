@@ -35,7 +35,7 @@ async def test_promotes_invited_member_on_first_run() -> None:
     member = await store.create(
         tenant_id=tenant, email="e@co.com", role="operator", invited_by="admin"
     )
-    await store.set_keycloak_user_id(member_id=member.id, keycloak_user_id=kc_id)
+    await store.set_keycloak_user_id(member_id=member.id, tenant_id=tenant, keycloak_user_id=kc_id)
 
     caller_user_id = uuid4()
     req = _request(subject_id=kc_id, member_repo=store)
@@ -55,7 +55,7 @@ async def test_idempotent_second_run_noop() -> None:
     member = await store.create(
         tenant_id=tenant, email="e@co.com", role="operator", invited_by="admin"
     )
-    await store.set_keycloak_user_id(member_id=member.id, keycloak_user_id=kc_id)
+    await store.set_keycloak_user_id(member_id=member.id, tenant_id=tenant, keycloak_user_id=kc_id)
     req = _request(subject_id=kc_id, member_repo=store)
     first_user = uuid4()
     await ensure_member_active(req, caller_user_id=first_user)  # type: ignore[arg-type]

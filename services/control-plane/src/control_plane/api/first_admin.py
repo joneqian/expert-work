@@ -134,7 +134,9 @@ async def provision_first_admin(
 
     # Step 3 — back-fill the Keycloak id + write the cross-tenant ADMIN binding
     # (Mini-ADR R-5: explicit target tenant_id, already inside bypass_rls).
-    await member_store.set_keycloak_user_id(member_id=member.id, keycloak_user_id=kc_user.id)
+    await member_store.set_keycloak_user_id(
+        member_id=member.id, tenant_id=tenant_id, keycloak_user_id=kc_user.id
+    )
     await role_binding_store.create(
         subject_type="user",
         subject_id=UUID(kc_user.id),

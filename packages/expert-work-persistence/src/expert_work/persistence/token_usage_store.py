@@ -97,9 +97,9 @@ class TokenUsageStore(abc.ABC):
     ) -> Sequence[TokenUsageRecord]:
         """Return rows for ``tenant_id``, newest first.
 
-        Tenant scoping rides on the RLS context (the GUC / contextvar),
-        not a SQL filter — so this also acts as the cross-tenant
-        isolation check at the data layer.
+        Isolation is an explicit ``tenant_id`` SQL predicate — the RLS
+        backstop is bypassed under the app's superuser connection, so the
+        predicate is the actual cross-tenant check at the data layer.
         """
 
     @abc.abstractmethod
@@ -115,9 +115,10 @@ class TokenUsageStore(abc.ABC):
 
         Half-open window (start inclusive, end exclusive). No row cap: the Y4
         rollup must price every usage row in a month, so this reads the full
-        window (the SQL impl pages internally). Tenant scoping rides on the RLS
-        context, like :meth:`list_for_tenant`. ``user_id`` narrows to one
-        end-user (conversation-centric IA M2 — the user-detail usage tab).
+        window (the SQL impl pages internally). Filtered by an explicit
+        ``tenant_id`` SQL predicate, like :meth:`list_for_tenant` (RLS is
+        bypassed at runtime). ``user_id`` narrows to one end-user
+        (conversation-centric IA M2 — the user-detail usage tab).
         """
 
     @abc.abstractmethod
@@ -302,7 +303,10 @@ class DbTokenUsageStore(TokenUsageStore):
         limit: int = 100,
     ) -> Sequence[TokenUsageRecord]:
         async with self._sf() as session:
-            stmt = select(TokenUsageRow)
+            # Explicit tenant predicate: the RLS backstop is bypassed at runtime
+            # (the app connects as a superuser DB role), so app-layer filtering
+            # is the actual cross-tenant isolation — not the tenant GUC alone.
+            stmt = select(TokenUsageRow).where(TokenUsageRow.tenant_id == tenant_id)
             if agent_name is not None:
                 stmt = stmt.where(TokenUsageRow.agent_name == agent_name)
             if model is not None:
@@ -337,6 +341,9 @@ class DbTokenUsageStore(TokenUsageStore):
                 stmt = (
                     select(TokenUsageRow)
                     .where(
+                        # Explicit tenant predicate — RLS is bypassed under the
+                        # app's superuser connection, so this is the isolation.
+                        TokenUsageRow.tenant_id == tenant_id,
                         TokenUsageRow.observed_at >= start,
                         TokenUsageRow.observed_at < end,
                         TokenUsageRow.id > after_id,

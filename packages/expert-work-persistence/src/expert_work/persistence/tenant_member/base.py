@@ -97,8 +97,15 @@ class TenantMemberStore(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def set_keycloak_user_id(self, *, member_id: UUID, keycloak_user_id: str) -> None:
-        """Back-fill ``keycloak_user_id`` after Keycloak account provisioning succeeds."""
+    async def set_keycloak_user_id(
+        self, *, member_id: UUID, tenant_id: UUID, keycloak_user_id: str
+    ) -> None:
+        """Back-fill ``keycloak_user_id`` after Keycloak account provisioning succeeds.
+
+        ``tenant_id`` scopes the write (the store's invariant: every method takes
+        it) — the RLS backstop is bypassed under the app's superuser connection,
+        so the explicit predicate is the actual cross-tenant guard.
+        """
 
     @abc.abstractmethod
     async def transition(

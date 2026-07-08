@@ -90,9 +90,11 @@ class InMemoryTenantMemberStore(TenantMemberStore):
         rows.sort(key=lambda r: r.invited_at or datetime.min, reverse=True)
         return rows[offset : offset + limit]
 
-    async def set_keycloak_user_id(self, *, member_id: UUID, keycloak_user_id: str) -> None:
+    async def set_keycloak_user_id(
+        self, *, member_id: UUID, tenant_id: UUID, keycloak_user_id: str
+    ) -> None:
         row = self._rows.get(member_id)
-        if row is None:
+        if row is None or row.tenant_id != tenant_id:
             return
         self._rows[member_id] = row.model_copy(update={"keycloak_user_id": keycloak_user_id})
 

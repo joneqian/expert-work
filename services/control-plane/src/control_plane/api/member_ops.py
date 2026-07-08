@@ -120,7 +120,9 @@ async def _provision_keycloak(
             )
             raise MemberKeycloakUnavailableError(str(exc)) from exc
         kc_user_id = kc_user.id
-        await member_store.set_keycloak_user_id(member_id=member.id, keycloak_user_id=kc_user_id)
+        await member_store.set_keycloak_user_id(
+            member_id=member.id, tenant_id=tenant_id, keycloak_user_id=kc_user_id
+        )
         await _emit(
             audit,
             tenant_id,
