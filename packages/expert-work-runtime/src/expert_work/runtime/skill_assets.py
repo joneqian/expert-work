@@ -159,3 +159,24 @@ async def fetch_supporting_files(
 
     pairs = await asyncio.gather(*(_one(p, sf) for p, sf in files.items()))
     return dict(pairs)
+
+
+async def fetch_supporting_files_settled(
+    files: Mapping[str, SkillSupportingFile],
+    *,
+    object_store: ObjectStore | None,
+) -> dict[str, bytes | BaseException]:
+    """Like :func:`fetch_supporting_files`, but isolates per-file failures: a
+    single entry's exception becomes that entry's value instead of failing the
+    whole batch. Callers that drop-and-audit each file individually (skill
+    seeding) need the granularity — one corrupt / missing asset must not sink
+    the other files. Same bounded concurrency."""
+    sem = asyncio.Semaphore(_IO_CONCURRENCY)
+
+    async def _one(sf: SkillSupportingFile) -> bytes:
+        async with sem:
+            return await fetch_supporting_file(sf, object_store=object_store)
+
+    paths = list(files)
+    results = await asyncio.gather(*(_one(files[p]) for p in paths), return_exceptions=True)
+    return dict(zip(paths, results, strict=True))

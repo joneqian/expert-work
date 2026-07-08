@@ -35,7 +35,7 @@ from expert_work.protocol.skill_package import ParsedSkillMd, serialize_skill_md
 from expert_work.runtime.skill_assets import (
     ObjectStore,
     SkillAssetIntegrityError,
-    fetch_supporting_file,
+    fetch_supporting_files_settled,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,26 +175,36 @@ async def build_skill_seed_files(
                 _skill_md_with_name(name, version).encode("utf-8"),
             )
         ]
-        for relpath, entry in sorted(version.supporting_files.items()):
-            try:
-                raw = await fetch_supporting_file(entry, object_store=object_store)
-            except (ValueError, binascii.Error):
+        # Fetch this skill's assets concurrently (bounded), isolating per-file
+        # failures so one corrupt / missing object drops just that file instead
+        # of a serial await-per-file loop (that was the N+1). The isinstance
+        # chain below mirrors the original except order exactly.
+        settled = await fetch_supporting_files_settled(
+            version.supporting_files, object_store=object_store
+        )
+        for relpath in sorted(version.supporting_files):
+            raw_or_err = settled[relpath]
+            if isinstance(raw_or_err, (ValueError, binascii.Error)):
                 logger.warning("skill_seed.bad_base64 skill=%s path=%s", name, relpath)
                 drops.append(SeedDrop(skill_name=name, reason="bad_base64", path=relpath))
                 continue
-            except SkillAssetIntegrityError:
+            if isinstance(raw_or_err, SkillAssetIntegrityError):
                 logger.warning("skill_seed.asset_integrity skill=%s path=%s", name, relpath)
                 drops.append(SeedDrop(skill_name=name, reason="asset_integrity", path=relpath))
                 continue
-            except Exception as exc:
+            if isinstance(raw_or_err, BaseException):
                 # Object-store outage / missing object: the sandbox is still
                 # useful without this one asset; drop + audit, never fail the
                 # whole build on a storage hiccup.
                 logger.warning(
-                    "skill_seed.asset_unavailable skill=%s path=%s err=%s", name, relpath, exc
+                    "skill_seed.asset_unavailable skill=%s path=%s err=%s",
+                    name,
+                    relpath,
+                    raw_or_err,
                 )
                 drops.append(SeedDrop(skill_name=name, reason="asset_unavailable", path=relpath))
                 continue
+            raw = raw_or_err
             # Re-scan text files (context scope); binary can't carry a prompt.
             try:
                 text: str | None = raw.decode("utf-8")
