@@ -214,13 +214,15 @@ class _BatchFilter(BaseModel):
 class _BatchPlatformSkillsBody(BaseModel):
     """``POST /v1/platform/skills/batch`` request body.
 
-    The patch (``set_status`` and/or ``set_pinned``) is applied to exactly one
-    selector: ``ids`` (the page's checkbox selection) OR ``filter`` (every
-    NULL-tenant skill matching it). Validated in the handler.
+    The patch (``set_status`` and/or ``set_pinned`` and/or ``set_category``)
+    is applied to exactly one selector: ``ids`` (the page's checkbox
+    selection) OR ``filter`` (every NULL-tenant skill matching it). Validated
+    in the handler.
     """
 
     set_status: SkillStatus | None = None
     set_pinned: bool | None = None
+    set_category: str | None = Field(default=None, max_length=64)
     ids: list[UUID] | None = Field(default=None, max_length=_MAX_BATCH_SKILLS)
     filter: _BatchFilter | None = None
 
@@ -987,19 +989,20 @@ def build_platform_skills_router() -> APIRouter:
         body: _BatchPlatformSkillsBody,
         request: Request,
     ) -> JSONResponse:
-        """Bulk lock/unlock/archive/activate platform skills (system_admin).
+        """Bulk lock/unlock/archive/activate/re-label platform skills (system_admin).
 
         Applies the patch to either an explicit ``ids`` list (a page's selection)
         or to every skill matching ``filter`` (the "select all N matching" path).
-        Returns ``{updated}`` — the affected row count — and writes a single
-        audit row (no per-row spam)."""
+        The patch may also carry ``set_category`` to re-label (or, via an empty
+        string, clear) the category. Returns ``{updated}`` — the affected row
+        count — and writes a single audit row (no per-row spam)."""
         principal = _principal(request)
         store = _get_skill_store(request)
         audit = _get_audit(request)
-        if body.set_status is None and body.set_pinned is None:
+        if body.set_status is None and body.set_pinned is None and body.set_category is None:
             raise HTTPException(
                 status_code=422,
-                detail="batch body must set at least one of: set_status, set_pinned",
+                detail="batch body must set at least one of: set_status, set_pinned, set_category",
             )
         has_ids = body.ids is not None
         has_filter = body.filter is not None
@@ -1007,6 +1010,10 @@ def build_platform_skills_router() -> APIRouter:
             raise HTTPException(
                 status_code=422, detail="batch body requires exactly one of: ids, filter"
             )
+        update_category = body.set_category is not None
+        new_category = (
+            (body.set_category.strip() or None) if body.set_category is not None else None
+        )
         async with bypass_rls_session():
             updated = await store.bulk_update_platform_skills(
                 ids=body.ids,
@@ -1015,6 +1022,8 @@ def build_platform_skills_router() -> APIRouter:
                 filter_q=body.filter.q if body.filter else None,
                 set_status=body.set_status,
                 set_pinned=body.set_pinned,
+                update_category=update_category,
+                new_category=new_category,
             )
         await audit_emit(
             audit,
@@ -1031,6 +1040,7 @@ def build_platform_skills_router() -> APIRouter:
                 "updated": updated,
                 "set_status": body.set_status.value if body.set_status else None,
                 "set_pinned": body.set_pinned,
+                "set_category": new_category if update_category else None,
             },
         )
         return JSONResponse(status_code=200, content={"updated": updated})

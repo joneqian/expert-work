@@ -454,10 +454,16 @@ async def test_get_unknown_returns_404(ctx: _Ctx) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _seed_platform_skill(store: SkillStore, *, name: str, required_tier: TenantPlan) -> UUID:
+async def _seed_platform_skill(
+    store: SkillStore,
+    *,
+    name: str,
+    required_tier: TenantPlan,
+    category: str | None = None,
+) -> UUID:
     async with bypass_rls_session():
         skill = await store.create_platform_skill(
-            skill_id=uuid4(), name=name, required_tier=required_tier
+            skill_id=uuid4(), name=name, required_tier=required_tier, category=category
         )
         await store.set_platform_status(skill_id=skill.id, status=SkillStatus.ACTIVE)
     return skill.id
@@ -1497,6 +1503,75 @@ async def test_batch_validation(ctx: _Ctx) -> None:
         headers=ctx.admin_headers,
     )
     assert r3.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_batch_set_category_by_ids(ctx: _Ctx) -> None:
+    a = await _seed_platform_skill(ctx.skill_store, name="cat-a", required_tier=TenantPlan.FREE)
+    b = await _seed_platform_skill(ctx.skill_store, name="cat-b", required_tier=TenantPlan.FREE)
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"ids": [str(a), str(b)], "set_category": "研发"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 2
+    got = await ctx.client.get(f"/v1/platform/skills/{a}", headers=ctx.admin_headers)
+    assert got.json()["category"] == "研发"
+
+
+@pytest.mark.asyncio
+async def test_batch_clear_category_with_empty_string(ctx: _Ctx) -> None:
+    # Seeded WITH a category so clearing it is a meaningful assertion.
+    a = await _seed_platform_skill(
+        ctx.skill_store, name="cat-c", required_tier=TenantPlan.FREE, category="旧分类"
+    )
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"ids": [str(a)], "set_category": ""},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    got = await ctx.client.get(f"/v1/platform/skills/{a}", headers=ctx.admin_headers)
+    assert got.json()["category"] is None
+
+
+@pytest.mark.asyncio
+async def test_batch_set_pinned_preserves_category(ctx: _Ctx) -> None:
+    # set_category OMITTED alongside another action — must NOT touch category.
+    a = await _seed_platform_skill(
+        ctx.skill_store, name="cat-f", required_tier=TenantPlan.FREE, category="保留"
+    )
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"ids": [str(a)], "set_pinned": True},  # set_category omitted
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    got = await ctx.client.get(f"/v1/platform/skills/{a}", headers=ctx.admin_headers)
+    assert got.json()["category"] == "保留"
+
+
+@pytest.mark.asyncio
+async def test_batch_category_only_passes_action_guard(ctx: _Ctx) -> None:
+    a = await _seed_platform_skill(ctx.skill_store, name="cat-d", required_tier=TenantPlan.FREE)
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"ids": [str(a)], "set_category": "设计"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200  # not 422 — category counts as an action
+
+
+@pytest.mark.asyncio
+async def test_batch_no_action_422(ctx: _Ctx) -> None:
+    a = await _seed_platform_skill(ctx.skill_store, name="cat-e", required_tier=TenantPlan.FREE)
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"ids": [str(a)]},  # no set_status / set_pinned / set_category
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

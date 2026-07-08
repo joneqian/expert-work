@@ -111,6 +111,21 @@ function raw<T>(data: T): T {
   return data;
 }
 
+/** Shared list + categories mocks for the batch "set category" tests below —
+ *  two rows (so a header-checkbox selection yields ``ids: ["psk-1", "psk-2"]``,
+ *  mirroring the batch-lock test) and a non-empty category list (so the
+ *  "set category" dropdown has an item to click). */
+const listAndCategoryHandlers: RouteHandler[] = [
+  {
+    match: (u, m) => u.endsWith("/platform/skills") && m === "get",
+    respond: () => raw({ items: [SKILL, SKILL2], total: 2 }),
+  },
+  {
+    match: (u) => u.endsWith("/platform/skills/categories"),
+    respond: () => raw({ categories: ["研发"] }),
+  },
+];
+
 function renderPage(roles: string[]) {
   setStoredToken(makeJwt({ sub: "u1", tenant_id: TENANT, roles }));
   return render(
@@ -196,6 +211,62 @@ describe("SettingsPlatformSkills page", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("ps-batch-toolbar")).not.toBeInTheDocument(),
     );
+  });
+
+  it("batch-sets a category on the selected skills via the batch endpoint", async () => {
+    const batched: Array<Record<string, unknown>> = [];
+    installAdapter([
+      ...listAndCategoryHandlers,
+      {
+        match: (u, m) => u.endsWith("/platform/skills/batch") && m === "post",
+        respond: ({ data }) => {
+          batched.push(typeof data === "string" ? JSON.parse(data) : (data as object));
+          return raw({ updated: 2 });
+        },
+      },
+    ]);
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+
+    // Select all rows on the page (header checkbox) → the batch toolbar appears.
+    const checkboxes = screen.getAllByRole("checkbox");
+    await userEvent.click(checkboxes[0]);
+    await waitFor(() => expect(screen.getByTestId("ps-batch-toolbar")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("ps-batch-set-category"));
+    await userEvent.click(await screen.findByText("研发"));
+
+    await waitFor(() => expect(batched.length).toBe(1));
+    expect(batched[0].set_category).toBe("研发");
+    expect(batched[0].ids).toEqual(["psk-1", "psk-2"]);
+  });
+
+  it("batch clear-category posts set_category as empty string", async () => {
+    const batched: Array<Record<string, unknown>> = [];
+    installAdapter([
+      ...listAndCategoryHandlers,
+      {
+        match: (u, m) => u.endsWith("/platform/skills/batch") && m === "post",
+        respond: ({ data }) => {
+          batched.push(typeof data === "string" ? JSON.parse(data) : (data as object));
+          return raw({ updated: 2 });
+        },
+      },
+    ]);
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    await userEvent.click(checkboxes[0]);
+    await waitFor(() => expect(screen.getByTestId("ps-batch-toolbar")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("ps-batch-set-category"));
+    // Test env resolves i18n to "en" (jsdom navigator.language "en-US") → en.ts's
+    // "Clear category" (see en.ts platform_skills.batch_clear_category).
+    await userEvent.click(await screen.findByText("Clear category"));
+
+    await waitFor(() => expect(batched.length).toBe(1));
+    expect(batched[0].set_category).toBe("");
   });
 
   it("search input refetches the list with the q param (debounced)", async () => {

@@ -1962,6 +1962,8 @@ const zhCN: TranslationKeys = {
     batch_partial: "批量完成:{{ok}} 个成功,{{failed}} 个失败",
     batch_all_matching: "对全部 {{count}} 个匹配项生效",
     batch_scope_all: "全部 {{count}} 个匹配项",
+    batch_set_category: "设分类",
+    batch_clear_category: "清空分类",
     search_ph: "搜索名称或描述",
     search_aria: "搜索平台技能",
     status_filter_aria: "按状态筛选",
