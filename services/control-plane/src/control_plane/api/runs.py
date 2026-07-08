@@ -1581,17 +1581,24 @@ def build_runs_list_router() -> APIRouter:
                 )
 
             # § 6.5.5 (b) — server-side JOIN agent_name from thread_meta.
-            # M0 = N+1; M1 = SQL JOIN. Capped at MAX_LIST_LIMIT (=500) so
-            # the loop bound is safe.
-            agents_by_thread: dict[UUID, tuple[str | None, str | None]] = {}
+            # Batched: one `get_many` per distinct tenant in the page (the
+            # single-tenant path = 1 query) instead of a per-run `get` — that
+            # per-row loop was the M0 N+1 this block used to be. Grouped by
+            # tenant so the per-row tenant scoping is preserved on the
+            # cross-tenant (system_admin) path. Bound stays MAX_LIST_LIMIT (500).
+            ids_by_tenant: dict[UUID, list[UUID]] = {}
             for info in items:
-                if info.thread_id in agents_by_thread:
-                    continue
-                meta = await threads.get(info.thread_id, tenant_id=info.tenant_id)
-                if meta is None:
-                    agents_by_thread[info.thread_id] = (None, None)
-                else:
-                    agents_by_thread[info.thread_id] = (meta.agent_name, meta.agent_version)
+                bucket = ids_by_tenant.setdefault(info.tenant_id, [])
+                if info.thread_id not in bucket:
+                    bucket.append(info.thread_id)
+            agents_by_thread: dict[UUID, tuple[str | None, str | None]] = {}
+            for meta_tenant_id, thread_ids in ids_by_tenant.items():
+                metas = await threads.get_many(thread_ids, tenant_id=meta_tenant_id)
+                for thread_id in thread_ids:
+                    meta = metas.get(thread_id)
+                    agents_by_thread[thread_id] = (
+                        (meta.agent_name, meta.agent_version) if meta is not None else (None, None)
+                    )
 
             # Per-run token summary — one aggregate over this page's trace_ids
             # (token_usage joins runs by trace_id; no run_id column). Runs

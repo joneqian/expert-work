@@ -134,6 +134,27 @@ class SqlThreadMetaStore(ThreadMetaStore):
                 return None
             return _row_to_meta(row)
 
+    async def get_many(
+        self, thread_ids: Collection[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, ThreadMeta]:
+        ids = list(dict.fromkeys(thread_ids))
+        if not ids:
+            return {}
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ThreadMetaRow).where(
+                            ThreadMetaRow.tenant_id == tenant_id,
+                            ThreadMetaRow.thread_id.in_(ids),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return {row.thread_id: _row_to_meta(row) for row in rows}
+
     async def list_by_tenant(
         self,
         tenant_id: UUID,

@@ -298,3 +298,38 @@ async def test_list_all_tenants_filters_by_user() -> None:
 
     got = await store.list_all_tenants(user_id=user)
     assert [m.thread_id for m in got] == [mine.thread_id]
+
+
+# ---------------------------------------------------------------------------
+# get_many — batch of get(), keyed by thread_id. Replaces a per-id get() loop
+# in the run-list merged view (avoids an N+1 over the page's threads).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_many_returns_owned_subset_keyed_by_thread_id() -> None:
+    store = InMemoryThreadMetaStore()
+    tenant = uuid4()
+    t1, t2 = uuid4(), uuid4()
+    await store.create(thread_id=t1, tenant_id=tenant, created_by="x")
+    await store.create(thread_id=t2, tenant_id=tenant, created_by="x")
+    missing = uuid4()
+    got = await store.get_many([t1, t2, missing], tenant_id=tenant)
+    assert set(got) == {t1, t2}
+    assert got[t1].thread_id == t1
+
+
+@pytest.mark.asyncio
+async def test_get_many_is_tenant_scoped() -> None:
+    store = InMemoryThreadMetaStore()
+    owner, other = uuid4(), uuid4()
+    tid = uuid4()
+    await store.create(thread_id=tid, tenant_id=owner, created_by="x")
+    # Cross-tenant id is absent — never reveals cross-tenant existence.
+    assert await store.get_many([tid], tenant_id=other) == {}
+
+
+@pytest.mark.asyncio
+async def test_get_many_empty_input_returns_empty() -> None:
+    store = InMemoryThreadMetaStore()
+    assert await store.get_many([], tenant_id=uuid4()) == {}
