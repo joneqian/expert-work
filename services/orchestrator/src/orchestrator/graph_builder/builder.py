@@ -1880,8 +1880,8 @@ async def _first_misaligned_action(
     the args.
     """
     user_request = _latest_human_text(messages)
-    first_bad: int | None = None
-    for index, call in enumerate(tool_calls):
+
+    async def _judge(index: int, call: dict[str, Any]) -> tuple[int, bool]:
         name = str(call.get("name", ""))
         args = call.get("args") or {}
         try:
@@ -1890,13 +1890,24 @@ async def _first_misaligned_action(
             )
         except Exception:
             _action_screen_total.labels(verdict="error").inc()
-            bad = on_error == "closed"
-        else:
-            bad = verdict.blocked
-            _action_screen_total.labels(verdict="misaligned" if bad else "aligned").inc()
-        if bad and first_bad is None:
-            first_bad = index
-    return first_bad
+            return index, on_error == "closed"
+        bad = verdict.blocked
+        _action_screen_total.labels(verdict="misaligned" if bad else "aligned").inc()
+        return index, bad
+
+    # Judge every proposed call concurrently (bounded, mirroring tools_node's
+    # dispatch below) rather than serially: the loop never early-exits, so this
+    # is the same set of judge round trips at a fraction of the wall-clock. The
+    # lowest bad index == the old first-in-order ``first_bad``.
+    semaphore = asyncio.Semaphore(MAX_TOOL_WORKERS)
+
+    async def _bounded(index: int, call: dict[str, Any]) -> tuple[int, bool]:
+        async with semaphore:
+            return await _judge(index, call)
+
+    verdicts = await asyncio.gather(*(_bounded(i, c) for i, c in enumerate(tool_calls)))
+    bad_indices = [index for index, bad in verdicts if bad]
+    return min(bad_indices) if bad_indices else None
 
 
 def _extract_post_llm_messages(

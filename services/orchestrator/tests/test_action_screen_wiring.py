@@ -11,6 +11,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 
+from expert_work.runtime.cancellation import CancellationToken
 from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     ActionVerdict,
@@ -22,6 +23,7 @@ from orchestrator import (
     ToolSpec,
     build_react_graph,
 )
+from orchestrator.graph_builder.builder import _first_misaligned_action
 
 _ALIGNED = ActionVerdict(aligned=True, reason="ok")
 _MISALIGNED = ActionVerdict(aligned=False, reason="off-task")
@@ -145,3 +147,49 @@ async def test_off_skips_screening_even_with_misaligned_judge() -> None:
     state = await _run(action_screen="off", judge=FakeActionJudge(verdict=_MISALIGNED))
     tms = _tool_messages(state)
     assert tms and "echo: hi" in str(tms[0].content)
+
+
+@dataclass
+class _RecordingActionJudge:
+    """Per-tool-name verdict + records which calls were judged — lets us assert
+    the screen judges every proposed call (no early break) and picks the lowest
+    misaligned index."""
+
+    bad: set[str]
+    calls: list[str] = field(default_factory=list)
+
+    async def judge_action(
+        self, *, user_request: str, tool_name: str, tool_args: Mapping[str, Any]
+    ) -> ActionVerdict:
+        del user_request, tool_args
+        self.calls.append(tool_name)
+        return ActionVerdict(aligned=tool_name not in self.bad, reason="")
+
+
+@pytest.mark.asyncio
+async def test_first_misaligned_action_judges_all_and_returns_lowest_bad() -> None:
+    judge = _RecordingActionJudge(bad={"b"})
+    tool_calls = [{"name": n, "args": {}} for n in ("a", "b", "c")]
+    idx = await _first_misaligned_action(
+        tool_calls,
+        [HumanMessage(content="hi")],
+        judge=judge,
+        on_error="open",
+        token=CancellationToken(),
+    )
+    assert idx == 1  # "b" is the first misaligned
+    assert sorted(judge.calls) == ["a", "b", "c"]  # every call judged (concurrent, no break)
+
+
+@pytest.mark.asyncio
+async def test_first_misaligned_action_all_aligned_returns_none() -> None:
+    judge = _RecordingActionJudge(bad=set())
+    tool_calls = [{"name": n, "args": {}} for n in ("a", "b")]
+    idx = await _first_misaligned_action(
+        tool_calls,
+        [HumanMessage(content="hi")],
+        judge=judge,
+        on_error="open",
+        token=CancellationToken(),
+    )
+    assert idx is None
