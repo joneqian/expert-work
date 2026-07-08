@@ -614,6 +614,8 @@ export interface TranslationKeys {
     auto_attach_evolved_help: string;
     skills_search: string;
     skills_empty: string;
+    skills_filter_category: string;
+    skills_filter_source: string;
     skills_source_platform: string;
     skills_source_tenant: string;
     skills_tier_locked: string;
@@ -2944,6 +2946,8 @@ const en: TranslationKeys = {
       "When on, builds automatically attach this agent's own promoted (ACTIVE) distilled skills without editing the manifest.\nAttached lazily: a summary in <available-skills> only, never eager prompt content.\nSkills you check below always take precedence over an auto-attached duplicate.",
     skills_search: "Search skills (name / description / category)",
     skills_empty: "No skills available",
+    skills_filter_category: "Filter by category",
+    skills_filter_source: "Filter by source",
     skills_source_platform: "Platform",
     skills_source_tenant: "Tenant",
     skills_tier_locked: "Needs {{tier}}",

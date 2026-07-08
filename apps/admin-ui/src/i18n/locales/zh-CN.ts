@@ -658,6 +658,8 @@ const zhCN: TranslationKeys = {
       "开启后,构建时自动挂载本 Agent 自己蒸馏晋升(ACTIVE)的技能,无需改 manifest。\n懒加载:仅摘要进 <available-skills>,不吃 eager prompt 预算。\n下方勾选的技能始终优先于同名自动挂载项。",
     skills_search: "搜索技能(名称/描述/分类)",
     skills_empty: "暂无可用技能",
+    skills_filter_category: "按分类筛选",
+    skills_filter_source: "按来源筛选",
     skills_source_platform: "平台",
     skills_source_tenant: "租户",
     skills_tier_locked: "需 {{tier}}",
