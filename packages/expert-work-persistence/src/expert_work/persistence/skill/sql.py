@@ -292,6 +292,25 @@ class SqlSkillStore(SkillStore):
             ).scalar_one_or_none()
         return _skill_row_to_dto(row) if row is not None else None
 
+    async def shadowed_skill_names(self, *, tenant_id: UUID, names: Sequence[str]) -> set[str]:
+        wanted = list(dict.fromkeys(names))
+        if not wanted:
+            return set()
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(SkillRow.name).where(
+                            SkillRow.tenant_id == tenant_id,
+                            SkillRow.name.in_(wanted),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return set(rows)
+
     async def list_skills(
         self,
         *,

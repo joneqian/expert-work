@@ -143,6 +143,13 @@ class SkillStore(abc.ABC):
         """Return the skill row by ``(tenant_id, name)`` or ``None``."""
 
     @abc.abstractmethod
+    async def shadowed_skill_names(self, *, tenant_id: UUID, names: Sequence[str]) -> set[str]:
+        """Return the subset of ``names`` the tenant already owns a skill for
+        (any status) — the merged-view name-shadow set. One round-trip,
+        replacing a per-name ``get_skill_by_name`` loop over the platform
+        library (which is an N+1)."""
+
+    @abc.abstractmethod
     async def list_skills(
         self,
         *,

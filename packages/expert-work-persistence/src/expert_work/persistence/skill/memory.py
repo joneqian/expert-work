@@ -198,6 +198,14 @@ class InMemorySkillStore(SkillStore):
                 return row
         return None
 
+    async def shadowed_skill_names(self, *, tenant_id: UUID, names: Sequence[str]) -> set[str]:
+        wanted = set(names)
+        return {
+            row.name
+            for row in self._skills.values()
+            if row.tenant_id == tenant_id and row.name in wanted
+        }
+
     async def list_skills(
         self,
         *,
