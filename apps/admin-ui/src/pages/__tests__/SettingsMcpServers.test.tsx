@@ -98,4 +98,22 @@ describe("SettingsMcpServers unified list", () => {
     fireEvent.click(expandIcon as Element);
     expect(toolsMock).not.toHaveBeenCalled();
   });
+
+  // Regression: a platform row whose catalog entry was deleted while still
+  // allowlisted (`buildUnifiedRows` sets catalogId=null, authType="none")
+  // used to show a Test button that 404s and a Remove button whose handler
+  // silently no-ops. Neither is a real affordance, so both must be hidden
+  // or disabled instead.
+  it("degraded platform row (catalog deleted) hides Test/authorize and disables Remove", async () => {
+    listMock.mockResolvedValue([]);
+    availMock.mockResolvedValue([{ name: "ghost", source: "platform", display_name: "Ghost" }]);
+    renderPage();
+    await screen.findByText("Ghost");
+
+    expect(screen.queryByTestId("ms-test-ghost")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ms-authorize-ghost")).not.toBeInTheDocument();
+
+    const removeButton = screen.getByTestId("ms-remove-ghost");
+    expect(removeButton).toBeDisabled();
+  });
 });

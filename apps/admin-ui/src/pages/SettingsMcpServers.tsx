@@ -268,6 +268,24 @@ export function SettingsMcpServers() {
       key: "actions",
       render: (_: unknown, row: UnifiedRow) => {
         if (row.source === "platform") {
+          if (row.catalogId === null) {
+            // Degraded row: the catalog entry was deleted while the tenant
+            // still had it allowlisted. Test would 404 (nothing to probe)
+            // and Remove has no catalog id to act on — show neither as a
+            // live affordance; Remove stays visible but disabled so the
+            // stale entry is still explainable, not silently broken.
+            return (
+              <Space size={4}>
+                <Tooltip title={t("mcp_servers.remove_unavailable")}>
+                  <span>
+                    <Button size="small" disabled data-testid={`ms-remove-${row.name}`}>
+                      {t("mcp_servers.remove")}
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Space>
+            );
+          }
           const isOauth = row.authType === "oauth2";
           return (
             <Space size={4}>
