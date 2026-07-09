@@ -89,18 +89,21 @@ export function SettingsMcpServers() {
   }, [reload]);
 
   const probe = useCallback(
-    async (name: string) => {
-      const current = probes[name];
+    // `key` is the source-qualified `UnifiedRow.key` (probes map key, avoids
+    // tenant/platform name collisions); `name` is the bare server name sent
+    // to the API.
+    async (key: string, name: string) => {
+      const current = probes[key];
       if (current?.kind === "connected" || current?.kind === "testing") return;
-      setProbes((prev) => ({ ...prev, [name]: { kind: "testing" } }));
+      setProbes((prev) => ({ ...prev, [key]: { kind: "testing" } }));
       try {
         const tools = await listMcpServerTools(name);
         setProbes((prev) => ({
           ...prev,
-          [name]: { kind: "connected", count: tools.length, tools },
+          [key]: { kind: "connected", count: tools.length, tools },
         }));
       } catch {
-        setProbes((prev) => ({ ...prev, [name]: { kind: "unreachable" } }));
+        setProbes((prev) => ({ ...prev, [key]: { kind: "unreachable" } }));
       }
     },
     [probes],
@@ -133,7 +136,7 @@ export function SettingsMcpServers() {
   const handleRemovePlatform = useCallback(
     async (catalogId: string | null) => {
       if (catalogId === null) {
-        message.error(t("mcp_servers.failed_to_load"));
+        message.error(t("mcp_servers.remove_unavailable"));
         return;
       }
       try {
@@ -157,8 +160,8 @@ export function SettingsMcpServers() {
   }, []);
 
   const renderProbeStatus = useCallback(
-    (name: string, staticTag: ReactNode) => {
-      const s = probes[name] ?? { kind: "idle" };
+    (key: string, staticTag: ReactNode) => {
+      const s = probes[key] ?? { kind: "idle" };
       if (s.kind === "idle") return staticTag;
       if (s.kind === "testing") {
         return (
@@ -237,12 +240,12 @@ export function SettingsMcpServers() {
       render: (_: unknown, row: UnifiedRow) => {
         if (row.source === "platform") {
           return renderProbeStatus(
-            row.name,
+            row.key,
             <Tag color="green">{t("mcp_servers.status_enabled_platform")}</Tag>,
           );
         }
         return renderProbeStatus(
-          row.server.name,
+          row.key,
           <Tag color={row.server.enabled ? "green" : "default"}>
             {row.server.enabled
               ? t("mcp_servers.status_enabled")
@@ -255,8 +258,7 @@ export function SettingsMcpServers() {
       title: t("mcp_servers.col_tools"),
       key: "tools",
       render: (_: unknown, row: UnifiedRow) => {
-        const name = row.source === "tenant" ? row.server.name : row.name;
-        const s = probes[name];
+        const s = probes[row.key];
         if (s?.kind === "connected") return <span>{s.count}</span>;
         return <span style={{ color: "var(--ew-text-tertiary, #666)" }}>—</span>;
       },
@@ -282,8 +284,8 @@ export function SettingsMcpServers() {
                 <Button
                   size="small"
                   data-testid={`ms-test-${row.name}`}
-                  loading={probes[row.name]?.kind === "testing"}
-                  onClick={() => void probe(row.name)}
+                  loading={probes[row.key]?.kind === "testing"}
+                  onClick={() => void probe(row.key, row.name)}
                 >
                   {t("mcp_servers.test")}
                 </Button>
@@ -305,8 +307,8 @@ export function SettingsMcpServers() {
             <Button
               size="small"
               data-testid={`ms-test-${s.name}`}
-              loading={probes[s.name]?.kind === "testing"}
-              onClick={() => void probe(s.name)}
+              loading={probes[row.key]?.kind === "testing"}
+              onClick={() => void probe(row.key, s.name)}
             >
               {t("mcp_servers.test")}
             </Button>
@@ -337,7 +339,7 @@ export function SettingsMcpServers() {
   const expandedRowRender = useCallback(
     (row: UnifiedRow) => {
       const name = row.source === "tenant" ? row.server.name : row.name;
-      const s = probes[name] ?? { kind: "idle" };
+      const s = probes[row.key] ?? { kind: "idle" };
       if (s.kind === "idle" || s.kind === "testing") {
         return (
           <div style={{ padding: "8px 0" }}>
@@ -434,10 +436,17 @@ export function SettingsMcpServers() {
         columns={columns}
         expandable={{
           expandedRowRender,
+          // oauth2 platform rows have no working probe endpoint (backend
+          // 409s) and intentionally show no Test button. `rowExpandable`
+          // removes the chevron (antd renders it visibility:hidden with no
+          // click affordance); `onExpand` is also guarded as a second line
+          // of defense, since antd still wires the icon's onClick
+          // regardless of `rowExpandable`. Together these ensure probe()
+          // can never fire for an oauth2 platform row.
+          rowExpandable: (row) => !(row.source === "platform" && row.authType === "oauth2"),
           onExpand: (expanded, row) => {
-            if (expanded) {
-              void probe(row.source === "tenant" ? row.server.name : row.name);
-            }
+            if (!expanded || (row.source === "platform" && row.authType === "oauth2")) return;
+            void probe(row.key, row.source === "tenant" ? row.server.name : row.name);
           },
         }}
       />

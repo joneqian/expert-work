@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "antd";
 import "../../i18n";
@@ -11,6 +11,7 @@ import type { McpServer } from "../../api/mcp-servers";
 
 const listMock = vi.spyOn(serversSdk, "listMcpServers");
 const availMock = vi.spyOn(serversSdk, "listAvailableMcpServers");
+const toolsMock = vi.spyOn(serversSdk, "listMcpServerTools");
 
 // The default test-time locale resolves to "en" (jsdom's navigator.language
 // is "en-US"; see AgentsList.test.tsx for the same forced-locale idiom) —
@@ -20,6 +21,7 @@ beforeEach(async () => {
   await i18n.changeLanguage("zh-CN");
   listMock.mockReset();
   availMock.mockReset();
+  toolsMock.mockReset();
 });
 
 const custom: McpServer = {
@@ -65,5 +67,35 @@ describe("SettingsMcpServers unified list", () => {
     renderPage();
     expect(await screen.findByTestId("ms-authorize-gh")).toBeInTheDocument();
     expect(screen.queryByTestId("ms-test-gh")).not.toBeInTheDocument();
+  });
+
+  // Regression: oauth2 platform rows have no working probe endpoint (the
+  // backend 409s listMcpServerTools for them), so there must be no way to
+  // trigger one. Without `rowExpandable`, every row — including this one —
+  // got an expand chevron whose `onExpand` unconditionally called probe(),
+  // flipping the green "已启用（平台）" badge to a red "无法连接" tag that
+  // reload() never resets.
+  it("oauth2 platform row's expand control can never trigger a probe", async () => {
+    listMock.mockResolvedValue([]);
+    availMock.mockResolvedValue([
+      { name: "gh", source: "platform", display_name: "GitHub", auth_type: "oauth2", catalog_id: "c2" },
+    ]);
+    const { container } = renderPage();
+    await screen.findByTestId("ms-authorize-gh");
+
+    // antd always renders the expand control as a
+    // `<button class="ant-table-row-expand-icon">` (even for
+    // non-expandable rows); `rowExpandable` returning false adds the
+    // `-spaced` modifier (no chevron, visibility:hidden) instead of
+    // `-collapsed`/`-expanded`. There is exactly one row in this fixture.
+    const expandIcon = container.querySelector(".ant-table-row-expand-icon");
+    expect(expandIcon).not.toBeNull();
+    expect(expandIcon).toHaveClass("ant-table-row-expand-icon-spaced");
+
+    // antd still wires an onClick on that button regardless of
+    // `rowExpandable` — so the real guarantee has to hold even if it's
+    // clicked. This is the assertion that actually fails a 409 on revert.
+    fireEvent.click(expandIcon as Element);
+    expect(toolsMock).not.toHaveBeenCalled();
   });
 });

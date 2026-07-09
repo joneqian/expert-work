@@ -1134,6 +1134,7 @@ const zhCN: TranslationKeys = {
     needs_authorize: "需你授权",
     remove: "移出",
     remove_confirm: "移出平台服务器 {{name}}？",
+    remove_unavailable: "该平台服务器无目录引用，无法移出。",
     act_run: "运行",
     act_stop: "停用",
   },

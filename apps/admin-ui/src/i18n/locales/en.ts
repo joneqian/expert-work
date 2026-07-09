@@ -1068,6 +1068,7 @@ export interface TranslationKeys {
     needs_authorize: string;
     remove: string;
     remove_confirm: string;
+    remove_unavailable: string;
     act_run: string;
     act_stop: string;
   };
@@ -3445,6 +3446,7 @@ const en: TranslationKeys = {
     needs_authorize: "Needs your authorization",
     remove: "Remove",
     remove_confirm: "Remove platform server {{name}}?",
+    remove_unavailable: "This platform server can't be removed (no catalog reference).",
     act_run: "Run",
     act_stop: "Stop",
   },
