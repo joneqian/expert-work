@@ -868,6 +868,19 @@ class PolicySpec(BaseModel):
             "config unchanged (the child does not reset)."
         ),
     )
+    max_no_progress: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "No-progress stop — consecutive loop-detection trips (the "
+            "loop-detection middleware flags identical tool-call repeats) "
+            "after which the ReAct loop force-wraps up early via the same "
+            "tool-less graceful turn ``max_steps`` uses. ``0`` (default) "
+            "disables it. The first trip already arms one higher-effort "
+            "turn (escalate_next); this caps how many consecutive "
+            "unproductive turns are tolerated before stopping."
+        ),
+    )
     approval_required_tools: list[str] = Field(
         default_factory=list,
         description=(

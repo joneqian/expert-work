@@ -26,6 +26,8 @@ def test_required_keys_present() -> None:
         "recalled_memories",
         "step_count_refund_pending",
         "escalate_next",
+        "no_progress_streak",
+        "max_no_progress",
         "last_plan_goal",
         "tool_failures",
         "subagent_invocations",

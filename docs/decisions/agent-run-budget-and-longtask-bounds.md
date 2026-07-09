@@ -1,7 +1,16 @@
 # Agent Run Budgeting & Long-Task Bounds
 
-Status: analysis — **deferred** (2026-07-09)
+Status: **partially implemented** (2026-07-09) — long-task Gap #1 (wall-clock floor) + no-progress stop shipped; token/$ budget (方案 C) still deferred.
 Related: [STREAM-E-DESIGN](../streams/STREAM-E-DESIGN.md) § 1.1 E.6 (ReAct loop guard); Mini-ADR J-40 (`run_deadline_s`); [deer-flow-context-mgmt-alignment](./deer-flow-context-mgmt-alignment.md).
+
+## Update — 2026-07-09 (what shipped)
+
+Two of the findings below were built (the rest stays deferred):
+
+- **Long-task Gap #1 — platform-default wall-clock floor.** `settings.default_run_deadline_s` (default **3600s / 1h**, `le=86400`) is threaded through the lifespan → `make_agent_builder` → `build_agent`, where `_effective_run_deadline_s(manifest, default)` applies it **only when the manifest leaves `policies.run_deadline_s` at 0** (manifest always wins). The four deadline-setter sites are unchanged — `built.run_deadline_s` already carries the floor. So an unconfigured run now has a wall-clock ceiling; a genuinely long agent raises `run_deadline_s` explicitly.
+- **No-progress stop (方案 ②).** `policies.max_no_progress` (default **0 = off**) + a new `AgentState.no_progress_streak`: `agent_node` increments the streak on each loop-detection trip and resets it on a clean turn; once it reaches `max_no_progress` the run routes into the **existing** tool-less graceful wrap-up (same gate `max_steps` uses). The first trip still arms one higher-effort turn (`escalate_next`); this caps consecutive unproductive turns before stopping.
+
+**Still deferred:** token/$ per-run budget (方案 C, cost-motivated); Gap #2 (dedicated Reporter synthesis role); the deadline→graceful-wrap-up rewiring (deadline still enforced at delegation boundaries + cancellation, not the wrap-up gate).
 
 ## TL;DR / Decision
 
@@ -12,9 +21,9 @@ Conclusion after investigation + benchmarking (deer-flow, Hermes Agent, Temporal
 1. **Heartbeat/lease is a different axis from `max_steps`** — liveness/ownership, not productivity. We already have it (Stream 9.4). It does **not** replace `max_steps` (a heartbeating agent can still be a runaway).
 2. **A token/$ per-run budget (方案 C) is cost-motivated.** Pre-cost stage → **YAGNI, deferred.** The mechanism is settled and cheap; build it when cost/billing becomes real pressure.
 3. **The current suite is already industry-aligned** (matches deer-flow + Hermes, leads them on several points). It is adequate to ship on until cost matters.
-4. **`max_steps` alone is *not* sufficient for genuinely long tasks** — but the *composite* of existing mechanisms is, with **two real gaps** (see § Long-Task Analysis). The actionable one is config discipline, not code: long-running agents must set `run_deadline_s`.
+4. **`max_steps` alone is *not* sufficient for genuinely long tasks** — but the *composite* of existing mechanisms is, with **two real gaps** (see § Long-Task Analysis). Gap #1 (the wall-clock floor) is now shipped; Gap #2 stays deferred.
 
-Nothing is being built now. This note is the pickup point for the cost era.
+Token/$ budget (方案 C) is the pickup point for the cost era; the wall-clock floor + no-progress stop shipped 2026-07-09 (see § Update).
 
 ---
 
@@ -87,9 +96,8 @@ Long tasks are actually bounded by `max_steps` **+** spawn/worker caps **+** wal
 
 ### Two real long-task gaps
 
-1. **⚠️ Wall-clock (`run_deadline_s`) defaults to 0 = OFF, and there is no platform-level default.** For long tasks, *time* is the honest bound (see reason 4), yet the time axis is off unless the manifest sets it. A multi-hour agent relying only on `max_steps` has no wall-clock ceiling.
-   - **Action (config discipline, no code): every agent intended for long/multi-hour work MUST set `policies.run_deadline_s` explicitly.** Consider adding a non-zero platform-default deadline as a floor so "nobody set it" is not "runs forever on wall-clock."
-2. **Single inline wrap-up may under-synthesize.** One toolless wrap-up turn must compress possibly hours of accumulated (and maybe compacted/lossy) state into one answer. deer-flow uses a dedicated **Reporter** role for synthesis. Lower priority; revisit if long-task final-answer quality proves weak.
+1. **✅ RESOLVED — wall-clock floor shipped.** Was: `run_deadline_s` defaulted to 0 = OFF with no platform-level default, so a multi-hour agent relying only on `max_steps` had no wall-clock ceiling. Now: `settings.default_run_deadline_s` (1h default) supplies the floor when the manifest leaves it 0 (manifest wins); see § Update. Long agents still raise `run_deadline_s` explicitly.
+2. **Single inline wrap-up may under-synthesize.** One toolless wrap-up turn must compress possibly hours of accumulated (and maybe compacted/lossy) state into one answer. deer-flow uses a dedicated **Reporter** role for synthesis. **Still deferred** — lower priority; revisit if long-task final-answer quality proves weak.
 
 ---
 
@@ -121,7 +129,7 @@ budget_exhausted = (max_steps > 0 and step_count >= max_steps)              # un
 
 ## Triggers to revisit
 
-- Cost/billing becomes a real constraint → build 方案 C (token budget), starting warn-only.
-- Ship a long/multi-hour agent → **first set `run_deadline_s`** (gap #1); consider a platform-default deadline.
-- Long-task final-answer quality proves weak → consider a synthesis/Reporter role (gap #2).
-- No-progress runs waste user time (not cost) → wire the existing loop-detector's `escalate_next` to a stop branch (方案 ②, cheap).
+- Cost/billing becomes a real constraint → build 方案 C (token budget), starting warn-only. **(still open)**
+- Ship a long/multi-hour agent → set `run_deadline_s` to exceed the 1h platform floor if the task genuinely needs longer (gap #1 floor now shipped). ✅
+- Long-task final-answer quality proves weak → consider a synthesis/Reporter role (gap #2). **(still open)**
+- No-progress runs waste user time (not cost) → shipped: `policies.max_no_progress` (方案 ②). ✅ Follow-up: widen the loop-detector beyond identical-fingerprint (cyclic A→B→A→B, semantic stall), and generalize the final `MaxStepsExceededError` label to cover the stuck path.

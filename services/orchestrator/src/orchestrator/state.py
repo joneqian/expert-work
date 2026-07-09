@@ -192,6 +192,15 @@ class AgentState(TypedDict):
     #: (``ctx.payload["loop_detected"]``); the NEXT agent step consumes it
     #: (one turn on the escalated, higher-effort caller) and resets it.
     escalate_next: NotRequired[bool]
+    #: No-progress stop — consecutive loop-detection trips. agent_node
+    #: increments it on each turn the loop middleware flags a repeat and
+    #: resets it to 0 on a clean turn. Once it reaches ``max_no_progress``
+    #: (> 0) the node forces the same tool-less graceful wrap-up ``max_steps``
+    #: uses, stopping a stuck run early instead of grinding to ``max_steps``.
+    no_progress_streak: NotRequired[int]
+    #: Per-run consecutive-no-progress cap (0 = off). Configured once at graph
+    #: construction from ``policies.max_no_progress``; mirrors ``max_steps``.
+    max_no_progress: NotRequired[int]
     #: Stream CM-11 — the plan goal as of the previous agent turn. agent_node
     #: sets it each turn to the current ``plan.goal`` (``None`` for react
     #: graphs). A change versus the live plan goal — a re-plan, or a human

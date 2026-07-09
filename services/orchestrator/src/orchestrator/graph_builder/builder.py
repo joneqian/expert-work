@@ -503,6 +503,13 @@ def build_react_graph(
         refund_pending = state.get("step_count_refund_pending", 0)
         step_count = max(0, raw_step_count - refund_pending)
         max_steps = state.get("max_steps", 0)
+        # No-progress stop: the loop-detection middleware arms one escalated
+        # turn on the first repeat; if the run keeps tripping it for
+        # ``max_no_progress`` (> 0) consecutive turns the agent is stuck, so
+        # wrap up early rather than grind to ``max_steps`` making no progress.
+        max_no_progress = state.get("max_no_progress", 0)
+        no_progress_streak = state.get("no_progress_streak", 0)
+        stuck = max_no_progress > 0 and no_progress_streak >= max_no_progress
         # Step budget spent. Rather than raising MaxStepsExceededError and
         # discarding everything the run produced (a finished report, gathered
         # research — the user loses it all), degrade gracefully: do ONE final
@@ -510,7 +517,8 @@ def build_react_graph(
         # end (hermes-agent #7915). ``budget_exhausted`` forces ``tools=[]`` +
         # a wrap-up instruction just before the call below and strips any
         # tool_calls off the response so the router ends instead of looping.
-        budget_exhausted = max_steps > 0 and step_count >= max_steps
+        # ``stuck`` (no-progress) routes into the same graceful wrap-up.
+        budget_exhausted = (max_steps > 0 and step_count >= max_steps) or stuck
 
         # Stream TE-6 — bind active specs plus any deferred tools the run has
         # promoted via ``find_tools`` (carried per-thread on AgentState, so the
@@ -939,6 +947,7 @@ def build_react_graph(
             persisted_messages: list[BaseMessage] = list(new_messages)
             if advisory_message is not None and advisory_message not in persisted_messages:
                 persisted_messages = [advisory_message, *persisted_messages]
+            looped_this_turn = bool(ctx.payload.get("loop_detected")) or primary_loop_detected
             update_mw: dict[str, Any] = {
                 "messages": persisted_messages,
                 "step_count": step_count + 1,
@@ -950,7 +959,10 @@ def build_react_graph(
                 # primary candidate (accounted inside the finalize helper)
                 # arms it too — the loop signal is about model behaviour,
                 # not about which response was ultimately kept.
-                "escalate_next": bool(ctx.payload.get("loop_detected")) or primary_loop_detected,
+                "escalate_next": looped_this_turn,
+                # No-progress stop — a loop trip this turn bumps the streak;
+                # a clean turn resets it (mirrors ``escalate_next``).
+                "no_progress_streak": no_progress_streak + 1 if looped_this_turn else 0,
                 # CM-11 — rebaseline the goal so a one-off change escalates
                 # exactly one turn (next turn diffs against this value).
                 "last_plan_goal": current_goal,
@@ -970,6 +982,7 @@ def build_react_graph(
             "step_count_refund_pending": 0,
             "tool_failures": [],
             "escalate_next": False,  # CM-9 — no middleware chain, reset
+            "no_progress_streak": 0,  # no middleware → no loop trip → reset
             "last_plan_goal": current_goal,  # CM-11 — rebaseline the goal
         }
         if demoted_tools:

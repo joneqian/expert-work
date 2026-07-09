@@ -606,6 +606,14 @@ class Settings(BaseSettings):
     #: tools verbatim (still a subset of what the parent itself had).
     dynamic_worker_allowed_toolsets: list[str] = Field(default_factory=list)
 
+    #: Platform-default wall-clock floor (seconds) for a run's deadline,
+    #: applied when a manifest leaves ``policies.run_deadline_s`` at 0. A
+    #: generous safety net so an unconfigured run cannot run unbounded on
+    #: wall-clock (steps can be minutes); an agent that genuinely needs
+    #: longer raises ``run_deadline_s`` explicitly. 3600 = 1h; 0 disables
+    #: the floor (opt every run back to manifest-only). Capped at 24h.
+    default_run_deadline_s: int = Field(default=3600, ge=0, le=86400)
+
     # --------------------------------------------------- memory consolidator (Sprint #7)
     #: Capability Uplift Sprint #7 (Mini-ADR U-34) — MemoryConsolidator
     #: sweep cadence. Default 14400 = every 4 hours (4 sweeps / day).
