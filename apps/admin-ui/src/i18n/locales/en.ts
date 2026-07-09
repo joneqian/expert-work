@@ -1061,6 +1061,16 @@ export interface TranslationKeys {
     empty_hint: string;
     delete_confirm: string;
     failed_to_load: string;
+    source_platform: string;
+    source_custom: string;
+    platform_hosted: string;
+    status_enabled_platform: string;
+    needs_authorize: string;
+    remove: string;
+    remove_confirm: string;
+    remove_unavailable: string;
+    act_run: string;
+    act_stop: string;
   };
   create_mcp_server: {
     add_title: string;
@@ -2315,7 +2325,7 @@ const en: TranslationKeys = {
     audit: "Audit",
     egress_audit: "Egress audit",
     mcp_servers: "MCP Servers",
-    mcp_oauth: "My MCP Connections",
+    mcp_oauth: "My MCP Authorizations",
     mcp_catalog: "MCP Catalog",
     agent_templates: "Agent Templates",
     platform_skills: "Platform Skills",
@@ -3406,7 +3416,7 @@ const en: TranslationKeys = {
   mcp_servers: {
     page_title: "MCP Servers",
     subtitle: "Manage the remote MCP servers your agents can call tools from",
-    add: "Add server",
+    add: "Add MCP server",
     col_name: "Name",
     col_transport: "Transport",
     col_url: "URL",
@@ -3414,7 +3424,7 @@ const en: TranslationKeys = {
     col_status: "Status",
     col_tools: "Tools",
     col_actions: "Actions",
-    status_enabled: "Enabled",
+    status_enabled: "Running",
     status_disabled: "Disabled",
     test: "Test",
     edit: "Edit",
@@ -3429,6 +3439,16 @@ const en: TranslationKeys = {
       "MCP servers let your agents call external tools like GitHub or Linear.",
     delete_confirm: "Delete server {{name}}?",
     failed_to_load: "Failed to load MCP servers",
+    source_platform: "Platform",
+    source_custom: "Custom",
+    platform_hosted: "Platform-hosted",
+    status_enabled_platform: "Enabled (platform)",
+    needs_authorize: "Needs your authorization",
+    remove: "Remove",
+    remove_confirm: "Remove platform server {{name}}?",
+    remove_unavailable: "This platform server can't be removed (no catalog reference).",
+    act_run: "Run",
+    act_stop: "Stop",
   },
   create_mcp_server: {
     add_title: "Add MCP server",
@@ -3495,7 +3515,7 @@ const en: TranslationKeys = {
     col_category: "Category",
     col_transport: "Transport",
     col_tier: "Required plan",
-    col_enabled: "Enabled",
+    col_enabled: "Publish status",
     col_actions: "Actions",
     empty_title: "No connectors yet",
     empty_hint:
@@ -3566,7 +3586,7 @@ const en: TranslationKeys = {
     display_name_required: "Display name is required",
     url_template_required: "URL template is required",
     browser_title: "Add MCP server",
-    browser_empty: "No connectors are available for your plan yet.",
+    browser_empty: "No servers are available for your plan yet.",
     browser_failed: "Failed to load the catalog",
     locked_ribbon: "Locked",
     requires_tier: "Requires {{tier}} plan",
@@ -3596,11 +3616,11 @@ const en: TranslationKeys = {
     tool_no_params: "No parameters.",
   },
   mcp_oauth: {
-    page_title: "My MCP Connections",
-    page_subtitle: "OAuth connectors you've authorized with your own account.",
+    page_title: "My MCP Authorizations",
+    page_subtitle: "MCP servers you've authorized with your own account.",
     failed_to_load: "Failed to load your connections",
-    empty: "You haven't connected any OAuth MCP connectors yet.",
-    col_connector: "Connector",
+    empty: "You haven't authorized any MCP servers yet.",
+    col_connector: "MCP server",
     col_status: "Status",
     col_scopes: "Scopes",
     col_expires: "Token expires",

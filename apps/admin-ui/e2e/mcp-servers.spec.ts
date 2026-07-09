@@ -79,12 +79,25 @@ async function login(page: import("@playwright/test").Page): Promise<void> {
 // Stream W — the "Add MCP server" action now opens a catalog browser first.
 const CATALOG_LIST = { success: true, data: [], error: null };
 
+// The unified list also fetches GET /v1/mcp-servers/available (platform
+// allowlist rows). This spec exercises only custom (tenant) servers, so an
+// empty platform list is sufficient — the page merges it with MCP_SERVERS_LIST.
+const AVAILABLE_LIST = { success: true, data: [], error: null };
+
 test.beforeEach(async ({ page }) => {
   // GET /v1/mcp-servers/catalog → tenant catalog (register before the broader
   // /v1/mcp-servers route so glob ordering is correct).
   await page.route("**/v1/mcp-servers/catalog", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({ json: CATALOG_LIST });
+      return;
+    }
+    await route.fallback();
+  });
+  // GET /v1/mcp-servers/available → unified-list platform rows (empty here).
+  await page.route("**/v1/mcp-servers/available", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: AVAILABLE_LIST });
       return;
     }
     await route.fallback();

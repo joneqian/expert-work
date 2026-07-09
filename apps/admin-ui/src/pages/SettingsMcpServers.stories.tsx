@@ -1,13 +1,16 @@
 /**
- * Storybook stories for SettingsMcpServers — Stream V-F.
+ * Storybook stories for SettingsMcpServers — Stream V-F, unified list refresh.
  *
  * Two stories:
  *   - ``Empty``: an authenticated tenant admin with no MCP servers registered.
- *   - ``WithServers``: 3 servers with mixed transport / auth / enabled state.
+ *   - ``WithServers``: 3 custom servers (mixed transport / auth / enabled
+ *     state) + 2 platform (allowlist) rows — one none-auth, one oauth2 — to
+ *     show both platform action variants (Test+Remove vs Authorize+Remove).
  *
- * Mirrors the fixture decorator pattern used in ``SettingsOps.stories.tsx``
- * (JWT via ``setStoredToken`` + ``apiClient.defaults.adapter`` returning the
- * full ``{success,data,error}`` envelope).
+ * The page now fetches two endpoints (``listMcpServers`` + ``listAvailable
+ * McpServers``), so the mock adapter branches on the request URL — mirrors
+ * ``SettingsMcpOAuth.stories.tsx``'s ``withFixture`` — instead of the old
+ * single-envelope-for-every-request stub.
  */
 import type { ComponentType } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
@@ -18,7 +21,7 @@ import { SettingsMcpServers } from "./SettingsMcpServers";
 import { AuthProvider } from "../auth/AuthContext";
 import { TenantScopeProvider } from "../tenant/TenantScopeContext";
 import { apiClient, setStoredToken } from "../api/client";
-import type { McpServer } from "../api/mcp-servers";
+import type { AvailableMcpServer, McpServer } from "../api/mcp-servers";
 import "../i18n";
 
 // ── Fixture helpers ────────────────────────────────────────────────────────
@@ -31,18 +34,23 @@ function makeJwt(payload: Record<string, unknown>): string {
   return `${header}.${body}.`;
 }
 
-function withFixture(envelope: unknown, status = 200) {
+function withFixture(servers: McpServer[], available: AvailableMcpServer[] = []) {
   return (Story: ComponentType) => {
     setStoredToken(makeJwt({ sub: "u1", tenant_id: TENANT, roles: ["admin"] }));
-    apiClient.defaults.adapter = (config) =>
-      Promise.resolve({
-        data: envelope,
-        status,
+    apiClient.defaults.adapter = (config) => {
+      const url = config.url ?? "";
+      const data = url.includes("/available")
+        ? { success: true, data: available, error: null }
+        : { success: true, data: servers, error: null };
+      return Promise.resolve({
+        data,
+        status: 200,
         statusText: "OK",
         headers: {},
         config,
         request: {},
       });
+    };
     return (
       <MemoryRouter>
         <AuthProvider>
@@ -95,6 +103,25 @@ const SAMPLE_SERVERS: McpServer[] = [
   },
 ];
 
+/** Two platform (allowlist) rows — one none-auth (Test + Remove), one
+ *  oauth2 (Authorize link + Remove, no Test). */
+const SAMPLE_AVAILABLE: AvailableMcpServer[] = [
+  {
+    name: "amap",
+    source: "platform",
+    display_name: "高德地图",
+    auth_type: "none",
+    catalog_id: "cat-amap",
+  },
+  {
+    name: "slack",
+    source: "platform",
+    display_name: "Slack",
+    auth_type: "oauth2",
+    catalog_id: "cat-slack",
+  },
+];
+
 // ── Meta ───────────────────────────────────────────────────────────────────
 
 const meta: Meta<typeof SettingsMcpServers> = {
@@ -110,13 +137,12 @@ type Story = StoryObj<typeof SettingsMcpServers>;
 
 /** Tenant admin with no MCP servers registered. Shows the guided empty state. */
 export const Empty: Story = {
-  decorators: [withFixture({ success: true, data: [], error: null })],
+  decorators: [withFixture([], [])],
 };
 
-/** Tenant admin with 3 servers (SSE+bearer enabled, HTTP+bearer enabled,
- *  SSE+none disabled) — shows the full table. */
+/** Tenant admin with 3 custom servers (SSE+bearer enabled, HTTP+bearer
+ *  enabled, SSE+none disabled) + 2 platform rows (none-auth, oauth2) —
+ *  shows the full unified table. */
 export const WithServers: Story = {
-  decorators: [
-    withFixture({ success: true, data: SAMPLE_SERVERS, error: null }),
-  ],
+  decorators: [withFixture(SAMPLE_SERVERS, SAMPLE_AVAILABLE)],
 };

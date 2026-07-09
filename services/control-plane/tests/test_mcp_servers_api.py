@@ -932,3 +932,46 @@ async def test_enable_disable_emit_audit() -> None:
     actions = {r.action.value for r in page.entries}
     assert "mcp_catalog:enable" in actions
     assert "mcp_catalog:disable" in actions
+
+
+@pytest.mark.asyncio
+async def test_available_platform_row_enriched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tenant-enabled platform server carries display_name/auth_type/catalog_id."""
+    app, admin_headers, tenant_id = await _make_app_with_admin()
+    await _seed_catalog_entry(
+        app,
+        McpConnectorCatalogUpsert(
+            name="amap-maps",
+            display_name="高德地图",
+            transport="streamable_http",
+            url_template="https://mcp.amap.test/mcp",
+            auth_type="oauth2",
+            oauth_client_id="cid",
+        ),
+    )
+    await _enable_for_tenant(app, tenant_id, "amap-maps")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        r = await client.get("/v1/mcp-servers/available", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    rows = {item["name"]: item for item in r.json()["data"]}
+    row = rows["amap-maps"]
+    assert row["source"] == "platform"
+    assert row["display_name"] == "高德地图"
+    assert row["auth_type"] == "oauth2"
+    assert row.get("catalog_id")
+
+
+@pytest.mark.asyncio
+async def test_available_platform_row_degrades_when_catalog_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale allowlist name (no catalog entry) degrades to {name, source} — no 500."""
+    app, admin_headers, tenant_id = await _make_app_with_admin()
+    await _enable_for_tenant(app, tenant_id, "ghost-server")  # not seeded in catalog
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        r = await client.get("/v1/mcp-servers/available", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    rows = {item["name"]: item for item in r.json()["data"]}
+    assert rows["ghost-server"] == {"name": "ghost-server", "source": "platform"}

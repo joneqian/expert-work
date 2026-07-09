@@ -76,6 +76,10 @@ export interface AvailableMcpServer {
   catalog_id?: string;
   /** Human-readable catalog connector name (Stream W). */
   catalog_name?: string;
+  /** Platform (allowlist) rows: connector display name (enriched by /available). */
+  display_name?: string;
+  /** Platform (allowlist) rows: connector auth type (enriched by /available). */
+  auth_type?: McpAuthType;
 }
 
 export interface TestConnectionBody {

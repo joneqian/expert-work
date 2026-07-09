@@ -32,6 +32,9 @@ export interface AddMcpServerDrawerProps {
   /** Fires after a successful custom-server create so the parent can refresh +
    *  close. (Enable/disable toggles persist in place and keep the drawer open.) */
   onSaved: () => void;
+  /** Fires after a successful platform enable/disable toggle so the parent can
+   *  refresh its unified server list (the toggle keeps the drawer open). */
+  onEnabledChange?: () => void;
 }
 
 type Step =
@@ -42,6 +45,7 @@ export function AddMcpServerDrawer({
   open,
   onClose,
   onSaved,
+  onEnabledChange,
 }: AddMcpServerDrawerProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -95,6 +99,7 @@ export function AddMcpServerDrawer({
             e.id === entry.id ? { ...e, tenant_enabled: next } : e,
           ),
         );
+        onEnabledChange?.();
       } catch (err) {
         const msg =
           err instanceof ApiError
@@ -107,7 +112,7 @@ export function AddMcpServerDrawer({
         throw err instanceof Error ? err : new Error(msg);
       }
     },
-    [message],
+    [message, onEnabledChange],
   );
 
   return (
