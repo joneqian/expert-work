@@ -34,6 +34,17 @@ describe("locale modules", () => {
   it("zh-CN has the same key set as en", () => {
     expect(collectKeys(zhCN)).toEqual(collectKeys(en));
   });
+
+  it("canonical MCP terminology is applied (zh)", () => {
+    expect(zhCN.nav.mcp_oauth).toBe("我的 MCP 授权");
+    expect(zhCN.mcp_servers.add).toBe("添加 MCP 服务器");
+    expect(zhCN.mcp_servers.status_enabled).toBe("运行中");
+    expect(zhCN.mcp_catalog.col_enabled).toBe("发布状态");
+    expect(zhCN.mcp_oauth.page_title).toBe("我的 MCP 授权");
+    // 新键存在
+    expect(zhCN.mcp_servers.source_platform).toBe("平台");
+    expect(zhCN.mcp_servers.needs_authorize).toBe("需你授权");
+  });
 });
 
 describe("i18n runtime", () => {
