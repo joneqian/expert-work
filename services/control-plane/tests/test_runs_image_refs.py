@@ -286,6 +286,7 @@ def _jinja_built(
         spotlight_nonce=nonce,
         supports_vision=False,
         max_steps=5,
+        max_no_progress=0,
     )
 
 
@@ -318,6 +319,7 @@ def test_build_graph_input_non_jinja_unchanged() -> None:
         spotlight_nonce=None,
         supports_vision=False,
         max_steps=5,
+        max_no_progress=0,
     )
     gi = build_run_graph_input(
         built, input_text="hi", image_refs=[], untrusted_content=None, inputs={}

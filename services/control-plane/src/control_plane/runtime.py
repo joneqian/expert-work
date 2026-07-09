@@ -575,6 +575,10 @@ def make_agent_builder(
     # audit emit (SKILL_AUTHORED_BY_AGENT etc.). ``None`` → tools still work,
     # audit is simply not written.
     audit_logger: AuditLogger | None = None,
+    # Platform-default wall-clock floor (seconds) for a run's deadline,
+    # applied when the manifest leaves ``policies.run_deadline_s`` at 0.
+    # 0 = no floor (manifest-only). Bound from ``settings`` by the lifespan.
+    default_run_deadline_s: int = 0,
 ) -> AgentBuilder:
     """Production :data:`AgentBuilder` bound to a SecretStore + checkpointer.
 
@@ -728,6 +732,7 @@ def make_agent_builder(
             spec,
             secret_store=secret_store,
             checkpointer=checkpointer,
+            default_run_deadline_s=default_run_deadline_s,
             token_usage_kind=token_usage_kind,
             tool_env=build_tool_env,
             middleware_env=middleware_env,

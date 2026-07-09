@@ -61,6 +61,7 @@ class _FakeRuntime:
             supports_vision=False,
             spotlight_nonce=None,
             max_steps=8,
+            max_no_progress=0,
         )
 
     def new_worker_spawn_budget(self):

@@ -1393,6 +1393,7 @@ def create_app(
                 resolved_agent_runtime.agent_builder = make_agent_builder(
                     resolved_secret_store,
                     checkpointer,
+                    default_run_deadline_s=resolved_settings.default_run_deadline_s,
                     tool_env=replace(
                         base_tool_env,
                         child_agent_builder=child_agent_builder,

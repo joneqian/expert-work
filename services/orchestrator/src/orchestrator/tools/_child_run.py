@@ -95,6 +95,7 @@ async def run_child_to_result(
         ],
         "step_count": 0,
         "max_steps": child.max_steps,
+        "max_no_progress": child.max_no_progress,
     }
 
     started_at = datetime.now(UTC)

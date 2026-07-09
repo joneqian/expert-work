@@ -333,6 +333,7 @@ def build_run_graph_input(
         ],
         "step_count": 0,
         "max_steps": built.max_steps,
+        "max_no_progress": built.max_no_progress,
     }
 
 

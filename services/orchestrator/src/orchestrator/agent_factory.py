@@ -202,6 +202,10 @@ class BuiltAgent:
     #: deadline. ``sse.run_agent`` reads this to compute
     #: ``deadline_at = time.monotonic() + run_deadline_s`` once per run.
     run_deadline_s: int = 0
+    #: No-progress stop — consecutive loop-detection trips after which the
+    #: ReAct loop force-wraps up early (0 = off). Seeds ``max_no_progress``
+    #: in the initial ``AgentState``; mirrors ``max_steps``.
+    max_no_progress: int = 0
     #: Stream SE (SE-7d-3b-ii) — distilled skill versions bound into this agent
     #: at build time. The run carries these to its finalization hook so the
     #: rollback monitor can attribute each run's outcome to the versions it used.
@@ -455,6 +459,16 @@ def _bound_distilled_skills(
     return tuple(bound)
 
 
+def _effective_run_deadline_s(manifest_value: int, platform_default: int) -> int:
+    """Resolve the run's wall-clock deadline in seconds.
+
+    The manifest's ``policies.run_deadline_s`` wins when set (> 0); otherwise
+    the platform-default floor applies so an unconfigured run still has a
+    wall-clock ceiling. ``0`` from both leaves the deadline off.
+    """
+    return manifest_value or platform_default
+
+
 async def build_agent(
     spec: AgentSpec,
     *,
@@ -464,6 +478,9 @@ async def build_agent(
     middleware_env: MiddlewareEnv | None = None,
     memory_env: MemoryEnv | None = None,
     subagent_depth: int = 0,
+    # Platform-default wall-clock floor (seconds) applied when the manifest
+    # leaves ``policies.run_deadline_s`` at 0. ``0`` = no floor.
+    default_run_deadline_s: int = 0,
     # SE-16 (SE-A43) — what this build's LLM calls count as in token_usage.
     # The evolution replay path passes ``skill_evolution`` so with/without
     # replay spend is separable from the agent's conversation cost.
@@ -993,7 +1010,10 @@ async def build_agent(
         system_prompt=final_system_prompt,
         max_steps=spec.spec.workflow.max_iterations,
         supports_vision=spec.spec.model.supports_vision,
-        run_deadline_s=spec.spec.policies.run_deadline_s,
+        run_deadline_s=_effective_run_deadline_s(
+            spec.spec.policies.run_deadline_s, default_run_deadline_s
+        ),
+        max_no_progress=spec.spec.policies.max_no_progress,
         bound_distilled_skills=_bound_distilled_skills(
             loaded_skills.resolved_versions, agent_name=spec.metadata.name
         ),
