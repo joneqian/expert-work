@@ -723,20 +723,44 @@ def build_mcp_servers_router() -> APIRouter:
     ) -> dict[str, object]:
         tenant_id = principal.tenant_id
         available: list[dict[str, object]] = []
+        allowlist: list[str] = []
         if tenant_config_service is not None:
             try:
                 cfg = await tenant_config_service.get(tenant_id=tenant_id)  # type: ignore[attr-defined]
-                for name in cfg.mcp_allowlist:
-                    available.append({"name": name, "source": "platform"})
+                allowlist = list(cfg.mcp_allowlist)
             except Exception:
                 logger.info("mcp_servers.available.no_tenant_config")
         tenant_rows = await store.list_for_tenant(tenant_id=tenant_id)
-        # Resolve catalog names in a single bypass-RLS query, only when any tenant
-        # row is catalog-bound (avoids an extra query for custom-only tenants).
+
+        # Fetch the platform catalog once if either the allowlist (platform rows,
+        # enriched below) or any catalog-bound tenant row needs it. Catalog is
+        # NULL-tenant → bypass RLS (W-8).
+        need_catalog = bool(allowlist) or any(
+            getattr(r, "catalog_id", None) is not None for r in tenant_rows
+        )
+        by_name: dict[str, object] = {}
         catalog_names: dict[UUID, str] = {}
-        if any(getattr(r, "catalog_id", None) is not None for r in tenant_rows):
+        if need_catalog:
             async with bypass_rls_session():
-                catalog_names = {e.id: e.name for e in await catalog_store.list()}
+                entries = await catalog_store.list()
+            by_name = {e.name: e for e in entries}
+            catalog_names = {e.id: e.name for e in entries}
+
+        for name in allowlist:
+            entry = by_name.get(name)
+            if entry is None:  # stale allowlist → catalog entry deleted; degrade
+                available.append({"name": name, "source": "platform"})
+                continue
+            available.append(
+                {
+                    "name": name,
+                    "source": "platform",
+                    "display_name": entry.display_name,  # type: ignore[attr-defined]
+                    "auth_type": entry.auth_type,  # type: ignore[attr-defined]
+                    "catalog_id": str(entry.id),  # type: ignore[attr-defined]
+                }
+            )
+
         for rec in tenant_rows:
             row: dict[str, object] = {
                 "name": rec.name,
