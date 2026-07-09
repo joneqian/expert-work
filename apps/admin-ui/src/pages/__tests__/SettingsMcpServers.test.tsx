@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "antd";
 import "../../i18n";
@@ -127,5 +127,32 @@ describe("SettingsMcpServers unified list", () => {
     renderPage();
     expect(await screen.findByText("my-custom")).toBeInTheDocument();
     expect(screen.queryByTestId("ms-error")).not.toBeInTheDocument();
+  });
+
+  // The Test button is an explicit "re-probe now" action: clicking it must
+  // always re-hit the tools endpoint, even after the row is already
+  // "connected" (cached). The passive row-expand path keeps the cache; only
+  // the button forces. Regression: the cache guard used to swallow every
+  // click after the first, leaving the button a silent no-op.
+  it("Test button force re-probes even when the row is already connected", async () => {
+    listMock.mockResolvedValue([custom]);
+    availMock.mockResolvedValue([]);
+    toolsMock.mockResolvedValue([{ name: "t1", description: "" }]);
+    renderPage();
+    const btn = await screen.findByTestId("ms-test-my-custom");
+
+    fireEvent.click(btn);
+    // Wait until probe #1 resolves and the row renders "connected" (the
+    // button leaves its loading state) before clicking again.
+    await screen.findByText(/已连接/);
+    expect(toolsMock).toHaveBeenCalledTimes(1);
+    // Row is now cached "connected". Wait for the Test button to leave its
+    // loading state (antd re-renders the action cell once the probe resolves)
+    // — antd Button swallows clicks while loading — then click again.
+    await waitFor(() =>
+      expect(screen.getByTestId("ms-test-my-custom")).not.toHaveClass("ant-btn-loading"),
+    );
+    fireEvent.click(screen.getByTestId("ms-test-my-custom"));
+    await waitFor(() => expect(toolsMock).toHaveBeenCalledTimes(2));
   });
 });
