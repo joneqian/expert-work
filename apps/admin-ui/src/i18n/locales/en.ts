@@ -648,7 +648,6 @@ export interface TranslationKeys {
     new_session: string;
     session_failed: string;
     thread_id: string;
-    loading_thread: string;
     input_placeholder: string;
     run: string;
     running: string;
@@ -2997,7 +2996,6 @@ const en: TranslationKeys = {
     new_session: "New session",
     session_failed: "Failed to create session",
     thread_id: "thread",
-    loading_thread: "Creating thread…",
     input_placeholder:
       "Type a prompt to send to the agent. The full SSE event stream lands on the right.",
     run: "Run",

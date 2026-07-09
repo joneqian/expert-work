@@ -698,7 +698,6 @@ const zhCN: TranslationKeys = {
     new_session: "新建会话",
     session_failed: "创建会话失败",
     thread_id: "thread",
-    loading_thread: "正在创建 thread…",
     input_placeholder:
       "输入要发给智能体的提示词。完整的 SSE 事件流会显示在右侧。",
     run: "运行",
