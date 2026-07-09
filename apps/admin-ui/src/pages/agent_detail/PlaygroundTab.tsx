@@ -829,13 +829,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             description={threadError}
             data-testid="playground-session-error"
           />
-        ) : (
+        ) : thread ? (
           <Text type="secondary" style={{ fontSize: 12 }} className="mono">
-            {thread
-              ? `${t("playground.thread_id")}: ${thread.thread_id}`
-              : t("playground.loading_thread")}
+            {`${t("playground.thread_id")}: ${thread.thread_id}`}
           </Text>
-        )}
+        ) : null}
 
         {promptVariables.length > 0 && (
           <div data-testid="playground-vars" style={{ marginBottom: 8 }}>
