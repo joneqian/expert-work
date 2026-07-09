@@ -33,6 +33,7 @@ import {
   listMcpServerTools,
   listMcpServers,
   updateMcpServer,
+  type AvailableMcpServer,
   type McpServer,
   type McpTool,
 } from "../api/mcp-servers";
@@ -72,7 +73,14 @@ export function SettingsMcpServers() {
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([listMcpServers(), listAvailableMcpServers()]).then(
+    setError(null);
+    // The custom-server list is the primary content; the platform allowlist
+    // (``/available``) is supplementary — degrade to no platform rows if it
+    // fails rather than blanking the whole page on a partial outage.
+    Promise.all([
+      listMcpServers(),
+      listAvailableMcpServers().catch(() => [] as AvailableMcpServer[]),
+    ]).then(
       ([servers, available]) => {
         setRows(buildUnifiedRows(servers, available));
         setLoading(false);

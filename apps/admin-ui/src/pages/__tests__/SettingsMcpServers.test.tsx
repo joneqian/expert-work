@@ -116,4 +116,16 @@ describe("SettingsMcpServers unified list", () => {
     const removeButton = screen.getByTestId("ms-remove-ghost");
     expect(removeButton).toBeDisabled();
   });
+
+  // Regression: /available (platform allowlist) is supplementary. If it fails,
+  // the page must still render the tenant's custom servers — a Promise.all
+  // rejection used to blank the whole table (this is what took down the E2E
+  // spec, whose fixtures didn't stub the new /available call).
+  it("still renders custom servers when /available fails", async () => {
+    listMock.mockResolvedValue([custom]);
+    availMock.mockRejectedValue(new Error("available down"));
+    renderPage();
+    expect(await screen.findByText("my-custom")).toBeInTheDocument();
+    expect(screen.queryByTestId("ms-error")).not.toBeInTheDocument();
+  });
 });
