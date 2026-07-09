@@ -9,7 +9,7 @@
  * 平台行:bearer/none 可"测试"+"移出";oauth2 挂"需你授权 →"跳授权页、不给测试
  * (后端探测返回 409)。自定义行:测试 / 编辑 / 运行开关(运行中↔已停用)/ 删除。
  */
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   App,
@@ -70,6 +70,12 @@ export function SettingsMcpServers() {
   const [editing, setEditing] = useState<McpServer | null>(null);
 
   const [probes, setProbes] = useState<Record<string, ProbeState>>({});
+  // Mirror the latest probe state in a ref so the stable ``probe`` callback
+  // reads current status. antd memoizes the action cell, which would
+  // otherwise freeze a stale ``probes`` closure on the Test button's onClick
+  // and make a forced re-probe silently no-op on the second click.
+  const probesRef = useRef(probes);
+  probesRef.current = probes;
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -100,9 +106,14 @@ export function SettingsMcpServers() {
     // `key` is the source-qualified `UnifiedRow.key` (probes map key, avoids
     // tenant/platform name collisions); `name` is the bare server name sent
     // to the API.
-    async (key: string, name: string) => {
-      const current = probes[key];
-      if (current?.kind === "connected" || current?.kind === "testing") return;
+    async (key: string, name: string, opts?: { force?: boolean }) => {
+      const current = probesRef.current[key];
+      // Always skip while a probe is in flight (prevents double-fire). A
+      // cached ``connected`` result is skipped only for passive callers
+      // (row-expand); the explicit Test button passes ``force`` so a click
+      // always re-probes.
+      if (current?.kind === "testing") return;
+      if (!opts?.force && current?.kind === "connected") return;
       setProbes((prev) => ({ ...prev, [key]: { kind: "testing" } }));
       try {
         const tools = await listMcpServerTools(name);
@@ -114,7 +125,7 @@ export function SettingsMcpServers() {
         setProbes((prev) => ({ ...prev, [key]: { kind: "unreachable" } }));
       }
     },
-    [probes],
+    [],
   );
 
   const handleToggle = useCallback(
@@ -311,7 +322,7 @@ export function SettingsMcpServers() {
                   size="small"
                   data-testid={`ms-test-${row.name}`}
                   loading={probes[row.key]?.kind === "testing"}
-                  onClick={() => void probe(row.key, row.name)}
+                  onClick={() => void probe(row.key, row.name, { force: true })}
                 >
                   {t("mcp_servers.test")}
                 </Button>
@@ -334,7 +345,7 @@ export function SettingsMcpServers() {
               size="small"
               data-testid={`ms-test-${s.name}`}
               loading={probes[row.key]?.kind === "testing"}
-              onClick={() => void probe(row.key, s.name)}
+              onClick={() => void probe(row.key, s.name, { force: true })}
             >
               {t("mcp_servers.test")}
             </Button>
