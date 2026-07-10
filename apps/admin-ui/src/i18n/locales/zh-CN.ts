@@ -781,6 +781,8 @@ const zhCN: TranslationKeys = {
     signal_no_progress: "无进展连击",
     signal_escalate: "下轮升级",
     retry_attempt: "第 {{n}} 次 · {{cls}} · 退避 {{s}}s",
+    state_section: "执行状态",
+    plan_section: "计划",
   },
   session_history: {
     title: "会话历史",

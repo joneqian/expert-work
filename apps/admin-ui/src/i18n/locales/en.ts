@@ -730,6 +730,8 @@ export interface TranslationKeys {
     signal_no_progress: string;
     signal_escalate: string;
     retry_attempt: string;
+    state_section: string;
+    plan_section: string;
   };
   session_history: {
     title: string;
@@ -3101,6 +3103,8 @@ const en: TranslationKeys = {
     signal_no_progress: "No-progress streak",
     signal_escalate: "Escalate next",
     retry_attempt: "attempt {{n}} · {{cls}} · backoff {{s}}s",
+    state_section: "Run state",
+    plan_section: "Plan",
   },
   session_history: {
     title: "Session history",

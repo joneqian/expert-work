@@ -79,15 +79,24 @@ import {
   type ThreadMeta,
   type WorkspaceFile,
 } from "../../api/sessions";
-import { artifactsFromTools, toolStatusSummary } from "../../api/tool_timeline";
+import {
+  artifactsFromTools,
+  parseCompactionEvents,
+  parseRetryEvents,
+  toolStatusSummary,
+} from "../../api/tool_timeline";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
+import { parseAgentState } from "../../api/agent_state";
+import { CompactionSummaryList } from "../../components/CompactionCard";
 import { EventCard } from "../../components/EventCard";
 import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
+import { AgentStatePanels } from "./playground/AgentStatePanels";
 import { TurnMeta } from "./playground/TurnMeta";
+import { PlanPanel } from "../run_detail/PlanPanel";
 import {
   readModel,
   readPromptJinja,
@@ -1680,6 +1689,19 @@ function TurnCard({
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
   const toolStats = toolStatusSummary(turn.events);
+  const agentState = parseAgentState(turn.events);
+  const retries = parseRetryEvents(turn.events);
+  const compactions = parseCompactionEvents(turn.events);
+  // parseAgentState always returns a plain object (never null), so a bare
+  // truthiness check on it would always pass — check its channels instead so
+  // the run-state section actually hides when every channel is empty.
+  const hasAgentState =
+    agentState.recalledMemories.length > 0 ||
+    agentState.toolFailures.length > 0 ||
+    agentState.reflections.length > 0 ||
+    agentState.subagentInvocations.length > 0 ||
+    (agentState.signals.noProgressStreak ?? 0) > 0 ||
+    agentState.signals.escalateNext === true;
   // A+B — artifacts the agent registered this turn (``save_artifact``). The
   // agent can't emit a download link itself (the endpoint is thread-scoped +
   // auth'd), so surface them as an inline download row — deer-flow's pattern.
@@ -1863,6 +1885,35 @@ function TurnCard({
                     >
                       {summary.reasoning.join("\n\n———\n\n")}
                     </pre>
+                  ),
+                },
+              ]
+            : []),
+          ...(hasAgentState ||
+          retries.length > 0 ||
+          compactions.length > 0 ||
+          summary.perStepUsage.length > 0
+            ? [
+                {
+                  key: "run-state",
+                  label: t("playground.state_section"),
+                  children: (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {threadId && (
+                        <PlanPanel
+                          threadId={threadId}
+                          runStatus={turn.status === "running" ? "running" : "success"}
+                        />
+                      )}
+                      <AgentStatePanels
+                        state={agentState}
+                        retries={retries}
+                        perStepUsage={summary.perStepUsage}
+                      />
+                      {compactions.length > 0 && (
+                        <CompactionSummaryList items={compactions} />
+                      )}
+                    </div>
                   ),
                 },
               ]
