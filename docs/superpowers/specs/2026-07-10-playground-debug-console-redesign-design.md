@@ -131,10 +131,23 @@
 
 ### Batch 3 — P2:执行轨迹 UX(纯前端)
 
-9. **事件过滤 + 搜索** —— 事件流工具栏加类型过滤(只看 tool / error / updates)+ 文本搜索(搜 error / finish_reason / 工具名)。
-10. **step 时间线布局** —— 把扁平事件列表重排成纵向执行轴:step 1 → tool 调用 → step 2 …,每节点带状态/耗时(耗时此批仍是客户端粗算,Batch 4 换精确值)。异常步默认展开、正常步折叠。
+> **设计定稿(2026-07-10,经线框 4 轮迭代评审)。** 结构方向:`events` 段的「时间线」视图从"扁平工具卡"改为**分类型的执行轨迹**;「原始事件」视图不变。数据全部来自已有 parser(Batch 1 `parseToolCalls`、Batch 2 `parseAgentState`/`parseRetryEvents`/`parseCompactionEvents`/`summarizeTurn`)+ 一个新的 per-step reasoning 拆分 —— **本批仍纯前端、不缺数据,主要是重组渲染 + 装配 + 过滤**。
 
-> Batch 3 含较重的视觉/交互设计;实施计划前会先出线框对齐布局细节。
+**9. 分类型执行轨迹时间线(替代工具视图)。** Segmented 改「**步骤时间线 / 原始事件**」。步骤时间线 = 一条纵轴穿起**全部节点执行 + 关键事件**,按真实到达序列排,两种视觉权重:
+
+- **agent 步 = 大卡**:标题行 `步骤号 · node · 模型 · finish_reason · per-step token`(**不显 per-step 耗时** —— SSE 无 per-step 墙钟,留 Batch 4 的 `duration_ms`;客户端估会误导)。展开体:**该步的思考(reasoning,按步内联)** → 触发的**工具卡**(嵌在所属步内)/ 或最终答复(content)。
+- **工具卡**:头(内置/MCP 徽章 · 名称 · 成功/失败状态)+ **入参(args JSON)** + **出参(结果)**;exec_python/bash 出参走 exit_code 徽章 + stdout/stderr 分区(Batch 1),其它工具走 resultPreview。
+- **轻量类型行(aux 节点)**:`memory_recall` / `planner` / `reflect` / `memory_writeback` —— 一行摘要(node 标签 + 计数/verdict),可展开看内容(召回的记忆、plan goal+steps、reflect critique、写回记忆)。
+- **轴标记(事件)**:`compaction`(压缩 before→after)/ `retry`(定位在两次尝试之间,取代 chip)/ `error` / `end`(终态)/ **`approval`(紫色暂停标记 —— run 停在哪等人工审批)**。
+- **异常步默认展开 + 红节点 + 红条**(工具失败 / retry / 撞长度 / error);正常步/aux 行**默认折叠**。**`reflect` 的 `revise` 用告警色高亮** —— 它回环让 agent 重做,是"为什么循环"的关键线索。
+
+**10. 事件过滤 + 搜索。** 时间线上方工具条:类型 chip(全部 / 工具 / 错误 / retry …)+ 文本搜索(工具名 / error / finish_reason / node)+ 实时计数。过滤 = **隐藏非命中项**(非高亮淡化)。同一工具条也作用于「原始事件」视图。
+
+**与 Batch 2「执行状态」聚合区的关系:** 二者**并存,分工明确** —— 时间线管**序列**(每个节点/事件何时发生),聚合区管**全局汇总**(最终 plan 走 PlanPanel REST、全部记忆/失败/子 agent 的去重汇总)。不合并。
+
+**新增 parser 工作(唯一新数据处理):** per-step reasoning —— `summarizeTurn` 现把 `reasoning_content` 抹平成轮级 `reasoning: string[]`;需像 Batch 2 的 `perStepUsage` 一样按 AI message(步)保留关联,喂 agent 步卡的思考区。时间线的**装配**(把各 parser 的产物按 `receivedAt` 序列合并成有序的 typed items)是新的纯前端逻辑,但底层字段全部已解析。
+
+> 线框存档:见评审时的可交互 HTML 线框(4 轮:替代工具视图 → 思考按步 → 工具入参/出参 → 分类型轨迹 + 可展开 aux 行)。
 
 ### Batch 4 — 精确计时 + Langfuse 入口(后端 + facade + 前端)
 
