@@ -44,6 +44,7 @@ describe("summarizeTurn", () => {
       outputTokens: 30,
       totalTokens: 180,
       cacheReadTokens: 64,
+      cacheCreationTokens: 0,
       reasoningTokens: 8,
     });
   });
@@ -96,5 +97,53 @@ describe("summarizeTurn", () => {
     const summary = summarizeTurn(events);
     expect(summary.finalText).toBeNull();
     expect(summary.usage).toBeNull();
+  });
+
+  it("takes finish_reason and model_name from the last AI message that reports them", () => {
+    const events = [
+      updates([
+        {
+          type: "ai",
+          content: "",
+          response_metadata: { finish_reason: "tool_calls", model_name: "glm-5.2" },
+        },
+      ]),
+      updates([
+        {
+          type: "ai",
+          content: "done",
+          response_metadata: { finish_reason: "stop", model_name: "glm-5.2" },
+        },
+      ]),
+    ];
+    const summary = summarizeTurn(events);
+    expect(summary.finishReason).toBe("stop");
+    expect(summary.modelName).toBe("glm-5.2");
+  });
+
+  it("leaves finishReason/modelName null when response_metadata is absent", () => {
+    const summary = summarizeTurn([updates([{ type: "ai", content: "hi" }])]);
+    expect(summary.finishReason).toBeNull();
+    expect(summary.modelName).toBeNull();
+  });
+
+  it("sums cache_creation into cacheCreationTokens", () => {
+    const events = [
+      updates([
+        {
+          type: "ai",
+          content: "x",
+          usage_metadata: {
+            input_tokens: 10,
+            output_tokens: 2,
+            total_tokens: 12,
+            input_token_details: { cache_read: 4, cache_creation: 6 },
+          },
+        },
+      ]),
+    ];
+    const summary = summarizeTurn(events);
+    expect(summary.usage?.cacheCreationTokens).toBe(6);
+    expect(summary.usage?.cacheReadTokens).toBe(4);
   });
 });

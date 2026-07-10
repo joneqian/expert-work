@@ -14,6 +14,7 @@ export interface TurnUsage {
   outputTokens: number;
   totalTokens: number;
   cacheReadTokens: number;
+  cacheCreationTokens: number;
   reasoningTokens: number;
 }
 
@@ -28,6 +29,10 @@ export interface TurnSummary {
   stepCount: number | null;
   /** Wall-clock from the turn's first frame to its last, in ms (null if <2 frames). */
   latencyMs: number | null;
+  /** ``response_metadata.finish_reason`` of the last AI message that reports one (null if none). */
+  finishReason: string | null;
+  /** ``response_metadata.model_name`` of the last AI message that reports one (null if none). */
+  modelName: string | null;
 }
 
 function asInt(value: unknown): number {
@@ -60,11 +65,14 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
   const reasoning: string[] = [];
   let reported = false;
   let stepCount: number | null = null;
+  let finishReason: string | null = null;
+  let modelName: string | null = null;
   const usage: TurnUsage = {
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
     cacheReadTokens: 0,
+    cacheCreationTokens: 0,
     reasoningTokens: 0,
   };
 
@@ -87,6 +95,13 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
       const text = textOf(m.content);
       if (text !== null) finalText = text; // last AI text wins
 
+      const rm = m.response_metadata;
+      if (rm !== null && typeof rm === "object") {
+        const r = rm as Record<string, unknown>;
+        if (typeof r.finish_reason === "string") finishReason = r.finish_reason;
+        if (typeof r.model_name === "string") modelName = r.model_name;
+      }
+
       const ak = m.additional_kwargs;
       if (ak !== null && typeof ak === "object") {
         const rc = (ak as Record<string, unknown>).reasoning_content;
@@ -102,7 +117,9 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
         usage.totalTokens += asInt(u.total_tokens);
         const itd = u.input_token_details;
         if (itd !== null && typeof itd === "object") {
-          usage.cacheReadTokens += asInt((itd as Record<string, unknown>).cache_read);
+          const d = itd as Record<string, unknown>;
+          usage.cacheReadTokens += asInt(d.cache_read);
+          usage.cacheCreationTokens += asInt(d.cache_creation);
         }
         const otd = u.output_token_details;
         if (otd !== null && typeof otd === "object") {
@@ -121,5 +138,5 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
     }
   }
 
-  return { finalText, reasoning, usage: reported ? usage : null, stepCount, latencyMs };
+  return { finalText, reasoning, usage: reported ? usage : null, stepCount, latencyMs, finishReason, modelName };
 }
