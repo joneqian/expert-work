@@ -2029,6 +2029,8 @@ async def _dispatch_tool(
             ]
             outcome = (message, merged_updates, refund, classified)
             promotion_events.labels(event="call_through").inc()
+        duration_ms = _elapsed_ms(started)
+        outcome[0].additional_kwargs["duration_ms"] = duration_ms
         _record_tool_metrics(name, started, "ok" if ok else "error")
         await _emit_tool_audit(
             audit_logger,
@@ -2041,7 +2043,7 @@ async def _dispatch_tool(
             action=AuditAction.TOOL_CALL,
             result=AuditResult.SUCCESS if ok else AuditResult.ERROR,
             reason=None if ok else "tool_error",
-            duration_ms=_elapsed_ms(started),
+            duration_ms=duration_ms,
             # Stream 14.4 — MCP traffic audit: server + response volume.
             extra_details=_mcp_audit_details(
                 name, content=str(outcome[0].content), is_error=not ok
@@ -2050,6 +2052,7 @@ async def _dispatch_tool(
         return outcome
     except ToolNotFoundError as exc:
         logger.warning("tools.unknown_tool name=%s call_id=%s", name, call_id)
+        duration_ms = _elapsed_ms(started)
         _record_tool_metrics(name, started, "error")
         await _emit_tool_audit(
             audit_logger,
@@ -2062,7 +2065,7 @@ async def _dispatch_tool(
             action=AuditAction.TOOL_CALL,
             result=AuditResult.ERROR,
             reason="unknown_tool",
-            duration_ms=_elapsed_ms(started),
+            duration_ms=duration_ms,
             extra_details=_mcp_audit_details(name, is_error=True),
         )
         # Stream HX-12 — a truly unknown name gets ranked suggestions from
@@ -2084,6 +2087,7 @@ async def _dispatch_tool(
                 tool_call_id=call_id,
                 status="error",
                 name=name,
+                additional_kwargs={"duration_ms": duration_ms},
             ),
             {},
             0,
@@ -2099,6 +2103,7 @@ async def _dispatch_tool(
             call_id,
             type(exc).__name__,
         )
+        duration_ms = _elapsed_ms(started)
         _record_tool_metrics(name, started, "blocked")
         await _emit_tool_audit(
             audit_logger,
@@ -2111,7 +2116,7 @@ async def _dispatch_tool(
             action=AuditAction.TOOL_BLOCKED,
             result=AuditResult.DENIED,
             reason=type(exc).__name__,
-            duration_ms=_elapsed_ms(started),
+            duration_ms=duration_ms,
             extra_details=_mcp_audit_details(name, is_error=True),
         )
         return (
@@ -2120,6 +2125,7 @@ async def _dispatch_tool(
                 tool_call_id=call_id,
                 status="error",
                 name=name,
+                additional_kwargs={"duration_ms": duration_ms},
             ),
             {},
             0,
