@@ -17,7 +17,6 @@
  * backend ad-hoc manifest override that doesn't exist yet).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   Alert,
   AutoComplete,
@@ -36,7 +35,6 @@ import {
   AlertTriangle,
   Check,
   Download,
-  ExternalLink,
   FileText,
   HardDrive,
   History,
@@ -89,6 +87,7 @@ import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
+import { TurnMeta } from "./playground/TurnMeta";
 import {
   readModel,
   readPromptJinja,
@@ -1817,87 +1816,12 @@ function TurnCard({
           />
         )}
 
-        {/* Per-turn usage chips */}
-        {summary.usage && (
-          <div
-            style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}
-            data-testid="playground-usage"
-          >
-            <Tag bordered={false} color="geekblue">
-              {t("playground.usage_in")}: {summary.usage.inputTokens}
-            </Tag>
-            <Tag bordered={false} color="geekblue">
-              {t("playground.usage_out")}: {summary.usage.outputTokens}
-            </Tag>
-            <Tag bordered={false}>
-              {t("playground.usage_total")}: {summary.usage.totalTokens}
-            </Tag>
-            {summary.usage.cacheReadTokens > 0 && (
-              <Tag bordered={false} color="green">
-                {t("playground.usage_cache")}: {summary.usage.cacheReadTokens}
-              </Tag>
-            )}
-            {summary.usage.reasoningTokens > 0 && (
-              <Tag bordered={false} color="purple">
-                {t("playground.usage_reasoning")}:{" "}
-                {summary.usage.reasoningTokens}
-              </Tag>
-            )}
-          </div>
-        )}
-
-        {/* #4 step / latency / cost + #8 run-detail link. */}
-        {(summary.stepCount !== null ||
-          summary.latencyMs !== null ||
-          costCny !== null ||
-          (runId && threadId)) && (
-          <div
-            style={{
-              marginTop: 6,
-              display: "flex",
-              gap: 6,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-            data-testid="playground-turn-meta"
-          >
-            {summary.stepCount !== null && (
-              <Tag bordered={false}>
-                {t("playground.meta_steps")}: {summary.stepCount}
-              </Tag>
-            )}
-            {summary.latencyMs !== null && (
-              <Tag bordered={false}>
-                {t("playground.meta_latency")}:{" "}
-                {(summary.latencyMs / 1000).toFixed(1)}s
-              </Tag>
-            )}
-            {costCny !== null && (
-              <Tag
-                bordered={false}
-                color="gold"
-                data-testid="playground-turn-cost"
-              >
-                ≈ ¥{costCny.toFixed(4)}
-              </Tag>
-            )}
-            {runId && threadId && (
-              <Link
-                to={`/runs/${threadId}/${runId}`}
-                style={{
-                  fontSize: 12,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 3,
-                }}
-                data-testid="playground-turn-run-link"
-              >
-                {t("playground.view_run")}
-                <ExternalLink size={11} strokeWidth={1.75} />
-              </Link>
-            )}
-          </div>
-        )}
+        <TurnMeta
+          summary={summary}
+          costCny={costCny}
+          runId={runId}
+          threadId={threadId}
+        />
 
         {/* SE-16 (SE-A46) — per-turn 👍/👎 quality signal feeding the
             skill-evolution curation pipeline. Settled turns only. */}

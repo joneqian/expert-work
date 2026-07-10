@@ -677,6 +677,9 @@ export interface TranslationKeys {
     usage_total: string;
     usage_cache: string;
     usage_reasoning: string;
+    usage_cache_write: string;
+    meta_finish: string;
+    meta_model: string;
     reasoning_label: string;
     events_label: string;
     export_json: string;
@@ -3026,6 +3029,9 @@ const en: TranslationKeys = {
     usage_total: "total",
     usage_cache: "cached",
     usage_reasoning: "reasoning",
+    usage_cache_write: "Cache write",
+    meta_finish: "Finish",
+    meta_model: "Model",
     reasoning_label: "Reasoning",
     events_label: "Events",
     export_json: "Export JSON",
