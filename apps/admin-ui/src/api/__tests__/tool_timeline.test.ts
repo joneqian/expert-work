@@ -5,6 +5,7 @@ import {
   parseCompactionEvents,
   parseExecResult,
   parseToolCalls,
+  toolStatusSummary,
 } from "../tool_timeline";
 import type { SseEvent } from "../sessions";
 
@@ -18,6 +19,10 @@ function updates(node: string, messages: unknown[]): SseEvent {
 }
 
 function aiCall(id: string, name: string, args: Record<string, unknown>): unknown {
+  return { type: "ai", content: "", tool_calls: [{ id, name, args, type: "tool_call" }] };
+}
+
+function aiCall2(id: string, name: string, args: Record<string, unknown>): unknown {
   return { type: "ai", content: "", tool_calls: [{ id, name, args, type: "tool_call" }] };
 }
 
@@ -243,5 +248,22 @@ describe("parseToolCalls exec attribution", () => {
     ];
     const [entry] = parseToolCalls(events);
     expect(entry.execResult).toBeUndefined();
+  });
+});
+
+describe("toolStatusSummary", () => {
+  it("counts total tool calls and failures", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "exec_python", {}), aiCall2("c2", "web_search", {})]),
+      updates("tools", [
+        toolResult("c1", "stdout:\nok\n\nexit_code: 0", "success"),
+        toolResult("c2", "boom", "error"),
+      ]),
+    ];
+    expect(toolStatusSummary(events)).toEqual({ total: 2, failed: 1 });
+  });
+
+  it("returns zeros when there are no tool calls", () => {
+    expect(toolStatusSummary([])).toEqual({ total: 0, failed: 0 });
   });
 });

@@ -277,3 +277,13 @@ export function artifactsFromTools(events: readonly SseEvent[]): TurnArtifact[] 
   }
   return [...byName.values()];
 }
+
+/** Aggregate a turn's tool activity for an at-a-glance header: how many calls,
+ *  how many failed. ``pending`` / ``pending_approval`` are not failures. */
+export function toolStatusSummary(
+  events: readonly SseEvent[],
+): { total: number; failed: number } {
+  const entries = parseToolCalls(events);
+  const failed = entries.filter((e) => e.status === "error").length;
+  return { total: entries.length, failed };
+}
