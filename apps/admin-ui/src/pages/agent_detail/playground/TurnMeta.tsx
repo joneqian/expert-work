@@ -24,7 +24,7 @@ export function TurnMeta({
   costCny,
   runId,
   threadId,
-}: TurnMetaProps): JSX.Element | null {
+}: TurnMetaProps) {
   const { t } = useTranslation();
   const { usage, stepCount, latencyMs, finishReason, modelName } = summary;
   // "stop" is the normal terminal reason — only surface the interesting ones
