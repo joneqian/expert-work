@@ -134,6 +134,38 @@ async def test_tool_error_emits_result_error() -> None:
     assert entry.reason == "tool_error"
 
 
+# --- duration_ms surfaced on the returned ToolMessage ------------------------
+
+
+async def test_dispatch_stamps_duration_ms_on_success_message() -> None:
+    tool = _EchoTool(ToolSpec(name="reader", description="d", is_read_only=True))
+    audit = _RecordingAuditLogger()
+    ctx = _ctx()
+    msg, _, _, _ = await _dispatch_tool(
+        _call("reader", {"q": "hi"}),
+        _registry(tool),
+        ctx,
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    assert isinstance(msg.additional_kwargs.get("duration_ms"), int)
+    assert msg.additional_kwargs["duration_ms"] >= 0
+
+
+async def test_dispatch_stamps_duration_ms_on_error_message() -> None:
+    tool = _BoomTool(ToolSpec(name="boom", description="d"))
+    audit = _RecordingAuditLogger()
+    msg, _, _, _ = await _dispatch_tool(
+        _call("boom", {}),
+        _registry(tool),
+        _ctx(),
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    assert isinstance(msg.additional_kwargs.get("duration_ms"), int)
+    assert msg.additional_kwargs["duration_ms"] >= 0
+
+
 # --- TOOL_BLOCKED + unknown -------------------------------------------------
 
 
@@ -153,11 +185,13 @@ async def test_middleware_block_emits_tool_blocked_denied() -> None:
     assert entry.action.value == "tool:blocked"
     assert entry.result.value == "denied"
     assert entry.reason == "PermissionError"
+    assert isinstance(msg.additional_kwargs.get("duration_ms"), int)
+    assert msg.additional_kwargs["duration_ms"] >= 0
 
 
 async def test_unknown_tool_emits_tool_call_error() -> None:
     audit = _RecordingAuditLogger()
-    await _dispatch_tool(
+    msg, _, _, _ = await _dispatch_tool(
         _call("ghost", {}),
         _registry(),  # empty
         _ctx(),
@@ -169,6 +203,8 @@ async def test_unknown_tool_emits_tool_call_error() -> None:
     assert entry.action.value == "tool:call"
     assert entry.result.value == "error"
     assert entry.reason == "unknown_tool"
+    assert isinstance(msg.additional_kwargs.get("duration_ms"), int)
+    assert msg.additional_kwargs["duration_ms"] >= 0
 
 
 # --- privacy: no raw arg values, only keys + declared paths -----------------

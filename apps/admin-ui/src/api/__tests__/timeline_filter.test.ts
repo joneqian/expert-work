@@ -5,7 +5,8 @@ import type { TimelineItem } from "../timeline";
 const agent = (over: Partial<Extract<TimelineItem, {kind:"agent"}>> = {}): TimelineItem => ({
   kind: "agent", seq: 0, receivedAt: "", stepCount: 1, node: "agent",
   model: "glm-5.2", finishReason: "stop", reasoning: null, content: "hi",
-  inputTokens: 0, outputTokens: 0, totalTokens: 0, tools: [], hasError: false, ...over,
+  inputTokens: 0, outputTokens: 0, totalTokens: 0, tools: [], hasError: false,
+  durationMs: null, ...over,
 });
 const retry: TimelineItem = { kind: "retry", seq: 1, receivedAt: "", text: "重试 #1 · TimeoutError", tone: "warn" };
 

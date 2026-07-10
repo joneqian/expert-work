@@ -14,6 +14,10 @@ function evt(event: string, data: unknown): SseEvent {
   return { id: null, event, data, rawData: "", receivedAt: "" };
 }
 
+function ev(event: string, data: unknown, receivedAt: string): SseEvent {
+  return { id: null, event, data, rawData: "", receivedAt };
+}
+
 /** An ``updates`` frame for one node carrying message dicts. */
 function updates(node: string, messages: unknown[]): SseEvent {
   return evt("updates", { [node]: { messages } });
@@ -120,6 +124,29 @@ describe("parseToolCalls", () => {
     expect(entry.isMcp).toBe(true);
     expect(entry.server).toBe("amap-maps");
     expect(entry.toolName).toBe("geo");
+  });
+
+  it("reads per-tool duration_ms from the tool result additional_kwargs", () => {
+    const events = [
+      ev("updates", { agent: { messages: [
+        { type: "ai", content: "", tool_calls: [{ id: "c1", name: "exec_python", args: {} }] },
+      ] } }, "t1"),
+      ev("updates", { tools: { messages: [
+        { type: "tool", tool_call_id: "c1", name: "exec_python", content: "ok", status: "success",
+          additional_kwargs: { duration_ms: 840 } },
+      ] } }, "t2"),
+    ];
+    const entries = parseToolCalls(events);
+    expect(entries[0].durationMs).toBe(840);
+  });
+
+  it("leaves durationMs null when the tool result carries no duration", () => {
+    const events = [
+      ev("updates", { tools: { messages: [
+        { type: "tool", tool_call_id: "c2", name: "web_search", content: "ok", status: "success" },
+      ] } }, "t1"),
+    ];
+    expect(parseToolCalls(events)[0].durationMs).toBe(null);
   });
 });
 

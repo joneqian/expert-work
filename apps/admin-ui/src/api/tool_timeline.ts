@@ -32,6 +32,8 @@ export interface ToolCallEntry {
   resultPreview: string | null;
   /** Structured sandbox result (exec_python / bash only) parsed from ``resultPreview``. */
   execResult?: ExecResult;
+  /** Tool execution time in ms, from the result's ``additional_kwargs.duration_ms`` (``null`` until the result arrives or if absent). */
+  durationMs: number | null;
 }
 
 const MCP_PREFIX = "mcp:";
@@ -226,6 +228,7 @@ export function parseToolCalls(
             args,
             status: "pending",
             resultPreview: null,
+            durationMs: null,
           }));
           // A re-seen call (replayed frame) refreshes name/args, never status.
           entry.rawName = rawName;
@@ -253,6 +256,7 @@ export function parseToolCalls(
             args: {},
             status,
             resultPreview: preview,
+            durationMs: null,
           };
         });
         // Fill the name from the result only if the call side didn't provide it.
@@ -265,6 +269,14 @@ export function parseToolCalls(
         }
         entry.status = status;
         entry.resultPreview = preview;
+        const ak = m.additional_kwargs;
+        const durRaw =
+          ak !== null && typeof ak === "object"
+            ? (ak as Record<string, unknown>).duration_ms
+            : undefined;
+        if (typeof durRaw === "number" && Number.isFinite(durRaw)) {
+          entry.durationMs = durRaw;
+        }
       }
     }
   }

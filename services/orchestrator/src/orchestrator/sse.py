@@ -393,6 +393,11 @@ async def run_agent(
         # so we measure from this point to the first ``updates`` chunk.
         ttft_started = time.monotonic()
         first_chunk_seen = False
+        # Batch 4a — per-superstep wall-clock. Each ``updates`` chunk is one
+        # node execution; the gap between successive chunk arrivals is that
+        # step's coarse duration. Baseline = the same RUNNING mark used for
+        # TTFT, so the first chunk's duration ≈ TTFT.
+        last_frame_ts = ttft_started
         # Stream HX-3 — run-level transient retry (Mini-ADR HX-C1..C3).
         # At most one in-worker retry, same run_id: the SSE stream stays
         # continuous and the trajectory stays a single record. The retry
@@ -426,6 +431,13 @@ async def run_agent(
                                 _durable_resume_seconds.observe(ttft)
                             first_chunk_seen = True
                         jsonable_chunk = _to_jsonable(chunk)
+                        now = time.monotonic()
+                        duration_ms = round((now - last_frame_ts) * 1000)
+                        last_frame_ts = now
+                        if isinstance(jsonable_chunk, dict):
+                            for node_val in jsonable_chunk.values():
+                                if isinstance(node_val, dict):
+                                    node_val["_duration_ms"] = duration_ms
                         await bridge.publish(run_id, stream_mode, jsonable_chunk)
                         await _persist_event(
                             event_store,
