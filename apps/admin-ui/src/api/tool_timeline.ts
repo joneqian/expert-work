@@ -151,6 +151,33 @@ export function parseCompactionEvents(events: readonly SseEvent[]): CompactionSu
   return out;
 }
 
+/** One transient-retry event (sse.py retry publish): the run hit a retryable
+ *  error and backed off before re-attempting the astream loop. */
+export interface RetryEntry {
+  receivedAt: string;
+  attempt: number;
+  errorClass: string;
+  backoffS: number;
+}
+
+/** Extract ordered retry events (``event: "retry"`` with
+ *  ``{attempt, error_class, backoff_s}``). Malformed frames are skipped. */
+export function parseRetryEvents(events: readonly SseEvent[]): RetryEntry[] {
+  const out: RetryEntry[] = [];
+  for (const evt of events) {
+    if (evt.event !== "retry" || evt.data === null || typeof evt.data !== "object") continue;
+    const d = evt.data as Record<string, unknown>;
+    if (typeof d.attempt !== "number" || typeof d.error_class !== "string") continue;
+    out.push({
+      receivedAt: evt.receivedAt,
+      attempt: d.attempt,
+      errorClass: d.error_class,
+      backoffS: typeof d.backoff_s === "number" ? d.backoff_s : 0,
+    });
+  }
+  return out;
+}
+
 /**
  * Reconstruct the ordered tool-call timeline from a run's SSE frames.
  *
