@@ -123,6 +123,8 @@ const { TextArea } = Input;
  *  pasted email/spec fits; a whole book rides the document-upload path. */
 const MAX_INPUT_CHARS = 65536;
 
+const EVENT_VIEW_STORAGE_KEY = "expert_work.playground.eventView";
+
 interface PlaygroundTabProps {
   detail: AgentDetailResponse;
 }
@@ -170,7 +172,18 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [creatingThread, setCreatingThread] = useState(false);
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [eventView, setEventView] = useState<"timeline" | "raw">("timeline");
+  const [eventView, setEventViewState] = useState<"timeline" | "raw">(() => {
+    if (typeof window === "undefined") return "timeline";
+    return window.localStorage.getItem(EVENT_VIEW_STORAGE_KEY) === "raw"
+      ? "raw"
+      : "timeline";
+  });
+  const setEventView = useCallback((next: "timeline" | "raw") => {
+    setEventViewState(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(EVENT_VIEW_STORAGE_KEY, next);
+    }
+  }, []);
   const [running, setRunning] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
