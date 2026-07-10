@@ -720,6 +720,17 @@ export interface TranslationKeys {
     tool_count_one: string;
     tool_count_other: string;
     tool_failed_count: string;
+    state_memories: string;
+    state_failures: string;
+    state_reflections: string;
+    state_subagents: string;
+    state_signals: string;
+    state_retries: string;
+    state_per_step: string;
+    signal_no_progress: string;
+    signal_escalate: string;
+    retry_attempt: string;
+    state_section: string;
   };
   session_history: {
     title: string;
@@ -3081,6 +3092,17 @@ const en: TranslationKeys = {
     tool_count_one: "{{count}} tool",
     tool_count_other: "{{count}} tools",
     tool_failed_count: "{{count}} failed",
+    state_memories: "Recalled memory",
+    state_failures: "Tool failures",
+    state_reflections: "Reflections",
+    state_subagents: "Subagent calls",
+    state_signals: "Run signals",
+    state_retries: "Retries",
+    state_per_step: "Per-step tokens",
+    signal_no_progress: "No-progress streak",
+    signal_escalate: "Escalate next",
+    retry_attempt: "attempt {{n}} · {{cls}} · backoff {{s}}s",
+    state_section: "Run state",
   },
   session_history: {
     title: "Session history",

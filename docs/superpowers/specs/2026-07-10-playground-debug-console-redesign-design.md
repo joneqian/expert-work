@@ -115,9 +115,11 @@
 4. **展开态持久** —— `eventView` 与 Collapse 展开状态存 localStorage(抄 `EventStreamPanel` 已有做法),刷新不丢。默认把"事件"展开。
 5. **`cache_creation_tokens`** —— `TurnUsage` 加字段,badge 区显示缓存写入(数据在 `usage_metadata`,upstream 兼容 vendor 可能为 0,为 0 时不显示)。
 
-### Batch 2 — P1:结构化埋没通道(纯前端)
+### Batch 2 — P1:结构化埋没通道(前端为主 + 1 小后端序列化修复)
 
-新增按 AgentState 通道的轻量渲染,数据全部已在 `updates` 帧。
+> **修订(2026-07-10,基于 Batch 2 数据勘查):** 原设想"纯前端、数据全在帧里可直接解析"对以下 4 个通道**不成立**。`sse.py` 的 `_to_jsonable`(:1075)只对 `BaseMessage` 调 `model_dump()`,其余 pydantic BaseModel / dataclass 全走 `str(value)` 兜底 —— 于是 `recalled_memories`(pydantic)/`tool_failures`(dataclass)/`reflections`(pydantic)/`subagent_invocations`(pydantic)到前端是 **Python repr 字符串,非 JSON**(连现有"原始事件"视图对它们也是退化的)。本质是序列化 bug。**Batch 2 因此含一个小后端前提:给 `_to_jsonable` 加 pydantic(`model_dump(mode="json")`)+ dataclass(`asdict`)序列化。** 不受影响项仍纯前端:`plan`(`PlanPanel` 走 REST 自取)、标量信号(bool/int 干净序列化)、`retry`(payload 本就是 JSON)、`compaction`(parser 已导出)、per-step token(`summarizeTurn` 重构)。
+
+新增按 AgentState 通道的轻量渲染。
 
 6. **AgentState 通道卡片** —— 在轮内新增可折叠段,逐通道解析渲染:
    - `plan`(goal + steps)—— **复用 `run_detail/PlanPanel`**,不重写。

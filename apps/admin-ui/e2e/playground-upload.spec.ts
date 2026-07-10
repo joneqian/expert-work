@@ -104,7 +104,7 @@ test("attach image, run, and send image_refs + pass axe", async ({ page }) => {
     .getByTestId("playground-event-view-toggle")
     .getByText(/原始|raw/i)
     .click();
-  await expect(page.getByTestId("playground-event-end")).toBeVisible();
+  await expect(page.getByTestId("event-card-end")).toBeVisible();
 
   expect(runBody).toEqual({
     input: "describe this image",

@@ -71,9 +71,9 @@ describe("EventStreamPanel", () => {
     // Raw-event view to assert individual frames (default is the timeline).
     await user.click(screen.getByText(i18n.t("event_stream.view_raw")));
 
-    await screen.findByTestId("event-stream-event-metadata");
-    expect(screen.getByTestId("event-stream-event-updates")).toBeInTheDocument();
-    expect(screen.getByTestId("event-stream-event-end")).toBeInTheDocument();
+    await screen.findByTestId("event-card-metadata");
+    expect(screen.getByTestId("event-card-updates")).toBeInTheDocument();
+    expect(screen.getByTestId("event-card-end")).toBeInTheDocument();
   });
 
   it("renders a compaction summary card in the timeline view", async () => {

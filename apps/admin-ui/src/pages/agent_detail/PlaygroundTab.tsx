@@ -79,15 +79,24 @@ import {
   type ThreadMeta,
   type WorkspaceFile,
 } from "../../api/sessions";
-import { artifactsFromTools, toolStatusSummary } from "../../api/tool_timeline";
+import {
+  artifactsFromTools,
+  parseCompactionEvents,
+  parseRetryEvents,
+  toolStatusSummary,
+} from "../../api/tool_timeline";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
-import { CopyButton } from "../../components/CopyButton";
+import { parseAgentState } from "../../api/agent_state";
+import { CompactionSummaryList } from "../../components/CompactionCard";
+import { EventCard } from "../../components/EventCard";
 import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
+import { AgentStatePanels } from "./playground/AgentStatePanels";
 import { TurnMeta } from "./playground/TurnMeta";
+import { PlanPanel } from "../run_detail/PlanPanel";
 import {
   readModel,
   readPromptJinja,
@@ -128,14 +137,6 @@ const EVENT_VIEW_STORAGE_KEY = "expert_work.playground.eventView";
 interface PlaygroundTabProps {
   detail: AgentDetailResponse;
 }
-
-const EVENT_COLOR: Record<string, string> = {
-  metadata: "blue",
-  updates: "geekblue",
-  approval: "gold",
-  error: "red",
-  end: "green",
-};
 
 interface UserOption {
   value: string;
@@ -1688,6 +1689,19 @@ function TurnCard({
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
   const toolStats = toolStatusSummary(turn.events);
+  const agentState = parseAgentState(turn.events);
+  const retries = parseRetryEvents(turn.events);
+  const compactions = parseCompactionEvents(turn.events);
+  // parseAgentState always returns a plain object (never null), so a bare
+  // truthiness check on it would always pass — check its channels instead so
+  // the run-state section actually hides when every channel is empty.
+  const hasAgentState =
+    agentState.recalledMemories.length > 0 ||
+    agentState.toolFailures.length > 0 ||
+    agentState.reflections.length > 0 ||
+    agentState.subagentInvocations.length > 0 ||
+    (agentState.signals.noProgressStreak ?? 0) > 0 ||
+    agentState.signals.escalateNext === true;
   // A+B — artifacts the agent registered this turn (``save_artifact``). The
   // agent can't emit a download link itself (the endpoint is thread-scoped +
   // auth'd), so surface them as an inline download row — deer-flow's pattern.
@@ -1875,6 +1889,35 @@ function TurnCard({
                 },
               ]
             : []),
+          ...(hasAgentState ||
+          retries.length > 0 ||
+          compactions.length > 0 ||
+          summary.perStepUsage.length > 0
+            ? [
+                {
+                  key: "run-state",
+                  label: t("playground.state_section"),
+                  children: (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {threadId && (
+                        <PlanPanel
+                          threadId={threadId}
+                          runStatus={turn.status === "running" ? "running" : "success"}
+                        />
+                      )}
+                      <AgentStatePanels
+                        state={agentState}
+                        retries={retries}
+                        perStepUsage={summary.perStepUsage}
+                      />
+                      {compactions.length > 0 && (
+                        <CompactionSummaryList items={compactions} />
+                      )}
+                    </div>
+                  ),
+                },
+              ]
+            : []),
           {
             key: "events",
             label: (
@@ -1964,57 +2007,6 @@ function TurnCard({
           },
         ]}
       />
-    </div>
-  );
-}
-
-function EventCard({ evt }: { evt: SseEvent }) {
-  const tagColor = EVENT_COLOR[evt.event] ?? "default";
-  const display =
-    typeof evt.data === "string" ? evt.data : JSON.stringify(evt.data, null, 2);
-  return (
-    <div
-      style={{
-        border: "1px solid var(--ew-border-subtle)",
-        borderRadius: 4,
-        padding: 8,
-        background: "var(--ew-surface-raised)",
-      }}
-      data-testid={`playground-event-${evt.event}`}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 4,
-          fontSize: 11,
-        }}
-      >
-        <Tag color={tagColor} bordered={false} style={{ margin: 0 }}>
-          {evt.event}
-        </Tag>
-        <Text type="secondary" style={{ fontSize: 11 }} className="mono">
-          {new Date(evt.receivedAt).toLocaleTimeString()}
-        </Text>
-        <span style={{ marginLeft: "auto" }}>
-          <CopyButton text={display} testId="playground-event-copy" />
-        </span>
-      </div>
-      <pre
-        style={{
-          margin: 0,
-          fontSize: 11,
-          fontFamily: "var(--ew-font-mono)",
-          color: "var(--ew-text-secondary)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
-          maxHeight: 280,
-          overflow: "auto",
-        }}
-      >
-        {display}
-      </pre>
     </div>
   );
 }

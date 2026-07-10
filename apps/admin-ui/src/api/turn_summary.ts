@@ -18,6 +18,12 @@ export interface TurnUsage {
   reasoningTokens: number;
 }
 
+export interface StepUsage {
+  node: string;
+  stepCount: number | null;
+  usage: TurnUsage;
+}
+
 export interface TurnSummary {
   /** Last AI message text content — the agent's answer (null if none yet). */
   finalText: string | null;
@@ -33,6 +39,8 @@ export interface TurnSummary {
   finishReason: string | null;
   /** ``response_metadata.model_name`` of the last AI message that reports one (null if none). */
   modelName: string | null;
+  /** Per-AI-message usage, each tagged with its owning node + step_count. */
+  perStepUsage: StepUsage[];
 }
 
 function asInt(value: unknown): number {
@@ -59,6 +67,21 @@ function textOf(content: unknown): string | null {
   return null;
 }
 
+function usageFromMetadata(um: Record<string, unknown>): TurnUsage {
+  const itd = um.input_token_details;
+  const otd = um.output_token_details;
+  const d = (v: unknown): Record<string, unknown> =>
+    v !== null && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  return {
+    inputTokens: asInt(um.input_tokens),
+    outputTokens: asInt(um.output_tokens),
+    totalTokens: asInt(um.total_tokens),
+    cacheReadTokens: asInt(d(itd).cache_read),
+    cacheCreationTokens: asInt(d(itd).cache_creation),
+    reasoningTokens: asInt(d(otd).reasoning),
+  };
+}
+
 /** Distill a turn's frames into answer + reasoning + usage. */
 export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
   let finalText: string | null = null;
@@ -67,6 +90,7 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
   let stepCount: number | null = null;
   let finishReason: string | null = null;
   let modelName: string | null = null;
+  const perStepUsage: StepUsage[] = [];
   const usage: TurnUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -79,13 +103,26 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
   for (const evt of events) {
     if (evt.event !== "updates") continue;
     // ``step_count`` lives at the node level (alongside ``messages``), not on a
-    // message — take the highest seen across the turn.
+    // message — take the highest seen across the turn. Also collect a
+    // per-AI-message usage row tagged with its owning node + step_count.
     if (evt.data !== null && typeof evt.data === "object") {
-      for (const node of Object.values(evt.data as Record<string, unknown>)) {
-        if (node !== null && typeof node === "object") {
-          const sc = (node as Record<string, unknown>).step_count;
-          if (typeof sc === "number" && (stepCount === null || sc > stepCount)) {
-            stepCount = sc;
+      for (const [nodeName, node] of Object.entries(evt.data as Record<string, unknown>)) {
+        if (node === null || typeof node !== "object") continue;
+        const n = node as Record<string, unknown>;
+        const sc = typeof n.step_count === "number" ? n.step_count : null;
+        if (sc !== null && (stepCount === null || sc > stepCount)) stepCount = sc;
+        const msgs = Array.isArray(n.messages) ? n.messages : [];
+        for (const m of msgs) {
+          if (m === null || typeof m !== "object") continue;
+          const mm = m as Record<string, unknown>;
+          if (mm.type !== "ai") continue;
+          const um = mm.usage_metadata;
+          if (um !== null && typeof um === "object") {
+            perStepUsage.push({
+              node: nodeName,
+              stepCount: sc,
+              usage: usageFromMetadata(um as Record<string, unknown>),
+            });
           }
         }
       }
@@ -111,20 +148,13 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
       const um = m.usage_metadata;
       if (um !== null && typeof um === "object") {
         reported = true;
-        const u = um as Record<string, unknown>;
-        usage.inputTokens += asInt(u.input_tokens);
-        usage.outputTokens += asInt(u.output_tokens);
-        usage.totalTokens += asInt(u.total_tokens);
-        const itd = u.input_token_details;
-        if (itd !== null && typeof itd === "object") {
-          const d = itd as Record<string, unknown>;
-          usage.cacheReadTokens += asInt(d.cache_read);
-          usage.cacheCreationTokens += asInt(d.cache_creation);
-        }
-        const otd = u.output_token_details;
-        if (otd !== null && typeof otd === "object") {
-          usage.reasoningTokens += asInt((otd as Record<string, unknown>).reasoning);
-        }
+        const su = usageFromMetadata(um as Record<string, unknown>);
+        usage.inputTokens += su.inputTokens;
+        usage.outputTokens += su.outputTokens;
+        usage.totalTokens += su.totalTokens;
+        usage.cacheReadTokens += su.cacheReadTokens;
+        usage.cacheCreationTokens += su.cacheCreationTokens;
+        usage.reasoningTokens += su.reasoningTokens;
       }
     }
   }
@@ -138,5 +168,14 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
     }
   }
 
-  return { finalText, reasoning, usage: reported ? usage : null, stepCount, latencyMs, finishReason, modelName };
+  return {
+    finalText,
+    reasoning,
+    usage: reported ? usage : null,
+    stepCount,
+    latencyMs,
+    finishReason,
+    modelName,
+    perStepUsage,
+  };
 }

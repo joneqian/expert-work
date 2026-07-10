@@ -16,27 +16,20 @@
  * heavy reviewer keeps it open across page loads.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Card, Empty, Segmented, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Segmented, Space, Typography } from "antd";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { streamRunEvents } from "../../api/runs";
 import type { SseEvent } from "../../api/sessions";
-import { parseCompactionEvents, type CompactionSummary } from "../../api/tool_timeline";
-import { CopyButton } from "../../components/CopyButton";
+import { parseCompactionEvents } from "../../api/tool_timeline";
+import { CompactionSummaryList } from "../../components/CompactionCard";
+import { EventCard } from "../../components/EventCard";
 import { ToolTimeline } from "../../components/ToolTimeline";
 
 const { Text } = Typography;
 
 const LOCAL_STORAGE_KEY = "expert_work.runDetail.eventStream.expanded";
-
-const EVENT_COLOR: Record<string, string> = {
-  metadata: "blue",
-  updates: "geekblue",
-  error: "red",
-  end: "green",
-  compaction: "purple",
-};
 
 interface EventStreamPanelProps {
   threadId: string;
@@ -191,108 +184,5 @@ export function EventStreamPanel({ threadId, runId }: EventStreamPanelProps) {
         </div>
       )}
     </Card>
-  );
-}
-
-function CompactionSummaryList({ items }: { items: readonly CompactionSummary[] }) {
-  return (
-    <div
-      data-testid="compaction-summary-list"
-      style={{ display: "flex", flexDirection: "column", gap: 8 }}
-    >
-      {items.map((item, idx) => (
-        <CompactionCard key={`${item.receivedAt}-${idx}`} item={item} />
-      ))}
-    </div>
-  );
-}
-
-function CompactionCard({ item }: { item: CompactionSummary }) {
-  const { t } = useTranslation();
-  const reductionPct =
-    item.tokensBefore > 0
-      ? Math.max(0, Math.round(((item.tokensBefore - item.tokensAfter) / item.tokensBefore) * 100))
-      : 0;
-  return (
-    <div
-      data-testid="compaction-card"
-      style={{
-        border: "1px solid var(--ew-border-subtle)",
-        borderRadius: 6,
-        padding: 10,
-        background: "var(--ew-surface-raised)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <Tag color="purple" bordered={false} style={{ margin: 0 }}>
-          {t("event_stream.compaction_label")}
-        </Tag>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {t("event_stream.compaction_passes", { n: item.passes })}
-        </Text>
-        <Text className="mono" style={{ fontSize: 12 }}>
-          {t("event_stream.compaction_reduction", {
-            before: item.tokensBefore.toLocaleString(),
-            after: item.tokensAfter.toLocaleString(),
-            pct: reductionPct,
-          })}
-        </Text>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {t("event_stream.compaction_summary_chars", { n: item.summaryChars.toLocaleString() })}
-        </Text>
-      </div>
-    </div>
-  );
-}
-
-function EventCard({ evt }: { evt: SseEvent }) {
-  const tagColor = EVENT_COLOR[evt.event] ?? "default";
-  const display = typeof evt.data === "string" ? evt.data : JSON.stringify(evt.data, null, 2);
-  return (
-    <div
-      style={{
-        border: "1px solid var(--ew-border-subtle)",
-        borderRadius: 4,
-        padding: 8,
-        background: "var(--ew-surface-raised)",
-      }}
-      data-testid={`event-stream-event-${evt.event}`}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 4,
-          fontSize: 11,
-        }}
-      >
-        <Tag color={tagColor} bordered={false} style={{ margin: 0 }}>
-          {evt.event}
-        </Tag>
-        {evt.id !== null && (
-          <Text type="secondary" style={{ fontSize: 11 }} className="mono">
-            {evt.id}
-          </Text>
-        )}
-        <span style={{ marginLeft: "auto" }}>
-          <CopyButton text={display} testId="event-stream-copy" />
-        </span>
-      </div>
-      <pre
-        style={{
-          margin: 0,
-          fontSize: 11,
-          fontFamily: "var(--ew-font-mono)",
-          color: "var(--ew-text-secondary)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
-          maxHeight: 240,
-          overflow: "auto",
-        }}
-      >
-        {display}
-      </pre>
-    </div>
   );
 }

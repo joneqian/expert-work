@@ -146,4 +146,32 @@ describe("summarizeTurn", () => {
     expect(summary.usage?.cacheCreationTokens).toBe(6);
     expect(summary.usage?.cacheReadTokens).toBe(4);
   });
+
+  it("emits per-step usage rows keyed by node + step_count without dropping the sum", () => {
+    const events: SseEvent[] = [
+      {
+        id: "a", event: "updates",
+        data: { agent: { step_count: 1, messages: [
+          { type: "ai", content: "", usage_metadata: { input_tokens: 100, output_tokens: 10, total_tokens: 110 } },
+        ] } },
+        rawData: "", receivedAt: "2026-07-10T00:00:00Z",
+      },
+      {
+        id: "b", event: "updates",
+        data: { agent: { step_count: 2, messages: [
+          { type: "ai", content: "done", usage_metadata: { input_tokens: 50, output_tokens: 5, total_tokens: 55 } },
+        ] } },
+        rawData: "", receivedAt: "2026-07-10T00:00:01Z",
+      },
+    ];
+    const s = summarizeTurn(events);
+    expect(s.perStepUsage).toHaveLength(2);
+    expect(s.perStepUsage[0]).toEqual({
+      node: "agent", stepCount: 1,
+      usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 },
+    });
+    expect(s.perStepUsage[1].stepCount).toBe(2);
+    // summed usage still intact
+    expect(s.usage?.totalTokens).toBe(165);
+  });
 });

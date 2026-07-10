@@ -4,6 +4,7 @@ import {
   artifactsFromTools,
   parseCompactionEvents,
   parseExecResult,
+  parseRetryEvents,
   parseToolCalls,
   toolStatusSummary,
 } from "../tool_timeline";
@@ -265,5 +266,18 @@ describe("toolStatusSummary", () => {
 
   it("returns zeros when there are no tool calls", () => {
     expect(toolStatusSummary([])).toEqual({ total: 0, failed: 0 });
+  });
+});
+
+describe("parseRetryEvents", () => {
+  it("parses retry frames in order, skipping malformed ones", () => {
+    const events = [
+      { id: null, event: "retry", data: { attempt: 1, error_class: "TimeoutError", backoff_s: 2.5 }, rawData: "", receivedAt: "t1" },
+      { id: null, event: "updates", data: {}, rawData: "", receivedAt: "t2" },
+      { id: null, event: "retry", data: { attempt: 2 }, rawData: "", receivedAt: "t3" }, // malformed → skip
+    ];
+    expect(parseRetryEvents(events)).toEqual([
+      { receivedAt: "t1", attempt: 1, errorClass: "TimeoutError", backoffS: 2.5 },
+    ]);
   });
 });
