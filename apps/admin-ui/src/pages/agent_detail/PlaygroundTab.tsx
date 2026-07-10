@@ -79,7 +79,7 @@ import {
   type ThreadMeta,
   type WorkspaceFile,
 } from "../../api/sessions";
-import { artifactsFromTools } from "../../api/tool_timeline";
+import { artifactsFromTools, toolStatusSummary } from "../../api/tool_timeline";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import { CopyButton } from "../../components/CopyButton";
@@ -1674,6 +1674,7 @@ function TurnCard({
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
+  const toolStats = toolStatusSummary(turn.events);
   // A+B — artifacts the agent registered this turn (``save_artifact``). The
   // agent can't emit a download link itself (the endpoint is thread-scoped +
   // auth'd), so surface them as an inline download row — deer-flow's pattern.
@@ -1872,7 +1873,19 @@ function TurnCard({
                   gap: 8,
                 }}
               >
-                <span>{t("playground.events_label")}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  {t("playground.events_label")}
+                  {toolStats.total > 0 && (
+                    <Tag bordered={false} style={{ margin: 0 }} data-testid="playground-tool-count">
+                      {t("playground.tool_count", { count: toolStats.total })}
+                    </Tag>
+                  )}
+                  {toolStats.failed > 0 && (
+                    <Tag color="error" bordered={false} style={{ margin: 0 }} data-testid="playground-tool-failed">
+                      {t("playground.tool_failed_count", { count: toolStats.failed })}
+                    </Tag>
+                  )}
+                </span>
                 {/* Toggle lives next to the content it switches; stop the click
                     from collapsing the panel. */}
                 <span

@@ -768,6 +768,8 @@ const zhCN: TranslationKeys = {
     approval_reject: "拒绝",
     approval_modify_hint: "改参数请到运行详情页。",
     history_button: "会话历史",
+    tool_count: "{{count}} 个工具",
+    tool_failed_count: "{{count}} 个失败",
   },
   session_history: {
     title: "会话历史",
@@ -824,6 +826,9 @@ const zhCN: TranslationKeys = {
     status_pending_approval: "待审批",
     args_label: "入参",
     result_label: "结果",
+    exit_code: "退出码",
+    stdout_label: "stdout",
+    stderr_label: "stderr",
   },
   approval_card: {
     awaiting_human: "等待审批",

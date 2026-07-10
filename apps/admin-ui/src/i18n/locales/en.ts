@@ -717,6 +717,8 @@ export interface TranslationKeys {
     approval_reject: string;
     approval_modify_hint: string;
     history_button: string;
+    tool_count: string;
+    tool_failed_count: string;
   };
   session_history: {
     title: string;
@@ -773,6 +775,9 @@ export interface TranslationKeys {
     status_pending_approval: string;
     args_label: string;
     result_label: string;
+    exit_code: string;
+    stdout_label: string;
+    stderr_label: string;
   };
   approval_card: {
     awaiting_human: string;
@@ -3072,6 +3077,8 @@ const en: TranslationKeys = {
     approval_reject: "Reject",
     approval_modify_hint: "Edit arguments on the run-detail page.",
     history_button: "History",
+    tool_count: "{{count}} tools",
+    tool_failed_count: "{{count}} failed",
   },
   session_history: {
     title: "Session history",
@@ -3128,6 +3135,9 @@ const en: TranslationKeys = {
     status_pending_approval: "awaiting approval",
     args_label: "Arguments",
     result_label: "Result",
+    exit_code: "Exit code",
+    stdout_label: "stdout",
+    stderr_label: "stderr",
   },
   approval_card: {
     awaiting_human: "awaiting approval",
