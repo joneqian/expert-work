@@ -8,11 +8,12 @@
  * (`.timeline` / `.step` / `.node-row` / `.marker` / `.legend`) for the
  * authoritative visual structure this transcribes.
  */
-import { useState, type KeyboardEvent } from "react";
+import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentStep, AuxNodeItem, MarkerItem, TimelineItem } from "../../../api/timeline";
 import { ToolCallCard } from "../../../components/ToolTimeline";
+import { fmtDuration } from "./duration_format";
 
 // Semantic colors as CSS vars with wireframe-matching hex fallbacks — same
 // `var(--ew-*, #hex)` convention Batch 1/2 established (ToolTimeline.tsx /
@@ -25,6 +26,20 @@ const INFO = "var(--ew-text-info, #4c8dff)";
 
 export interface StepTimelineProps {
   items: readonly TimelineItem[];
+}
+
+/** Renders `fmtDuration(ms)` with the `tl_duration` aria-label — used for the
+ *  agent step head, the nested tool card, and the aux node row. Hidden
+ *  (renders nothing, no placeholder) when `ms` is `null` (Task 4 didn't
+ *  observe a duration for this step). */
+function DurationBadge({ ms, style }: { ms: number | null; style?: CSSProperties }) {
+  const { t } = useTranslation();
+  if (ms === null) return null;
+  return (
+    <span aria-label={t("playground.tl_duration")} style={style}>
+      {fmtDuration(ms)}
+    </span>
+  );
 }
 
 export function StepTimeline({ items }: StepTimelineProps) {
@@ -157,6 +172,7 @@ function AgentStepCard({ item }: { item: AgentStep }) {
               item.finishReason && <span>{t("playground.tl_finish", { reason: item.finishReason })}</span>
             )}
             <span>{item.totalTokens} tok</span>
+            <DurationBadge ms={item.durationMs} />
           </div>
           <span style={{ marginLeft: "auto", color: "var(--ew-text-tertiary)", fontSize: 11 }}>
             {expanded ? "▾" : caretSuffix ? `▸ ${caretSuffix}` : "▸"}
@@ -188,8 +204,18 @@ function AgentStepCard({ item }: { item: AgentStep }) {
               </div>
             )}
             {item.tools.map((tool) => (
-              <div key={tool.id} style={{ marginTop: 8 }}>
+              <div key={tool.id} style={{ position: "relative", marginTop: 8 }}>
                 <ToolCallCard entry={tool} />
+                <DurationBadge
+                  ms={tool.durationMs}
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    right: 10,
+                    fontSize: 11,
+                    color: "var(--ew-text-tertiary)",
+                  }}
+                />
               </div>
             ))}
             {isFinal && item.content && (
@@ -269,6 +295,7 @@ function AuxNodeRow({ item }: { item: AuxNodeItem }) {
           {item.kind}
         </span>
         <span>{item.summary}</span>
+        <DurationBadge ms={item.durationMs} style={{ fontSize: 11, color: "var(--ew-text-tertiary)" }} />
         <span style={{ marginLeft: "auto", color: "var(--ew-text-tertiary)", fontSize: 11 }}>
           {expanded ? "▾" : "▸"} {tailLabel}
         </span>

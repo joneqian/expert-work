@@ -61,6 +61,15 @@ function items(): TimelineItem[] {
   return [agentStep, memRow, retryMarker];
 }
 
+const toolWithDuration: ToolCallEntry = { ...tool, id: "c2", durationMs: 840 };
+
+const agentStepWithDuration: AgentStep = {
+  ...agentStep,
+  seq: 10,
+  durationMs: 1200,
+  tools: [toolWithDuration],
+};
+
 describe("StepTimeline", () => {
   it("returns null (empty container) when items is empty", () => {
     const { container } = render(<StepTimeline items={[]} />);
@@ -96,5 +105,28 @@ describe("StepTimeline", () => {
     const errStep: AgentStep = { ...agentStep, seq: 3, hasError: true, finishReason: null };
     render(<StepTimeline items={[errStep]} />);
     expect(screen.getByTestId("tool-call-card")).toBeInTheDocument();
+  });
+
+  it("renders fmtDuration for an agent step's duration and its nested tool's duration, each with the tl_duration aria-label", () => {
+    render(<StepTimeline items={[agentStepWithDuration]} />);
+    fireEvent.click(screen.getByTestId("step-head"));
+    const durations = screen.getAllByLabelText("step duration");
+    expect(durations).toHaveLength(2);
+    expect(screen.getByText("1.2s")).toBeInTheDocument();
+    expect(screen.getByText("840ms")).toBeInTheDocument();
+  });
+
+  it("hides the duration element for a step (and its nested tool) with durationMs: null", () => {
+    render(<StepTimeline items={[agentStep]} />);
+    fireEvent.click(screen.getByTestId("step-head"));
+    expect(screen.getByTestId("tool-call-card")).toBeInTheDocument();
+    expect(screen.queryByLabelText("step duration")).not.toBeInTheDocument();
+  });
+
+  it("renders fmtDuration for an aux node row's duration at the end of its summary line", () => {
+    const memRowWithDuration: AuxNodeItem = { ...memRow, seq: 11, durationMs: 3200 };
+    render(<StepTimeline items={[memRowWithDuration]} />);
+    expect(screen.getByLabelText("step duration")).toBeInTheDocument();
+    expect(screen.getByText("3.2s")).toBeInTheDocument();
   });
 });
