@@ -747,6 +747,11 @@ export interface TranslationKeys {
     tl_importance: string;
     tl_confidence: string;
     tl_goal: string;
+    tl_filter_all: string;
+    tl_filter_tool: string;
+    tl_filter_error: string;
+    tl_filter_retry: string;
+    tl_search_placeholder: string;
   };
   session_history: {
     title: string;
@@ -3135,6 +3140,11 @@ const en: TranslationKeys = {
     tl_importance: "importance {{v}}",
     tl_confidence: "confidence {{v}}",
     tl_goal: "Goal: {{text}}",
+    tl_filter_all: "All",
+    tl_filter_tool: "Tool",
+    tl_filter_error: "Error",
+    tl_filter_retry: "retry",
+    tl_search_placeholder: "Search tool name / error / finish_reason / node…",
   },
   session_history: {
     title: "Session history",

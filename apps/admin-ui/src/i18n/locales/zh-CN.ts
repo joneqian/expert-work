@@ -798,6 +798,11 @@ const zhCN: TranslationKeys = {
     tl_importance: "重要性 {{v}}",
     tl_confidence: "置信 {{v}}",
     tl_goal: "目标:{{text}}",
+    tl_filter_all: "全部",
+    tl_filter_tool: "工具",
+    tl_filter_error: "错误",
+    tl_filter_retry: "retry",
+    tl_search_placeholder: "搜 工具名 / error / finish_reason / node…",
   },
   session_history: {
     title: "会话历史",
