@@ -768,7 +768,8 @@ const zhCN: TranslationKeys = {
     approval_reject: "拒绝",
     approval_modify_hint: "改参数请到运行详情页。",
     history_button: "会话历史",
-    tool_count: "{{count}} 个工具",
+    tool_count_one: "{{count}} 个工具",
+    tool_count_other: "{{count}} 个工具",
     tool_failed_count: "{{count}} 个失败",
   },
   session_history: {

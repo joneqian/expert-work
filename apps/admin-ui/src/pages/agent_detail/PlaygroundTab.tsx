@@ -1890,7 +1890,12 @@ function TurnCard({
                   {t("playground.events_label")}
                   {toolStats.total > 0 && (
                     <Tag bordered={false} style={{ margin: 0 }} data-testid="playground-tool-count">
-                      {t("playground.tool_count", { count: toolStats.total })}
+                      {t(
+                        toolStats.total === 1
+                          ? "playground.tool_count_one"
+                          : "playground.tool_count_other",
+                        { count: toolStats.total },
+                      )}
                     </Tag>
                   )}
                   {toolStats.failed > 0 && (
