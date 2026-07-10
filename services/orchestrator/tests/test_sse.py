@@ -27,6 +27,7 @@ from expert_work.protocol import AuditAction, AuditEntry, AuditResult
 from expert_work.runtime.runs import DisconnectMode, RunManager, RunRecord, RunStatus
 from expert_work.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
 from orchestrator.sse import (
+    _to_jsonable,
     format_sse,
     run_agent,
     sse_consumer,
@@ -1109,3 +1110,39 @@ async def test_run_agent_emits_session_root_span() -> None:
     assert roots[0].attributes["run_id"] == str(record.run_id)
     assert roots[0].attributes["thread_id"] == str(record.thread_id)
     exporter.clear()
+
+
+def test_to_jsonable_serializes_pydantic_basemodel() -> None:
+    from pydantic import BaseModel
+
+    class _Step(BaseModel):
+        id: str
+        status: str
+
+    class _Plan(BaseModel):
+        goal: str
+        steps: tuple[_Step, ...]
+
+    plan = _Plan(goal="ship it", steps=(_Step(id="1", status="pending"),))
+    out = _to_jsonable({"planner": {"plan": plan}})
+    assert out == {
+        "planner": {"plan": {"goal": "ship it", "steps": [{"id": "1", "status": "pending"}]}}
+    }
+
+
+def test_to_jsonable_serializes_dataclass() -> None:
+    @dataclass(frozen=True)
+    class _Err:
+        tool_name: str
+        error_class: str
+        retryable: bool
+
+    err = _Err(tool_name="exec_python", error_class="transient", retryable=True)
+    out = _to_jsonable({"tools": {"tool_failures": [err]}})
+    assert out == {
+        "tools": {
+            "tool_failures": [
+                {"tool_name": "exec_python", "error_class": "transient", "retryable": True}
+            ]
+        }
+    }

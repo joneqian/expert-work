@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import time
@@ -44,6 +45,7 @@ from uuid import UUID, uuid4
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel
 
 from expert_work.common.context import reset_current_run_id, set_current_run_id
 from expert_work.common.observability import (
@@ -1081,6 +1083,8 @@ def _to_jsonable(value: Any) -> Any:
 
     - :class:`BaseMessage` → ``msg.model_dump()`` (LangChain's canonical
       dict form: type / content / id / tool_calls / ...).
+    - :class:`pydantic.BaseModel` → ``model_dump(mode="json")``.
+    - dataclass instance → ``dataclasses.asdict`` (recursed).
     - :class:`UUID` → ``str``; :class:`datetime` → ISO-8601 string.
     - ``Mapping`` / ``Sequence`` → recurse element-wise.
     - Anything else with no obvious encoding → ``str(value)`` fallback
@@ -1094,6 +1098,14 @@ def _to_jsonable(value: Any) -> Any:
         return str(value)
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, BaseModel):
+        # pydantic v2 → canonical JSON-mode dict (UUID/datetime already
+        # stringified); recurse for any residual non-JSON leaf.
+        return _to_jsonable(value.model_dump(mode="json"))
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        # frozen dataclasses (e.g. ClassifiedToolError) → dict; recurse so
+        # nested UUID/datetime leaves get stringified.
+        return _to_jsonable(dataclasses.asdict(value))
     if isinstance(value, Mapping):
         return {str(k): _to_jsonable(v) for k, v in value.items()}
     if isinstance(value, Sequence | set | frozenset):
