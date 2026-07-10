@@ -3,16 +3,19 @@ import type { TimelineItem } from "./timeline";
 export type TimelineFilter = "all" | "tool" | "error" | "retry";
 
 function haystack(it: TimelineItem): string {
-  if (it.kind === "agent") {
-    return [it.node, it.model ?? "", it.finishReason ?? "", it.reasoning ?? "", it.content ?? "",
-      ...it.tools.map((t) => `${t.toolName} ${t.status}`)].join(" ").toLowerCase();
+  switch (it.kind) {
+    case "agent":
+      return [it.node, it.model ?? "", it.finishReason ?? "", it.reasoning ?? "", it.content ?? "",
+        ...it.tools.map((t) => `${t.toolName} ${t.status}`)].join(" ").toLowerCase();
+    case "compaction":
+    case "retry":
+    case "error":
+    case "approval":
+    case "end":
+      return it.text.toLowerCase();
+    default:
+      return `${it.kind} ${it.summary}`.toLowerCase();
   }
-  if (it.kind === "compaction" || it.kind === "retry" || it.kind === "error" ||
-      it.kind === "approval" || it.kind === "end") {
-    return it.text.toLowerCase();
-  }
-  const aux = it as Extract<TimelineItem, { kind: "memory_recall" | "planner" | "reflect" | "memory_writeback" | "workspace_ingest" }>;
-  return `${aux.kind} ${aux.summary}`.toLowerCase();
 }
 
 function matchesType(it: TimelineItem, type: TimelineFilter): boolean {
