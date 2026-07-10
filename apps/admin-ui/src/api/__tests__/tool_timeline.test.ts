@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { artifactsFromTools, parseCompactionEvents, parseToolCalls } from "../tool_timeline";
+import {
+  artifactsFromTools,
+  parseCompactionEvents,
+  parseExecResult,
+  parseToolCalls,
+} from "../tool_timeline";
 import type { SseEvent } from "../sessions";
 
 function evt(event: string, data: unknown): SseEvent {
@@ -187,5 +192,56 @@ describe("parseCompactionEvents", () => {
     expect(summaries).toEqual([
       { receivedAt: "ok", passes: 1, tokensBefore: 100, tokensAfter: 40, summaryChars: 10 },
     ]);
+  });
+});
+
+describe("parseExecResult", () => {
+  it("splits stdout / stderr / exit_code from the rendered sandbox string", () => {
+    const preview = "stdout:\nhello\nworld\n\nstderr:\noops\n\nexit_code: 0";
+    expect(parseExecResult(preview)).toEqual({
+      stdout: "hello\nworld",
+      stderr: "oops",
+      exitCode: 0,
+    });
+  });
+
+  it("handles stdout-only output and a non-zero exit code", () => {
+    expect(parseExecResult("stdout:\n42\n\nexit_code: 1")).toEqual({
+      stdout: "42",
+      stderr: "",
+      exitCode: 1,
+    });
+  });
+
+  it("handles the (no output) case", () => {
+    expect(parseExecResult("(no output)\n\nexit_code: 0")).toEqual({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+    });
+  });
+
+  it("returns null exitCode when the marker is absent", () => {
+    expect(parseExecResult("stdout:\nx").exitCode).toBeNull();
+  });
+});
+
+describe("parseToolCalls exec attribution", () => {
+  it("attaches execResult for a builtin exec_python call", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "exec_python", { code: "print(1)" })]),
+      updates("tools", [toolResult("c1", "stdout:\n1\n\nexit_code: 0")]),
+    ];
+    const [entry] = parseToolCalls(events);
+    expect(entry.execResult).toEqual({ stdout: "1", stderr: "", exitCode: 0 });
+  });
+
+  it("does not attach execResult for a non-sandbox tool", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "web_search", { q: "x" })]),
+      updates("tools", [toolResult("c1", "some result")]),
+    ];
+    const [entry] = parseToolCalls(events);
+    expect(entry.execResult).toBeUndefined();
   });
 });
