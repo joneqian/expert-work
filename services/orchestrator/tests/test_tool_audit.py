@@ -185,11 +185,13 @@ async def test_middleware_block_emits_tool_blocked_denied() -> None:
     assert entry.action.value == "tool:blocked"
     assert entry.result.value == "denied"
     assert entry.reason == "PermissionError"
+    assert isinstance(msg.additional_kwargs.get("duration_ms"), int)
+    assert msg.additional_kwargs["duration_ms"] >= 0
 
 
 async def test_unknown_tool_emits_tool_call_error() -> None:
     audit = _RecordingAuditLogger()
-    await _dispatch_tool(
+    msg, _, _, _ = await _dispatch_tool(
         _call("ghost", {}),
         _registry(),  # empty
         _ctx(),
@@ -201,6 +203,8 @@ async def test_unknown_tool_emits_tool_call_error() -> None:
     assert entry.action.value == "tool:call"
     assert entry.result.value == "error"
     assert entry.reason == "unknown_tool"
+    assert isinstance(msg.additional_kwargs.get("duration_ms"), int)
+    assert msg.additional_kwargs["duration_ms"] >= 0
 
 
 # --- privacy: no raw arg values, only keys + declared paths -----------------
