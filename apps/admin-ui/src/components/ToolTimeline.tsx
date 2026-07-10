@@ -75,7 +75,30 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
       ),
     });
   }
-  if (entry.resultPreview) {
+  if (entry.execResult) {
+    const { stdout, stderr, exitCode } = entry.execResult;
+    items.push({
+      key: "result",
+      label: t("tool_timeline.result_label"),
+      children: (
+        <div data-testid="tool-exec-result" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div>
+            <Tag
+              color={exitCode === 0 ? "success" : "error"}
+              bordered={false}
+              data-testid="tool-exit-code"
+            >
+              {t("tool_timeline.exit_code")}: {exitCode ?? "?"}
+            </Tag>
+          </div>
+          {stdout && <ExecStream label={t("tool_timeline.stdout_label")} text={stdout} />}
+          {stderr && (
+            <ExecStream label={t("tool_timeline.stderr_label")} text={stderr} tone="error" />
+          )}
+        </div>
+      ),
+    });
+  } else if (entry.resultPreview) {
     items.push({
       key: "result",
       label: t("tool_timeline.result_label"),
@@ -134,6 +157,30 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
           data-testid="tool-call-detail"
         />
       )}
+    </div>
+  );
+}
+
+function ExecStream({ label, text, tone }: { label: string; text: string; tone?: "error" }) {
+  return (
+    <div>
+      <Text type="secondary" style={{ fontSize: 11 }}>
+        {label}
+      </Text>
+      <pre
+        style={{
+          margin: "2px 0 0",
+          fontSize: 11,
+          fontFamily: "var(--ew-font-mono)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          maxHeight: 200,
+          overflow: "auto",
+          color: tone === "error" ? "var(--ew-text-danger, #cf1322)" : undefined,
+        }}
+      >
+        {text}
+      </pre>
     </div>
   );
 }

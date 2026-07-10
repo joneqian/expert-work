@@ -30,11 +30,46 @@ export interface ToolCallEntry {
   status: ToolCallStatus;
   /** Result text with the spotlight ``«UNTRUSTED…»`` fence stripped (``null`` until the result arrives). */
   resultPreview: string | null;
+  /** Structured sandbox result (exec_python / bash only) parsed from ``resultPreview``. */
+  execResult?: ExecResult;
 }
 
 const MCP_PREFIX = "mcp:";
 // Spotlight injection-defense fence lines wrapping untrusted tool output.
 const SPOTLIGHT_FENCE = /«\/?UNTRUSTED[^»]*»/g;
+
+/** Structured stdout / stderr / exit code of a sandbox tool (exec_python, bash). */
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+/** Builtin tools whose result follows ``format_sandbox_outcome``'s rendering. */
+const SANDBOX_TOOLS = new Set(["exec_python", "bash"]);
+
+/**
+ * Parse the rendered sandbox result string into structured fields. Format
+ * (``format_sandbox_outcome``): sections joined by ``\n\n`` —
+ * ``stdout:\n<out>``, ``stderr:\n<err>`` (each optional; ``(no output)`` when
+ * both empty), an optional ``[execution timed out …]`` line, then a trailing
+ * ``exit_code: <n>``. ``exit_code`` is always last. Best-effort: a null
+ * ``exitCode`` signals an unrecognised shape.
+ */
+export function parseExecResult(preview: string): ExecResult {
+  const exitMatch = preview.match(/\nexit_code:\s*(-?\d+)\s*$/);
+  const exitCode = exitMatch ? Number(exitMatch[1]) : null;
+  const body = exitMatch ? preview.slice(0, exitMatch.index).trimEnd() : preview;
+  const section = (label: string): string => {
+    const marker = `${label}:\n`;
+    const start = body.indexOf(marker);
+    if (start === -1) return "";
+    const rest = body.slice(start + marker.length);
+    const next = rest.search(/\n\n(?:stdout:\n|stderr:\n|\[execution timed out)/);
+    return (next === -1 ? rest : rest.slice(0, next)).trim();
+  };
+  return { stdout: section("stdout"), stderr: section("stderr"), exitCode };
+}
 
 interface ParsedName {
   isMcp: boolean;
@@ -208,6 +243,11 @@ export function parseToolCalls(
   }
 
   const entries = order.map((id) => byId.get(id) as ToolCallEntry);
+  for (const entry of entries) {
+    if (!entry.isMcp && SANDBOX_TOOLS.has(entry.toolName) && entry.resultPreview) {
+      entry.execResult = parseExecResult(entry.resultPreview);
+    }
+  }
   if (awaitingApproval) {
     for (const entry of entries) {
       if (entry.status === "pending") entry.status = "pending_approval";
@@ -236,4 +276,14 @@ export function artifactsFromTools(events: readonly SseEvent[]): TurnArtifact[] 
     byName.set(name, { name, kind });
   }
   return [...byName.values()];
+}
+
+/** Aggregate a turn's tool activity for an at-a-glance header: how many calls,
+ *  how many failed. ``pending`` / ``pending_approval`` are not failures. */
+export function toolStatusSummary(
+  events: readonly SseEvent[],
+): { total: number; failed: number } {
+  const entries = parseToolCalls(events);
+  const failed = entries.filter((e) => e.status === "error").length;
+  return { total: entries.length, failed };
 }

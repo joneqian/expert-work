@@ -17,7 +17,6 @@
  * backend ad-hoc manifest override that doesn't exist yet).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   Alert,
   AutoComplete,
@@ -36,7 +35,6 @@ import {
   AlertTriangle,
   Check,
   Download,
-  ExternalLink,
   FileText,
   HardDrive,
   History,
@@ -81,7 +79,7 @@ import {
   type ThreadMeta,
   type WorkspaceFile,
 } from "../../api/sessions";
-import { artifactsFromTools } from "../../api/tool_timeline";
+import { artifactsFromTools, toolStatusSummary } from "../../api/tool_timeline";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import { CopyButton } from "../../components/CopyButton";
@@ -89,6 +87,7 @@ import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
+import { TurnMeta } from "./playground/TurnMeta";
 import {
   readModel,
   readPromptJinja,
@@ -123,6 +122,8 @@ const { TextArea } = Input;
  *  ``RunRequest.input`` ``max_length`` (``MAX_RUN_INPUT_CHARS``). A long
  *  pasted email/spec fits; a whole book rides the document-upload path. */
 const MAX_INPUT_CHARS = 65536;
+
+const EVENT_VIEW_STORAGE_KEY = "expert_work.playground.eventView";
 
 interface PlaygroundTabProps {
   detail: AgentDetailResponse;
@@ -171,7 +172,18 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [creatingThread, setCreatingThread] = useState(false);
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [eventView, setEventView] = useState<"timeline" | "raw">("timeline");
+  const [eventView, setEventViewState] = useState<"timeline" | "raw">(() => {
+    if (typeof window === "undefined") return "timeline";
+    return window.localStorage.getItem(EVENT_VIEW_STORAGE_KEY) === "raw"
+      ? "raw"
+      : "timeline";
+  });
+  const setEventView = useCallback((next: "timeline" | "raw") => {
+    setEventViewState(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(EVENT_VIEW_STORAGE_KEY, next);
+    }
+  }, []);
   const [running, setRunning] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -1675,6 +1687,7 @@ function TurnCard({
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
+  const toolStats = toolStatusSummary(turn.events);
   // A+B — artifacts the agent registered this turn (``save_artifact``). The
   // agent can't emit a download link itself (the endpoint is thread-scoped +
   // auth'd), so surface them as an inline download row — deer-flow's pattern.
@@ -1817,87 +1830,12 @@ function TurnCard({
           />
         )}
 
-        {/* Per-turn usage chips */}
-        {summary.usage && (
-          <div
-            style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}
-            data-testid="playground-usage"
-          >
-            <Tag bordered={false} color="geekblue">
-              {t("playground.usage_in")}: {summary.usage.inputTokens}
-            </Tag>
-            <Tag bordered={false} color="geekblue">
-              {t("playground.usage_out")}: {summary.usage.outputTokens}
-            </Tag>
-            <Tag bordered={false}>
-              {t("playground.usage_total")}: {summary.usage.totalTokens}
-            </Tag>
-            {summary.usage.cacheReadTokens > 0 && (
-              <Tag bordered={false} color="green">
-                {t("playground.usage_cache")}: {summary.usage.cacheReadTokens}
-              </Tag>
-            )}
-            {summary.usage.reasoningTokens > 0 && (
-              <Tag bordered={false} color="purple">
-                {t("playground.usage_reasoning")}:{" "}
-                {summary.usage.reasoningTokens}
-              </Tag>
-            )}
-          </div>
-        )}
-
-        {/* #4 step / latency / cost + #8 run-detail link. */}
-        {(summary.stepCount !== null ||
-          summary.latencyMs !== null ||
-          costCny !== null ||
-          (runId && threadId)) && (
-          <div
-            style={{
-              marginTop: 6,
-              display: "flex",
-              gap: 6,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-            data-testid="playground-turn-meta"
-          >
-            {summary.stepCount !== null && (
-              <Tag bordered={false}>
-                {t("playground.meta_steps")}: {summary.stepCount}
-              </Tag>
-            )}
-            {summary.latencyMs !== null && (
-              <Tag bordered={false}>
-                {t("playground.meta_latency")}:{" "}
-                {(summary.latencyMs / 1000).toFixed(1)}s
-              </Tag>
-            )}
-            {costCny !== null && (
-              <Tag
-                bordered={false}
-                color="gold"
-                data-testid="playground-turn-cost"
-              >
-                ≈ ¥{costCny.toFixed(4)}
-              </Tag>
-            )}
-            {runId && threadId && (
-              <Link
-                to={`/runs/${threadId}/${runId}`}
-                style={{
-                  fontSize: 12,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 3,
-                }}
-                data-testid="playground-turn-run-link"
-              >
-                {t("playground.view_run")}
-                <ExternalLink size={11} strokeWidth={1.75} />
-              </Link>
-            )}
-          </div>
-        )}
+        <TurnMeta
+          summary={summary}
+          costCny={costCny}
+          runId={runId}
+          threadId={threadId}
+        />
 
         {/* SE-16 (SE-A46) — per-turn 👍/👎 quality signal feeding the
             skill-evolution curation pipeline. Settled turns only. */}
@@ -1948,7 +1886,24 @@ function TurnCard({
                   gap: 8,
                 }}
               >
-                <span>{t("playground.events_label")}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  {t("playground.events_label")}
+                  {toolStats.total > 0 && (
+                    <Tag bordered={false} style={{ margin: 0 }} data-testid="playground-tool-count">
+                      {t(
+                        toolStats.total === 1
+                          ? "playground.tool_count_one"
+                          : "playground.tool_count_other",
+                        { count: toolStats.total },
+                      )}
+                    </Tag>
+                  )}
+                  {toolStats.failed > 0 && (
+                    <Tag color="error" bordered={false} style={{ margin: 0 }} data-testid="playground-tool-failed">
+                      {t("playground.tool_failed_count", { count: toolStats.failed })}
+                    </Tag>
+                  )}
+                </span>
                 {/* Toggle lives next to the content it switches; stop the click
                     from collapsing the panel. */}
                 <span
