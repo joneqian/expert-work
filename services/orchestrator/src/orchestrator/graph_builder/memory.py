@@ -208,16 +208,23 @@ def _redact_memory(item: MemoryItem) -> MemoryItem:
     / ``exfil`` / etc) so the agent has minimal signal to potentially
     re-ask the user; the ``pattern_id`` itself stays in the audit row
     (oracle defense — see ``docs/runbooks/threat-scanner-tuning.md`` § 4).
+
+    Also blanks ``embedding`` on every returned item (poisoned or not) —
+    ``recalled_memories`` only feeds prompt injection / the workspace
+    projection, neither of which reads the vector, so shipping it over
+    SSE and persisting it to ``run_event`` is pure waste.
     """
     if item.drift:
         record_memory_drift()
         record_memory_redacted()
-        return item.model_copy(update={"content": "[BLOCKED:drift_tampered]"})
+        return item.model_copy(update={"content": "[BLOCKED:drift_tampered]", "embedding": ()})
     findings = scan_for_threats(item.content, scope="strict")
     if findings:
         record_memory_redacted()
-        return item.model_copy(update={"content": f"[BLOCKED:{findings[0].category}]"})
-    return item
+        return item.model_copy(
+            update={"content": f"[BLOCKED:{findings[0].category}]", "embedding": ()}
+        )
+    return item.model_copy(update={"embedding": ()})
 
 
 async def _resolve_memory_recall_mode(

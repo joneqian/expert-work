@@ -323,6 +323,7 @@ async def test_recall_redacts_content_matching_strict_pattern() -> None:
     assert items[0].content.endswith("]")
     assert "ignore previous instructions" not in items[0].content
     assert "prompt_injection" not in items[0].content
+    assert items[0].embedding == ()
 
 
 @pytest.mark.asyncio
@@ -356,6 +357,7 @@ async def test_recall_redacts_drift_items_regardless_of_content() -> None:
     assert len(items) == 1
     assert items[0].content.startswith("[BLOCKED:")
     assert "drift" in items[0].content.lower() or "tampered" in items[0].content.lower()
+    assert items[0].embedding == ()
 
 
 @pytest.mark.asyncio
@@ -409,6 +411,13 @@ async def test_recall_passes_clean_content_unchanged() -> None:
     assert len(items) == 1
     assert items[0].content == "user prefers metric units"
     assert items[0].drift is False
+    # Regression: the SSE `_to_jsonable` switch to `model_dump(mode="json")`
+    # stopped honoring MemoryItem.embedding's `repr=False` — _redact_memory
+    # now blanks it explicitly so the recall channel never ships the raw
+    # vector, while id/kind/content survive untouched.
+    assert items[0].embedding == ()
+    assert items[0].kind == "fact"
+    assert items[0].id is not None
 
 
 # ---------------------------------------------------------------------------
