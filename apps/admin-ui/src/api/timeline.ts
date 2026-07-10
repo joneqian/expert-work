@@ -23,6 +23,7 @@ export interface AgentStep {
   totalTokens: number;
   tools: ToolCallEntry[];
   hasError: boolean;
+  durationMs: number | null;
 }
 export interface AuxNodeItem {
   kind: "memory_recall" | "planner" | "reflect" | "memory_writeback" | "workspace_ingest";
@@ -32,6 +33,7 @@ export interface AuxNodeItem {
   summary: string;
   detail: Record<string, unknown>;
   tone: "normal" | "warn";
+  durationMs: number | null;
 }
 export interface MarkerItem {
   kind: "compaction" | "retry" | "error" | "approval" | "end";
@@ -55,6 +57,10 @@ function int(v: unknown): number {
 function textOf(v: unknown): string | null {
   if (typeof v === "string") return v.trim() === "" ? null : v;
   return null;
+}
+function durationOf(ch: Record<string, unknown>): number | null {
+  const v = ch._duration_ms;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
@@ -126,6 +132,7 @@ export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
           totalTokens: int(um.total_tokens),
           tools,
           hasError: tools.some((t) => t.status === "error"),
+          durationMs: durationOf(ch),
         });
       }
 
@@ -133,13 +140,14 @@ export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
       if (Array.isArray(ch.recalled_memories) && ch.recalled_memories.length > 0) {
         push({ kind: "memory_recall", receivedAt: at, node, tone: "normal",
           summary: `记忆召回 · ${ch.recalled_memories.length} 条`,
-          detail: { memories: ch.recalled_memories } });
+          detail: { memories: ch.recalled_memories }, durationMs: durationOf(ch) });
       }
       if (ch.plan !== undefined && ch.plan !== null) {
         const p = obj(ch.plan);
         const steps = Array.isArray(p.steps) ? p.steps : [];
         push({ kind: "planner", receivedAt: at, node, tone: "normal",
-          summary: `制定计划 · 目标 + ${steps.length} 步`, detail: { plan: p } });
+          summary: `制定计划 · 目标 + ${steps.length} 步`, detail: { plan: p },
+          durationMs: durationOf(ch) });
       }
       if (Array.isArray(ch.reflections) && ch.reflections.length > 0) {
         for (const r of ch.reflections) {
@@ -148,13 +156,13 @@ export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
           push({ kind: "reflect", receivedAt: at, node,
             tone: verdict === "revise" ? "warn" : "normal",
             summary: `反思 · ${verdict === "revise" ? "修订" : "通过"}`,
-            detail: { verdict, critique: str(rr.critique) } });
+            detail: { verdict, critique: str(rr.critique) }, durationMs: durationOf(ch) });
         }
       }
       if (Array.isArray(ch.written_memories) && ch.written_memories.length > 0) {
         push({ kind: "memory_writeback", receivedAt: at, node, tone: "normal",
           summary: `记忆写回 · ${ch.written_memories.length} 条`,
-          detail: { memories: ch.written_memories } });
+          detail: { memories: ch.written_memories }, durationMs: durationOf(ch) });
       }
     }
   }

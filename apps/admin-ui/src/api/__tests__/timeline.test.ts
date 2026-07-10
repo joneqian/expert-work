@@ -73,4 +73,25 @@ describe("parseTimeline", () => {
     const seqs = parseTimeline(events).map((i) => i.seq);
     expect(seqs).toEqual([0, 1, 2]);
   });
+
+  it("reads node _duration_ms into agent step and aux node (null when absent)", () => {
+    const events = [
+      upd("agent", {
+        step_count: 1,
+        _duration_ms: 1200,
+        messages: [{ type: "ai", content: "hi" }],
+      }, "t1"),
+      upd("memory_recall", {
+        _duration_ms: 300,
+        recalled_memories: [{ id: "m1", kind: "fact", content: "x", importance: 0.5, confidence: 0.5 }],
+      }, "t2"),
+      upd("agent", { step_count: 2, messages: [{ type: "ai", content: "no-dur" }] }, "t3"),
+    ];
+    const items = parseTimeline(events);
+    const steps = items.filter((i) => i.kind === "agent");
+    const mem = items.find((i) => i.kind === "memory_recall");
+    expect(steps[0].kind === "agent" && steps[0].durationMs).toBe(1200);
+    expect(steps[1].kind === "agent" && steps[1].durationMs).toBe(null);
+    expect(mem && mem.kind === "memory_recall" && mem.durationMs).toBe(300);
+  });
 });

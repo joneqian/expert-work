@@ -15,6 +15,7 @@ const tool: ToolCallEntry = {
   args: { code: "print(1)" },
   status: "success",
   resultPreview: "1",
+  durationMs: null,
 };
 
 const agentStep: AgentStep = {
@@ -32,6 +33,7 @@ const agentStep: AgentStep = {
   totalTokens: 110,
   tools: [tool],
   hasError: false,
+  durationMs: null,
 };
 
 const memRow: AuxNodeItem = {
@@ -44,6 +46,7 @@ const memRow: AuxNodeItem = {
     memories: [{ id: "m1", kind: "fact", content: "住嘉兴", importance: 0.7, confidence: 0.9 }],
   },
   tone: "normal",
+  durationMs: null,
 };
 
 const retryMarker: MarkerItem = {
