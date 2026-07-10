@@ -82,7 +82,7 @@ import {
 import { artifactsFromTools, toolStatusSummary } from "../../api/tool_timeline";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
-import { CopyButton } from "../../components/CopyButton";
+import { EventCard } from "../../components/EventCard";
 import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import { ToolTimeline } from "../../components/ToolTimeline";
@@ -128,14 +128,6 @@ const EVENT_VIEW_STORAGE_KEY = "expert_work.playground.eventView";
 interface PlaygroundTabProps {
   detail: AgentDetailResponse;
 }
-
-const EVENT_COLOR: Record<string, string> = {
-  metadata: "blue",
-  updates: "geekblue",
-  approval: "gold",
-  error: "red",
-  end: "green",
-};
 
 interface UserOption {
   value: string;
@@ -1964,57 +1956,6 @@ function TurnCard({
           },
         ]}
       />
-    </div>
-  );
-}
-
-function EventCard({ evt }: { evt: SseEvent }) {
-  const tagColor = EVENT_COLOR[evt.event] ?? "default";
-  const display =
-    typeof evt.data === "string" ? evt.data : JSON.stringify(evt.data, null, 2);
-  return (
-    <div
-      style={{
-        border: "1px solid var(--ew-border-subtle)",
-        borderRadius: 4,
-        padding: 8,
-        background: "var(--ew-surface-raised)",
-      }}
-      data-testid={`playground-event-${evt.event}`}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 4,
-          fontSize: 11,
-        }}
-      >
-        <Tag color={tagColor} bordered={false} style={{ margin: 0 }}>
-          {evt.event}
-        </Tag>
-        <Text type="secondary" style={{ fontSize: 11 }} className="mono">
-          {new Date(evt.receivedAt).toLocaleTimeString()}
-        </Text>
-        <span style={{ marginLeft: "auto" }}>
-          <CopyButton text={display} testId="playground-event-copy" />
-        </span>
-      </div>
-      <pre
-        style={{
-          margin: 0,
-          fontSize: 11,
-          fontFamily: "var(--ew-font-mono)",
-          color: "var(--ew-text-secondary)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
-          maxHeight: 280,
-          overflow: "auto",
-        }}
-      >
-        {display}
-      </pre>
     </div>
   );
 }

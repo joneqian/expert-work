@@ -198,9 +198,9 @@ describe("PlaygroundTab", () => {
     // The per-turn events view defaults to the tool-call timeline; switch this
     // turn to raw events to assert the individual frames.
     await user.click(await screen.findByText(i18n.t("event_stream.view_raw")));
-    await screen.findByTestId("playground-event-metadata");
-    await screen.findByTestId("playground-event-updates");
-    await screen.findByTestId("playground-event-end");
+    await screen.findByTestId("event-card-metadata");
+    await screen.findByTestId("event-card-updates");
+    await screen.findByTestId("event-card-end");
     expect(screen.queryByTestId("playground-stop")).not.toBeInTheDocument();
   });
 
