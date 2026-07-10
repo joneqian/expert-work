@@ -183,7 +183,7 @@ async def test_run_agent_stamps_node_duration_ms_on_updates() -> None:
             assert isinstance(node_val["_duration_ms"], int)
             assert node_val["_duration_ms"] >= 0
     # metadata frame must NOT carry a node-level _duration_ms key.
-    meta = [e for e in events if e.event == "metadata"][0]
+    meta = next(e for e in events if e.event == "metadata")
     assert "_duration_ms" not in meta.data
 
 
