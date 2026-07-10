@@ -154,6 +154,40 @@ async def test_run_agent_publishes_metadata_then_chunks_then_end() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_agent_stamps_node_duration_ms_on_updates() -> None:
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    graph = _ScriptedGraph(
+        chunks=[
+            {"agent": {"step_count": 1}},
+            {"tools": {"step_count": 1}},
+        ]
+    )
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={"messages": []},
+        config={},
+    )
+    events = await _drain(bridge, record.run_id)
+    updates = [e for e in events if e.event == "updates"]
+    assert updates, "expected updates frames"
+    for e in updates:
+        assert isinstance(e.data, dict)
+        for node_val in e.data.values():
+            assert isinstance(node_val, dict)
+            assert "_duration_ms" in node_val
+            assert isinstance(node_val["_duration_ms"], int)
+            assert node_val["_duration_ms"] >= 0
+    # metadata frame must NOT carry a node-level _duration_ms key.
+    meta = [e for e in events if e.event == "metadata"][0]
+    assert "_duration_ms" not in meta.data
+
+
+@pytest.mark.asyncio
 async def test_run_agent_serializes_base_messages() -> None:
     """LangGraph chunks carry ``BaseMessage`` objects — they must land
     in the bridge as JSON-safe dicts, not raw objects."""
