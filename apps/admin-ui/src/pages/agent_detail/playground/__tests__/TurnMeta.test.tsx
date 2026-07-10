@@ -22,6 +22,7 @@ function summary(over: Partial<TurnSummary> = {}): TurnSummary {
     latencyMs: 1500,
     finishReason: "stop",
     modelName: "glm-5.2",
+    perStepUsage: [],
     ...over,
   };
 }
