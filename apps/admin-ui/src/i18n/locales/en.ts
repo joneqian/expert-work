@@ -731,6 +731,22 @@ export interface TranslationKeys {
     signal_escalate: string;
     retry_attempt: string;
     state_section: string;
+    tl_step: string;
+    tl_finish: string;
+    tl_tool_failed: string;
+    tl_final_answer: string;
+    tl_reasoning: string;
+    tl_expand: string;
+    tl_critique: string;
+    tl_legend_agent: string;
+    tl_legend_mem: string;
+    tl_legend_plan: string;
+    tl_legend_reflect: string;
+    tl_legend_marker: string;
+    tl_legend_approval: string;
+    tl_importance: string;
+    tl_confidence: string;
+    tl_goal: string;
   };
   session_history: {
     title: string;
@@ -3103,6 +3119,22 @@ const en: TranslationKeys = {
     signal_escalate: "Escalate next",
     retry_attempt: "attempt {{n}} · {{cls}} · backoff {{s}}s",
     state_section: "Run state",
+    tl_step: "Step {{n}}",
+    tl_finish: "finish: {{reason}}",
+    tl_tool_failed: "Tool failed → retry",
+    tl_final_answer: "Final answer",
+    tl_reasoning: "Reasoning (this LLM call)",
+    tl_expand: "Expand",
+    tl_critique: "critique",
+    tl_legend_agent: "agent (LLM step: reasoning + tool / answer)",
+    tl_legend_mem: "memory_recall / writeback",
+    tl_legend_plan: "planner",
+    tl_legend_reflect: "reflect (accept/revise)",
+    tl_legend_marker: "compaction / retry / error",
+    tl_legend_approval: "approval (paused for review)",
+    tl_importance: "importance {{v}}",
+    tl_confidence: "confidence {{v}}",
+    tl_goal: "Goal: {{text}}",
   },
   session_history: {
     title: "Session history",

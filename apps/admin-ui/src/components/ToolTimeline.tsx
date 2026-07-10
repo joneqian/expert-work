@@ -58,7 +58,7 @@ export function ToolTimeline({ events, awaitingApproval = false }: ToolTimelineP
   );
 }
 
-function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
+export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
   const { t } = useTranslation();
   const statusLabel = t(`tool_timeline.status_${entry.status}`);
   const hasArgs = Object.keys(entry.args).length > 0;
