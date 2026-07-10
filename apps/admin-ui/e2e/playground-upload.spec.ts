@@ -101,7 +101,7 @@ test("attach image, run, and send image_refs + pass axe", async ({ page }) => {
   // The event panel defaults to the tool-call timeline; this run has no tool
   // calls, so switch to the raw-events view to assert the individual frames.
   await page
-    .getByTestId("event-card-view-toggle")
+    .getByTestId("playground-event-view-toggle")
     .getByText(/原始|raw/i)
     .click();
   await expect(page.getByTestId("event-card-end")).toBeVisible();
