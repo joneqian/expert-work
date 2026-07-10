@@ -1,0 +1,76 @@
+import { describe, expect, it } from "vitest";
+
+import type { SseEvent } from "../sessions";
+import { parseTimeline } from "../timeline";
+
+function ev(event: string, data: unknown, receivedAt: string): SseEvent {
+  return { id: null, event, data, rawData: "", receivedAt };
+}
+function upd(node: string, channels: Record<string, unknown>, at: string): SseEvent {
+  return ev("updates", { [node]: channels }, at);
+}
+
+describe("parseTimeline", () => {
+  it("builds an agent step with reasoning, finish/model, and its tool", () => {
+    const events = [
+      upd("agent", {
+        step_count: 1,
+        messages: [{
+          type: "ai", content: "",
+          additional_kwargs: { reasoning_content: "先查天气" },
+          response_metadata: { finish_reason: "tool_calls", model_name: "glm-5.2" },
+          usage_metadata: { input_tokens: 100, output_tokens: 10, total_tokens: 110 },
+          tool_calls: [{ id: "c1", name: "exec_python", args: { code: "print(1)" } }],
+        }],
+      }, "t1"),
+      upd("tools", {
+        messages: [{ type: "tool", tool_call_id: "c1", name: "exec_python", content: "stdout:\n1\n\nexit_code: 0", status: "success" }],
+      }, "t2"),
+    ];
+    const items = parseTimeline(events);
+    const step = items.find((i) => i.kind === "agent");
+    expect(step).toBeDefined();
+    if (step && step.kind === "agent") {
+      expect(step.reasoning).toBe("先查天气");
+      expect(step.finishReason).toBe("tool_calls");
+      expect(step.model).toBe("glm-5.2");
+      expect(step.totalTokens).toBe(110);
+      expect(step.tools).toHaveLength(1);
+      expect(step.tools[0].toolName).toBe("exec_python");
+      expect(step.tools[0].status).toBe("success");
+      expect(step.hasError).toBe(false);
+    }
+  });
+
+  it("emits aux node items for memory_recall and a revise reflect (warn tone)", () => {
+    const events = [
+      upd("memory_recall", { recalled_memories: [{ id: "m1", kind: "fact", content: "住嘉兴", importance: 0.7, confidence: 0.9 }] }, "t1"),
+      upd("reflect", { reflections: [{ verdict: "revise", critique: "漏了夜间" }] }, "t2"),
+    ];
+    const items = parseTimeline(events);
+    const mem = items.find((i) => i.kind === "memory_recall");
+    const ref = items.find((i) => i.kind === "reflect");
+    expect(mem).toBeDefined();
+    expect(ref && ref.kind === "reflect" && ref.tone).toBe("warn");
+  });
+
+  it("emits markers for compaction / retry / end in order", () => {
+    const events = [
+      ev("compaction", { passes: 2, tokens_before: 46000, tokens_after: 22000, summary_chars: 800 }, "t1"),
+      ev("retry", { attempt: 1, error_class: "TimeoutError", backoff_s: 2 }, "t2"),
+      ev("end", {}, "t3"),
+    ];
+    const kinds = parseTimeline(events).map((i) => i.kind);
+    expect(kinds).toEqual(["compaction", "retry", "end"]);
+  });
+
+  it("assigns increasing seq in arrival order across types", () => {
+    const events = [
+      upd("memory_recall", { recalled_memories: [{ id: "m1", kind: "fact", content: "x", importance: 0.5, confidence: 0.5 }] }, "t1"),
+      upd("agent", { step_count: 1, messages: [{ type: "ai", content: "hi" }] }, "t2"),
+      ev("end", {}, "t3"),
+    ];
+    const seqs = parseTimeline(events).map((i) => i.seq);
+    expect(seqs).toEqual([0, 1, 2]);
+  });
+});
