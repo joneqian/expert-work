@@ -1918,7 +1918,7 @@ function TurnCard({
                       },
                       { value: "raw", label: t("event_stream.view_raw") },
                     ]}
-                    data-testid="playground-event-view-toggle"
+                    data-testid="event-card-view-toggle"
                   />
                   <Button
                     size="small"

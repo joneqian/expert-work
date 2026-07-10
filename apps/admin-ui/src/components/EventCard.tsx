@@ -68,7 +68,7 @@ export function EventCard({ evt }: { evt: SseEvent }) {
           color: "var(--ew-text-secondary)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
-          maxHeight: 240,
+          maxHeight: 280,
           overflow: "auto",
         }}
       >
