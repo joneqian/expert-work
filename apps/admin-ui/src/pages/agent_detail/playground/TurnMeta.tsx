@@ -64,7 +64,7 @@ export function TurnMeta({
             </Tag>
           )}
           {usage.cacheCreationTokens > 0 && (
-            <Tag bordered={false} color="cyan">
+            <Tag bordered={false} color="cyan" data-testid="playground-turn-cache-write">
               {t("playground.usage_cache_write")}: {usage.cacheCreationTokens}
             </Tag>
           )}

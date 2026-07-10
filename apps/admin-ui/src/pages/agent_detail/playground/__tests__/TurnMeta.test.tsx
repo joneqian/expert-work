@@ -42,7 +42,7 @@ describe("TurnMeta", () => {
 
   it("hides finish_reason when it is the normal 'stop'", () => {
     renderMeta(summary({ finishReason: "stop" }));
-    expect(screen.queryByText(/length/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("playground-turn-finish")).not.toBeInTheDocument();
   });
 
   it("surfaces a non-stop finish_reason (e.g. length)", () => {
@@ -63,6 +63,17 @@ describe("TurnMeta", () => {
         },
       }),
     );
+    expect(screen.getByTestId("playground-turn-cache-write")).toBeInTheDocument();
     expect(screen.getByText(/7/)).toBeInTheDocument();
+  });
+
+  it("hides cache-write chip when cacheCreationTokens is 0", () => {
+    renderMeta(summary());
+    expect(screen.queryByTestId("playground-turn-cache-write")).not.toBeInTheDocument();
+  });
+
+  it("hides model chip when modelName is null", () => {
+    renderMeta(summary({ modelName: null }));
+    expect(screen.queryByTestId("playground-turn-model")).not.toBeInTheDocument();
   });
 });
