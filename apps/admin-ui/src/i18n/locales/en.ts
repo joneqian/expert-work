@@ -752,6 +752,7 @@ export interface TranslationKeys {
     tl_filter_error: string;
     tl_filter_retry: string;
     tl_search_placeholder: string;
+    tl_count: string;
   };
   session_history: {
     title: string;
@@ -3145,6 +3146,7 @@ const en: TranslationKeys = {
     tl_filter_error: "Error",
     tl_filter_retry: "retry",
     tl_search_placeholder: "Search tool name / error / finish_reason / node…",
+    tl_count: "{{shown}} items · {{tools}} tools · {{fails}} failed",
   },
   session_history: {
     title: "Session history",

@@ -88,13 +88,16 @@ import {
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import { parseAgentState } from "../../api/agent_state";
+import { parseTimeline } from "../../api/timeline";
+import { filterTimeline, type TimelineFilter } from "../../api/timeline_filter";
 import { CompactionSummaryList } from "../../components/CompactionCard";
 import { EventCard } from "../../components/EventCard";
 import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
-import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
 import { AgentStatePanels } from "./playground/AgentStatePanels";
+import { StepTimeline } from "./playground/StepTimeline";
+import { TimelineFilterBar } from "./playground/TimelineFilterBar";
 import { TurnMeta } from "./playground/TurnMeta";
 import { PlanPanel } from "../run_detail/PlanPanel";
 import {
@@ -1692,6 +1695,24 @@ function TurnCard({
   const agentState = parseAgentState(turn.events);
   const retries = parseRetryEvents(turn.events);
   const compactions = parseCompactionEvents(turn.events);
+  const timeline = useMemo(() => parseTimeline(turn.events), [turn.events]);
+  const [tlType, setTlType] = useState<TimelineFilter>("all");
+  const [tlQuery, setTlQuery] = useState("");
+  const visibleTimeline = useMemo(
+    () => filterTimeline(timeline, tlType, tlQuery),
+    [timeline, tlType, tlQuery],
+  );
+  const timelineToolCount = visibleTimeline.filter(
+    (it) => it.kind === "agent" && it.tools.length > 0,
+  ).length;
+  const timelineFailCount = visibleTimeline.filter(
+    (it) => (it.kind === "agent" && it.hasError) || it.kind === "error",
+  ).length;
+  const timelineCount = t("playground.tl_count", {
+    shown: visibleTimeline.length,
+    tools: timelineToolCount,
+    fails: timelineFailCount,
+  });
   // parseAgentState always returns a plain object (never null), so a bare
   // truthiness check on it would always pass — check its channels instead so
   // the run-state section actually hides when every channel is empty.
@@ -1991,10 +2012,16 @@ function TurnCard({
                   {t("playground.empty_log")}
                 </Text>
               ) : eventView === "timeline" ? (
-                <ToolTimeline
-                  events={turn.events}
-                  awaitingApproval={turn.approval !== null}
-                />
+                <>
+                  <TimelineFilterBar
+                    type={tlType}
+                    query={tlQuery}
+                    onType={setTlType}
+                    onQuery={setTlQuery}
+                    count={timelineCount}
+                  />
+                  <StepTimeline items={visibleTimeline} />
+                </>
               ) : (
                 <div
                   style={{ display: "flex", flexDirection: "column", gap: 8 }}

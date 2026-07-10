@@ -803,6 +803,7 @@ const zhCN: TranslationKeys = {
     tl_filter_error: "错误",
     tl_filter_retry: "retry",
     tl_search_placeholder: "搜 工具名 / error / finish_reason / node…",
+    tl_count: "{{shown}} 项 · {{tools}} 工具 · {{fails}} 失败",
   },
   session_history: {
     title: "会话历史",
