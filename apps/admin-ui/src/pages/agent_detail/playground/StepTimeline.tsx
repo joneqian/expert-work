@@ -100,7 +100,7 @@ function AgentStepCard({ item }: { item: AgentStep }) {
           background: item.hasError
             ? `color-mix(in srgb, ${DANGER} 30%, var(--ew-surface-base))`
             : "var(--ew-surface-base)",
-          border: `2px solid ${item.hasError ? DANGER : "var(--ew-border-strong)"}`,
+          border: `2px solid ${item.hasError ? DANGER : SUCCESS}`,
         }}
       />
       <div
