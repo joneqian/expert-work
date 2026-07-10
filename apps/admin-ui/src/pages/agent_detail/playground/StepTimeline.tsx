@@ -204,14 +204,21 @@ function AgentStepCard({ item }: { item: AgentStep }) {
               </div>
             )}
             {item.tools.map((tool) => (
-              <div key={tool.id} style={{ position: "relative", marginTop: 8 }}>
+              <div
+                key={tool.id}
+                style={{
+                  position: "relative",
+                  marginTop: 8,
+                  paddingRight: tool.durationMs !== null ? 56 : 0,
+                }}
+              >
                 <ToolCallCard entry={tool} />
                 <DurationBadge
                   ms={tool.durationMs}
                   style={{
                     position: "absolute",
-                    top: 10,
-                    right: 10,
+                    top: 2,
+                    right: 0,
                     fontSize: 11,
                     color: "var(--ew-text-tertiary)",
                   }}
