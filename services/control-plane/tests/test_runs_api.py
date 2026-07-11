@@ -1455,3 +1455,21 @@ async def test_thread_runs_foreign_tenant_forbidden(runs_client: AsyncClient) ->
         params={"tenant_id": "11111111-1111-1111-1111-111111111111"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_thread_runs_store_failure_degrades_to_empty(
+    runs_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spec: store 异常 → best-effort 返回 {"runs": []}(不 500),与 /messages 一致。
+    The ownership gate already passed (own thread) — only the store read fails."""
+    thread_id = await _create_session(runs_client)
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+
+    async def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app.state.run_store, "list_by_thread", _boom)
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["runs"] == []

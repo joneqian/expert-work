@@ -1311,16 +1311,23 @@ def build_runs_router() -> APIRouter:
         ):
             raise HTTPException(status_code=404, detail="session not found")
 
-        rows = await runs.list_by_thread(thread_id=thread_id, tenant_id=target_tenant)
-        out = [
-            {
-                "run_id": str(r.run_id),
-                "status": r.status.value,
-                "is_resume": r.is_resume,
-                "created_at": r.created_at.isoformat(),
-            }
-            for r in rows
-        ]
+        # Best-effort read (spec: store 无/异常 → return {"runs": []}, not 500,
+        # mirroring get_thread_messages). The ownership gate above stays OUTSIDE
+        # this try — a non-owned thread must still 404, not degrade to empty.
+        try:
+            rows = await runs.list_by_thread(thread_id=thread_id, tenant_id=target_tenant)
+            out = [
+                {
+                    "run_id": str(r.run_id),
+                    "status": r.status.value,
+                    "is_resume": r.is_resume,
+                    "created_at": r.created_at.isoformat(),
+                }
+                for r in rows
+            ]
+        except Exception:
+            logger.warning("thread_runs.read_failed", exc_info=True)
+            return JSONResponse({"success": True, "data": {"runs": []}})
         return JSONResponse({"success": True, "data": {"runs": out}})
 
     @router.get("/{thread_id}/runs/{run_id}/events", response_model=None)
