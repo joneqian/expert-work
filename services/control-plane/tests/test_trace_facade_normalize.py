@@ -135,3 +135,52 @@ def test_normalize_caps_oversized_io() -> None:
     spans = normalize_trace(_trace(obs), io_cap=100)["spans"]
     g = next(s for s in spans if s["id"] == "g")
     assert len(g["input"]) <= 130 and "截断" in g["input"]
+
+
+def test_normalize_surfaces_cost_and_tokens_best_effort() -> None:
+    """cost/tokens carry through when Langfuse populated them, else stay None."""
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
+        _obs(
+            "gpop",
+            "GENERATION",
+            "llm_call",
+            "sess",
+            1.0,
+            0,
+            model="glm-4.6",
+            prompt_tokens=100,
+            completion_tokens=20,
+            calculated_total_cost=0.0021,
+        ),
+        _obs("gempty", "GENERATION", "llm_call", "sess", 1.0, 1),  # tokens 0 / cost 0.0
+    ]
+    spans = normalize_trace(_trace(obs))["spans"]
+    pop = next(s for s in spans if s["id"] == "gpop")
+    assert pop["costUsd"] == 0.0021
+    assert pop["inputTokens"] == 100
+    assert pop["outputTokens"] == 20
+    assert pop["model"] == "glm-4.6"
+    empty = next(s for s in spans if s["id"] == "gempty")
+    assert empty["costUsd"] is None  # 0.0 → None (best-effort, not "free")
+    assert empty["inputTokens"] is None and empty["outputTokens"] is None
+    assert empty["model"] is None
+
+
+def test_normalize_elides_only_root_http_request_not_named_children() -> None:
+    """Follow-up: the http_request elision is root-only (parent_id is None).
+
+    A non-root span whose name merely contains ``.http_request`` is KEPT.
+    """
+    obs = [
+        _obs("root", "SPAN", "expert_work.control_plane.http_request", None, 5.0, 0),
+        _obs("sess", "SPAN", "expert_work.session.run", "root", 5.0, 0),
+        # a legitimately-named non-root span containing the substring:
+        _obs("child", "SPAN", "expert_work.tool.retry_http_request", "sess", 0.3, 1),
+    ]
+    spans = normalize_trace(_trace(obs))["spans"]
+    ids = {s["id"] for s in spans}
+    assert "root" not in ids  # root http_request elided
+    assert "child" in ids  # non-root .http_request-named span kept
+    child = next(s for s in spans if s["id"] == "child")
+    assert child["parentId"] == "sess"  # still parented correctly

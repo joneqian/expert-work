@@ -233,8 +233,9 @@ def _resolve_omissions(
     * A ``*.orchestrator.llm_call`` SPAN with exactly one GENERATION child
       is an orchestrator wrapper — omit the SPAN, and let the GENERATION
       inherit the SPAN's (more complete) latency.
-    * Any ``*.http_request`` observation (the FastAPI entry span) is
-      omitted outright; its children re-parent past it.
+    * The ROOT ``*.http_request`` observation (the FastAPI entry span, i.e.
+      ``parent_id is None``) is omitted; its children re-parent past it. A
+      non-root span whose name merely contains ``.http_request`` is kept.
 
     Returns ``(omitted, latency_override)`` where ``omitted`` maps an
     omitted node's id to the raw parent id its children should redirect
@@ -256,7 +257,9 @@ def _resolve_omissions(
         latency_override[child.id] = parsed.latency_ms
 
     for parsed in parsed_by_id.values():
-        if ".http_request" in parsed.name:
+        # Root-only: elide the FastAPI entry span (parent_id is None), NOT any
+        # legitimately-named non-root span that happens to contain the substring.
+        if parsed.parent_id is None and ".http_request" in parsed.name:
             omitted[parsed.id] = parsed.parent_id
 
     return omitted, latency_override
