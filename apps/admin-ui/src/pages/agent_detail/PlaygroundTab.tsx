@@ -1723,54 +1723,6 @@ function TurnCard({
   fallbackAnswer?: string;
 }) {
   const { t } = useTranslation();
-
-  // 历史轮懒态:事件未到位时显示输入 + 兜底答案 + 载入指示,避免用空 events
-  // 跑完整解析机器。事件到位(loadState==="done")后走下方原完整渲染。
-  if (readOnly && turn.events.length === 0 && loadState !== "done") {
-    return (
-      <div
-        data-testid="playground-turn"
-        style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}
-      >
-        <div
-          style={{
-            alignSelf: "flex-end",
-            maxWidth: "85%",
-            padding: "6px 10px",
-            borderRadius: 8,
-            fontSize: 13,
-            whiteSpace: "pre-wrap",
-            background: "var(--ew-surface-raised)",
-            border: "1px solid var(--ew-border-subtle)",
-          }}
-        >
-          {turn.input}
-        </div>
-        {fallbackAnswer ? (
-          <div
-            style={{
-              alignSelf: "flex-start",
-              maxWidth: "85%",
-              fontSize: 13,
-              whiteSpace: "pre-wrap",
-              opacity: 0.75,
-            }}
-          >
-            <MarkdownView>{fallbackAnswer}</MarkdownView>
-          </div>
-        ) : null}
-        {loadState !== "error" ? (
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.6, fontSize: 12 }}
-          >
-            <Spin size="small" />
-            <span>{t("playground.history_loading")}</span>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
   const summary = summarizeTurn(turn.events);
   const toolStats = toolStatusSummary(turn.events);
   const agentState = parseAgentState(turn.events);
@@ -1906,6 +1858,54 @@ function TurnCard({
           summary.usage.outputTokens * rate.output_per_mtok_micros) /
         1e12
       : null;
+
+  // 历史轮懒态:事件未到位时显示输入 + 兜底答案 + 载入指示,避免用空 events
+  // 跑完整解析机器。事件到位(loadState==="done")后走下方原完整渲染。此早返回
+  // 必须在上方所有 hook 之后,否则 loadState 切换会改变 hook 数量,违反 Rules of Hooks。
+  if (readOnly && turn.events.length === 0 && loadState !== "done") {
+    return (
+      <div
+        data-testid="playground-turn"
+        style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}
+      >
+        <div
+          style={{
+            alignSelf: "flex-end",
+            maxWidth: "85%",
+            padding: "6px 10px",
+            borderRadius: 8,
+            fontSize: 13,
+            whiteSpace: "pre-wrap",
+            background: "var(--ew-surface-raised)",
+            border: "1px solid var(--ew-border-subtle)",
+          }}
+        >
+          {turn.input}
+        </div>
+        {fallbackAnswer ? (
+          <div
+            style={{
+              alignSelf: "flex-start",
+              maxWidth: "85%",
+              fontSize: 13,
+              whiteSpace: "pre-wrap",
+              opacity: 0.75,
+            }}
+          >
+            <MarkdownView>{fallbackAnswer}</MarkdownView>
+          </div>
+        ) : null}
+        {loadState !== "error" ? (
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.6, fontSize: 12 }}
+          >
+            <Spin size="small" />
+            <span>{t("playground.history_loading")}</span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div
