@@ -1388,7 +1388,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               key={turn.id}
               turn={turn}
               turnSeq={turnIndex}
-              eventView={eventView}
+              initialEventView={eventView}
               onViewChange={setEventView}
               threadId={thread?.thread_id ?? null}
               onDownloadArtifact={handleDownloadArtifact}
@@ -1675,7 +1675,7 @@ function ApprovalGate({
 function TurnCard({
   turn,
   turnSeq,
-  eventView,
+  initialEventView,
   onViewChange,
   threadId,
   onDownloadArtifact,
@@ -1689,7 +1689,12 @@ function TurnCard({
   turn: Turn;
   /** The turn's index in the transcript — sent as feedback ``turn_seq``. */
   turnSeq: number;
-  eventView: "timeline" | "raw" | "exact";
+  /** Seed for this turn's own view state (persisted global default). Each
+   *  TurnCard owns its view independently, so switching one turn to "exact"
+   *  fetches only that turn's trace — not every rendered turn's (avoids a
+   *  request burst on long threads). ``onViewChange`` updates the persisted
+   *  default so the preference still seeds future turns. */
+  initialEventView: "timeline" | "raw" | "exact";
   onViewChange: (view: "timeline" | "raw" | "exact") => void;
   threadId: string | null;
   onDownloadArtifact: (threadId: string, name: string) => Promise<void>;
@@ -1767,10 +1772,20 @@ function TurnCard({
     (turn.status === "running" ? t("playground.turn_running") : null);
   const runId = runIdOf(turn.events);
 
-  // Batch 4b item 14 — "精确" (exact) trace view. Lazy: fetched only once
-  // the user selects "exact" (``eventView`` is shared across every
-  // TurnCard, so selecting it fetches every currently-rendered turn's
-  // trace — but a turn is never fetched while some other view is active).
+  // Per-turn view state, seeded from the persisted global default. Switching
+  // one turn's view no longer flips every other turn (and no longer fans out
+  // a getRunTrace to every rendered turn at once).
+  const [eventView, setEventViewLocal] = useState(initialEventView);
+  const handleViewChange = useCallback(
+    (next: "timeline" | "raw" | "exact") => {
+      setEventViewLocal(next);
+      onViewChange(next); // persist as the default seed for future turns
+    },
+    [onViewChange],
+  );
+
+  // Batch 4b item 14 — "精确" (exact) trace view. Lazy: this turn's trace is
+  // fetched only once this turn's own view is "exact".
   const agentStepCount = useMemo(
     () => timeline.filter((it) => it.kind === "agent").length,
     [timeline],
@@ -2052,7 +2067,7 @@ function TurnCard({
                   <Segmented<"timeline" | "raw" | "exact">
                     size="small"
                     value={eventView}
-                    onChange={onViewChange}
+                    onChange={handleViewChange}
                     options={[
                       {
                         value: "timeline",
