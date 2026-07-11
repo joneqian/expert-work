@@ -703,6 +703,7 @@ export interface TranslationKeys {
     resume_label: string;
     resumed_notice: string;
     history_divider: string;
+    history_loading: string;
     meta_steps: string;
     meta_latency: string;
     view_run: string;
@@ -3116,6 +3117,7 @@ const en: TranslationKeys = {
     resumed_notice:
       "Continuing an existing thread — prior conversation loaded below.",
     history_divider: "— new messages below —",
+    history_loading: "Loading debug data…",
     meta_steps: "steps",
     meta_latency: "latency",
     view_run: "View run",

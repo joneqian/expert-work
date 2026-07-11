@@ -28,6 +28,7 @@ import {
   Popover,
   Segmented,
   Space,
+  Spin,
   Tag,
   Typography,
 } from "antd";
@@ -1685,6 +1686,9 @@ function TurnCard({
   onExport,
   exporting,
   isSystemAdmin,
+  readOnly = false,
+  loadState = "done",
+  fallbackAnswer,
 }: {
   turn: Turn;
   /** The turn's index in the transcript — sent as feedback ``turn_seq``. */
@@ -1710,8 +1714,63 @@ function TurnCard({
   /** item 15 — gates the "open in Langfuse" deep link (Langfuse has no
    *  per-tenant isolation; see TraceToolbar for the same gate). */
   isSystemAdmin: boolean;
+  /** Historical-turn rendering: hides the approval gate and feedback bar
+   *  (no mutating control on a finished run). Live turns default false. */
+  readOnly?: boolean;
+  /** Historical-turn lazy load state — drives the placeholder below. */
+  loadState?: "pending" | "loading" | "done" | "error";
+  /** Assistant text shown before this historical turn's events replay. */
+  fallbackAnswer?: string;
 }) {
   const { t } = useTranslation();
+
+  // 历史轮懒态:事件未到位时显示输入 + 兜底答案 + 载入指示,避免用空 events
+  // 跑完整解析机器。事件到位(loadState==="done")后走下方原完整渲染。
+  if (readOnly && turn.events.length === 0 && loadState !== "done") {
+    return (
+      <div
+        data-testid="playground-turn"
+        style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}
+      >
+        <div
+          style={{
+            alignSelf: "flex-end",
+            maxWidth: "85%",
+            padding: "6px 10px",
+            borderRadius: 8,
+            fontSize: 13,
+            whiteSpace: "pre-wrap",
+            background: "var(--ew-surface-raised)",
+            border: "1px solid var(--ew-border-subtle)",
+          }}
+        >
+          {turn.input}
+        </div>
+        {fallbackAnswer ? (
+          <div
+            style={{
+              alignSelf: "flex-start",
+              maxWidth: "85%",
+              fontSize: 13,
+              whiteSpace: "pre-wrap",
+              opacity: 0.75,
+            }}
+          >
+            <MarkdownView>{fallbackAnswer}</MarkdownView>
+          </div>
+        ) : null}
+        {loadState !== "error" ? (
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.6, fontSize: 12 }}
+          >
+            <Spin size="small" />
+            <span>{t("playground.history_loading")}</span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   const summary = summarizeTurn(turn.events);
   const toolStats = toolStatusSummary(turn.events);
   const agentState = parseAgentState(turn.events);
@@ -1942,7 +2001,7 @@ function TurnCard({
         )}
 
         {/* #5 — approval gate (run paused on an approval-required tool). */}
-        {turn.approval && threadId && (
+        {!readOnly && turn.approval && threadId && (
           <ApprovalGate
             approval={turn.approval}
             busy={deciding}
@@ -1959,7 +2018,7 @@ function TurnCard({
 
         {/* SE-16 (SE-A46) — per-turn 👍/👎 quality signal feeding the
             skill-evolution curation pipeline. Settled turns only. */}
-        {turn.status === "done" && threadId && (
+        {!readOnly && turn.status === "done" && threadId && (
           <FeedbackBar threadId={threadId} turnSeq={turnSeq} />
         )}
       </div>
