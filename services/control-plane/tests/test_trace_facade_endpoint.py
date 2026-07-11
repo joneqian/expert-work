@@ -309,3 +309,22 @@ async def test_trace_other_exception_returns_unavailable(trace_client: AsyncClie
     resp = await trace_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}/trace", headers=headers)
     assert resp.status_code == 200
     assert resp.json() == {"status": "unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_trace_none_latency_returns_not_ready(trace_client: AsyncClient) -> None:
+    """``trace.get`` succeeds but Langfuse hasn't finished aggregating the
+    trace yet (``latency`` is ``None`` until it closes out) — the common
+    just-after-run polling window the debug console hits. Must degrade to
+    ``not_ready``, never a 500 (硬约束「降级永不 500」)."""
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+    trace = _fake_trace()
+    trace.latency = None
+    app.state.langfuse_read_client = _FakeLangfuseClient(trace=trace)
+
+    resp = await trace_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}/trace", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "not_ready"}

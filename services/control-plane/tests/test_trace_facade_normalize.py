@@ -103,6 +103,29 @@ def test_normalize_unmapped_span_falls_back_to_cleaned_name() -> None:
     assert planner["label"] == "orchestrator.planner"  # expert_work. 前缀去掉
 
 
+def test_normalize_handles_none_latency_without_raising() -> None:
+    """Real Langfuse SDK returns ``latency=None`` while aggregation is still
+    in flight (trace just landed, hasn't closed out yet). ``normalize_trace``
+    must never raise on this — ``round(None * 1000)`` would otherwise be an
+    uncaught ``TypeError`` (硬约束「降级永不 500」). latency_ms falls back
+    to 0 both at the trace level and per-observation.
+    """
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, None, 0),
+    ]
+    trace = SimpleNamespace(
+        name="expert_work.control_plane.http_request",
+        latency=None,
+        total_cost=0.0,
+        observations=obs,
+    )
+    out = normalize_trace(trace)
+    assert out["status"] == "ok"
+    assert out["trace"]["latencyMs"] == 0
+    span = out["spans"][0]
+    assert span["latencyMs"] == 0
+
+
 def test_normalize_caps_oversized_io() -> None:
     big = "x" * 20000
     obs = [

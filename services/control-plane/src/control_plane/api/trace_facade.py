@@ -87,7 +87,7 @@ def normalize_trace(trace: object, *, io_cap: int = 8192) -> dict[str, object]:
     raw_observations: list[Any] = list(t.observations or [])
 
     trace_name = str(t.name)
-    trace_latency_ms = round(t.latency * 1000)
+    trace_latency_ms = round((t.latency or 0) * 1000)
     trace_total_cost_usd = t.total_cost or None
 
     if not raw_observations:
@@ -102,7 +102,8 @@ def normalize_trace(trace: object, *, io_cap: int = 8192) -> dict[str, object]:
             "spans": [],
         }
 
-    trace_start = min(o.start_time for o in raw_observations)
+    start_times = [o.start_time for o in raw_observations if o.start_time is not None]
+    trace_start = min(start_times) if start_times else None
 
     parsed_by_id: dict[str, _ParsedObs] = {}
     children_by_parent: dict[str | None, list[str]] = {}
@@ -177,7 +178,17 @@ def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 8192) -> di
         return {"status": "not_ready"}
     except Exception:
         return {"status": "unavailable"}
-    return normalize_trace(trace, io_cap=io_cap)
+    # Trace exists but Langfuse's aggregation hasn't finished yet (latency is
+    # populated once the trace closes out) — tell the caller to retry rather
+    # than rendering a bogus zero-latency row.
+    if getattr(trace, "latency", None) is None:
+        return {"status": "not_ready"}
+    try:
+        return normalize_trace(trace, io_cap=io_cap)
+    except Exception:
+        # Belt-and-suspenders: no code path from a successful trace.get()
+        # should ever reach an uncaught exception (硬约束「降级永不 500」).
+        return {"status": "unavailable"}
 
 
 def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
@@ -185,8 +196,11 @@ def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
     obs_type = str(o.type)
     name = str(o.name)
     parent_id = _clean_str(getattr(o, "parent_observation_id", None))
-    start_ms = round((o.start_time - trace_start).total_seconds() * 1000)
-    latency_ms = round(o.latency * 1000)
+    if o.start_time is None or trace_start is None:
+        start_ms = 0
+    else:
+        start_ms = round((o.start_time - trace_start).total_seconds() * 1000)
+    latency_ms = round((o.latency or 0) * 1000)
     kind, label = _classify(obs_type, name)
     detail = _tool_detail(o) if kind == "tool" else None
     return _ParsedObs(
