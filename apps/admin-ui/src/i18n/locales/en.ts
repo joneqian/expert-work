@@ -754,6 +754,22 @@ export interface TranslationKeys {
     tl_search_placeholder: string;
     tl_count: string;
     tl_duration: string;
+    tr_col_action: string;
+    tr_state_not_ready_title: string;
+    tr_state_not_ready_msg: string;
+    tr_state_unavailable_title: string;
+    tr_state_unavailable_msg: string;
+    tr_state_no_trace_title: string;
+    tr_state_no_trace_msg: string;
+    tr_detail_close: string;
+    tr_detail_latency: string;
+    tr_detail_model: string;
+    tr_detail_tokens: string;
+    tr_detail_cost: string;
+    tr_io_input: string;
+    tr_io_input_hint: string;
+    tr_io_output: string;
+    tr_io_output_hint: string;
   };
   session_history: {
     title: string;
@@ -795,6 +811,7 @@ export interface TranslationKeys {
     empty: string;
     view_timeline: string;
     view_raw: string;
+    view_exact: string;
     compaction_label: string;
     compaction_passes: string;
     compaction_reduction: string;
@@ -3149,6 +3166,25 @@ const en: TranslationKeys = {
     tl_search_placeholder: "Search tool name / error / finish_reason / node…",
     tl_count: "{{shown}} items · {{tools}} tools · {{fails}} failed",
     tl_duration: "step duration",
+    tr_col_action: "Action",
+    tr_state_not_ready_title: "Processing",
+    tr_state_not_ready_msg:
+      "The run just finished — the trace is still being ingested (about 1 second). Refresh shortly to see exact timings.",
+    tr_state_unavailable_title: "Unavailable",
+    tr_state_unavailable_msg:
+      "The trace service is temporarily unreachable. Try again later for exact timings — the rest of this run's debug data is unaffected.",
+    tr_state_no_trace_title: "No trace",
+    tr_state_no_trace_msg:
+      "This run has no associated trace (Langfuse wasn't enabled, or it's an older run).",
+    tr_detail_close: "Close",
+    tr_detail_latency: "duration",
+    tr_detail_model: "model",
+    tr_detail_tokens: "tokens",
+    tr_detail_cost: "cost",
+    tr_io_input: "Input (prompt)",
+    tr_io_input_hint: "The prompt sent to the model",
+    tr_io_output: "Output (response)",
+    tr_io_output_hint: "The model's reply",
   },
   session_history: {
     title: "Session history",
@@ -3190,6 +3226,7 @@ const en: TranslationKeys = {
     empty: "No events yet.",
     view_timeline: "Tool calls",
     view_raw: "Raw events",
+    view_exact: "Exact",
     compaction_label: "Context compacted",
     compaction_passes: "{{n}} pass(es)",
     compaction_reduction: "{{before}} → {{after}} tokens (−{{pct}}%)",
