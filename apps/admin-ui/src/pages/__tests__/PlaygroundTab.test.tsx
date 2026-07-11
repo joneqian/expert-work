@@ -6,7 +6,7 @@
  * from the test body. This keeps the network layer out of jsdom.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
@@ -155,6 +155,19 @@ function makeStream(events: SseEvent[]): AsyncGenerator<SseEvent, void, void> {
   return (async function* () {
     for (const e of events) yield e;
   })();
+}
+
+/** An externally-resolvable promise — lets a test resolve two racing async
+ *  fetches in a deliberate order (used by the stale-resume guard test). */
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 function jwt(roles: string[] = []): string {
@@ -1465,6 +1478,108 @@ describe("PlaygroundTab", () => {
       await screen.findByText("a1");
       expect(screen.getByTestId("playground-input")).toBeInTheDocument();
       expect(screen.queryByTestId("playground-approval")).not.toBeInTheDocument();
+    });
+
+    it("drops a stale resume's history write when a newer resume superseded it", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      const threadA: ThreadMeta = {
+        ...sampleThread,
+        thread_id: "aaaaaaaa-0000-0000-0000-0000000000a1",
+      };
+      const threadB: ThreadMeta = {
+        ...sampleThread,
+        thread_id: "bbbbbbbb-0000-0000-0000-0000000000b2",
+      };
+      listSessionsMock.mockResolvedValue([threadA, threadB]);
+
+      // Control each thread's message fetch independently so we can resolve
+      // A *after* B (A resumed first, but its slow fetch lands last).
+      const msgsA = deferred<Array<{ role: "user" | "assistant"; content: string }>>();
+      const msgsB = deferred<Array<{ role: "user" | "assistant"; content: string }>>();
+      getMessagesMock.mockImplementation((tid: string) =>
+        tid === threadA.thread_id ? msgsA.promise : msgsB.promise,
+      );
+      // Runs resolve immediately per thread (Promise.all still waits on the
+      // deferred messages fetch above); 1 run ↔ 1 message-turn each → paired.
+      listThreadRunsMock.mockImplementation((tid: string) =>
+        Promise.resolve(
+          tid === threadA.thread_id
+            ? [{ runId: "rA", status: "success" as const, isResume: false, createdAt: "t1" }]
+            : [{ runId: "rB", status: "success" as const, isResume: false, createdAt: "t1" }],
+        ),
+      );
+      // Each run's replay yields a distinct answer so we can tell whose turns
+      // actually rendered; fresh generator per call (never exhausted).
+      streamRunEventsMock.mockImplementation((_tid: string, runId: string) =>
+        makeStream([
+          {
+            id: "u",
+            event: "updates",
+            data: {
+              agent: {
+                messages: [
+                  { type: "ai", content: runId === "rB" ? "answer-B" : "answer-A" },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t2" },
+        ]),
+      );
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+
+      // Resume A (its message fetch stays pending).
+      await user.click(screen.getByTestId("playground-history-open"));
+      await user.click(
+        await screen.findByTestId(`session-history-item-${threadA.thread_id}`),
+      );
+
+      // Resume B before A resolved — B supersedes A (new AbortController).
+      await user.click(screen.getByTestId("playground-history-open"));
+      await user.click(
+        await screen.findByTestId(`session-history-item-${threadB.thread_id}`),
+      );
+
+      // Resolve B first → its history builds + its run replays.
+      await act(async () => {
+        msgsB.resolve([
+          { role: "user", content: "qB" },
+          { role: "assistant", content: "aB" },
+        ]);
+      });
+      await screen.findByText("answer-B");
+
+      // Now resolve the stale A LAST — the guard must drop its write.
+      await act(async () => {
+        msgsA.resolve([
+          { role: "user", content: "qA" },
+          { role: "assistant", content: "aA" },
+        ]);
+      });
+      // Let any (incorrectly ungated) stale microtasks flush.
+      await waitFor(() => expect(getMessagesMock).toHaveBeenCalledTimes(2));
+
+      // B's history survives; A's content never clobbers it.
+      expect(screen.getByText("answer-B")).toBeInTheDocument();
+      expect(screen.queryByText("answer-A")).not.toBeInTheDocument();
+      expect(screen.queryByText("qA")).not.toBeInTheDocument();
+      // Only B's own run was replayed — no wrong-thread replay of A's runId
+      // against B's thread_id.
+      expect(streamRunEventsMock).toHaveBeenCalledWith(
+        threadB.thread_id,
+        "rB",
+        expect.anything(),
+      );
+      expect(streamRunEventsMock).not.toHaveBeenCalledWith(
+        threadB.thread_id,
+        "rA",
+        expect.anything(),
+      );
     });
   });
 });

@@ -366,8 +366,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setThreadError(null);
       setResumed(true);
       setHistory([]);
-      setHistoryTurns(null);
-      setHistoryLoads({});
       setThread(picked);
       // Continue as the thread's own user so per-user workspace / memory /
       // episodic stay consistent — auto-fill the run-as field. Guard the
@@ -399,10 +397,16 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         listThreadRuns(picked.thread_id).catch(() => null),
       ])
         .then(([messages, runs]) => {
+          // A newer resume replaced ``historyAbortRef.current`` before this
+          // fetch resolved — drop the stale write so it can't clobber the
+          // current thread's history (or trigger a wrong-thread replay).
+          if (historyAbortRef.current !== ac) return;
           setHistory(messages); // 降级路径永远有数据
           if (!runs) return;
           const built = buildHistoryTurns(messages, runs);
-          if (!built) return; // 计数守卫失败 → 保持扁平文本
+          // 计数守卫失败(null)或空 thread(0 轮)→ 保持扁平文本(null 分支
+          // 什么都不渲,不会漏出「以下为本次新消息」分隔线)。
+          if (!built || built.length === 0) return;
           setHistoryTurns(built);
           setHistoryLoads(
             Object.fromEntries(
@@ -411,6 +415,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           );
         })
         .catch(() => {
+          // Same staleness guard — a stale failed resume must not wipe the
+          // history a newer resume already loaded.
+          if (historyAbortRef.current !== ac) return;
           setHistory([]);
           setHistoryTurns(null);
         });
