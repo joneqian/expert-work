@@ -1314,6 +1314,25 @@ def create_app(
                     # Mini-ADR OBS-L1 — PII masking on by default (fail-safe).
                     pii_masking_enabled=resolved_settings.langfuse_pii_masking_enabled,
                 )
+                # Batch 4b Task 2 — a second, raw Langfuse SDK instance for
+                # read-only trace fetches (``.api.trace.get``); the adapter
+                # above only exposes the write-side surface the middleware
+                # protocol needs. Same three-env gate as above; ``None``
+                # when the deployment doesn't configure Langfuse.
+                langfuse_read_client: object | None = None
+                if (
+                    resolved_settings.langfuse_host
+                    and resolved_settings.langfuse_public_key
+                    and resolved_settings.langfuse_secret_key
+                ):
+                    from langfuse import Langfuse
+
+                    langfuse_read_client = Langfuse(
+                        public_key=resolved_settings.langfuse_public_key,
+                        secret_key=resolved_settings.langfuse_secret_key,
+                        host=resolved_settings.langfuse_host,
+                    )
+                _app.state.langfuse_read_client = langfuse_read_client
                 middleware_env = build_middleware_env(
                     token_usage_store=resolved_token_usage,
                     langfuse_client=langfuse_client,
@@ -1825,6 +1844,11 @@ def create_app(
                 langfuse_shutdown = getattr(langfuse_client, "shutdown", None)
                 if callable(langfuse_shutdown):
                     langfuse_shutdown()
+                # Batch 4b Task 2 — best-effort shutdown of the read-only
+                # Langfuse SDK instance (duck-typed lookup, same as above).
+                langfuse_read_shutdown = getattr(langfuse_read_client, "shutdown", None)
+                if callable(langfuse_read_shutdown):
+                    langfuse_read_shutdown()
                 knowledge_recovery: KnowledgeIngestRecoveryWorker | None = getattr(
                     _app.state, "knowledge_recovery_worker", None
                 )

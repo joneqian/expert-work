@@ -28,7 +28,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["TraceSpan", "normalize_trace"]
+from langfuse.api import NotFoundError
+
+__all__ = ["TraceSpan", "fetch_and_normalize", "normalize_trace"]
 
 _NAME_PREFIX = "expert_work."
 _TRUNCATION_SUFFIX = "…(已截断)"
@@ -113,7 +115,13 @@ def normalize_trace(trace: object, *, io_cap: int = 8192) -> dict[str, object]:
 
     def resolve_parent(raw_parent_id: str | None) -> str | None:
         current = raw_parent_id
+        visited: set[str] = set()
+        # T1-reviewer follow-up: real Langfuse data flows through here now —
+        # guard against a corrupted upstream parent cycle wedging the event loop.
         while current is not None and current in omitted:
+            if current in visited:
+                return None
+            visited.add(current)
             current = omitted[current]
         return current
 
@@ -147,6 +155,29 @@ def normalize_trace(trace: object, *, io_cap: int = 8192) -> dict[str, object]:
         },
         "spans": [_span_as_dict(s) for s in spans],
     }
+
+
+def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 8192) -> dict[str, object]:
+    """Fetch one trace from Langfuse and normalize it — Batch 4b Task 2.
+
+    Unlike :func:`normalize_trace` this DOES touch the network (via the
+    injected read-only Langfuse SDK client) — the try/except below is a
+    deliberate fail-soft degrade boundary, not a swallowed error: every
+    branch returns an explicit ``status`` so the debug console can render
+    "tracing off" vs "not ingested yet" vs a real trace, and a Langfuse
+    outage never turns into a 500 for the caller.
+    """
+    if client is None:
+        return {"status": "unavailable"}
+    try:
+        trace = client.api.trace.get(trace_id)
+    except NotFoundError:
+        # Genuinely unknown, or Langfuse's async ingestion pipeline just
+        # hasn't landed it yet — distinct from tracing being disabled.
+        return {"status": "not_ready"}
+    except Exception:
+        return {"status": "unavailable"}
+    return normalize_trace(trace, io_cap=io_cap)
 
 
 def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
