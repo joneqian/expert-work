@@ -221,6 +221,15 @@ html[data-theme="dark"] {
   --ew-text-inverse:   var(--ew-color-neutral-900);
   --ew-text-link:      var(--ew-color-brand-400);
   --ew-text-link-hover: var(--ew-color-brand-300);
+  /* Semantic text colours — theme-aware; used by the playground debug console
+     (StepTimeline / TraceView / TimelineFilterBar). Previously referenced only
+     via hex fallbacks, so they did not switch with the theme; now aliased to
+     the existing status-fg scale (+ accent) so they adapt in both themes. */
+  --ew-text-danger:    var(--ew-status-danger-fg);
+  --ew-text-success:   var(--ew-status-success-fg);
+  --ew-text-warning:   var(--ew-status-warning-fg);
+  --ew-text-info:      var(--ew-status-info-fg);
+  --ew-accent-violet:  var(--ew-color-accent-400);
 
   --ew-action-primary-bg:       var(--ew-color-brand-500);
   --ew-action-primary-bg-hover: var(--ew-color-brand-400);
@@ -274,6 +283,12 @@ html[data-theme="light"] {
   --ew-text-inverse:   var(--ew-color-neutral-0);
   --ew-text-link:      var(--ew-color-brand-700);
   --ew-text-link-hover: var(--ew-color-brand-600);
+  /* Semantic text colours — light theme (see dark block for rationale). */
+  --ew-text-danger:    var(--ew-status-danger-fg);
+  --ew-text-success:   var(--ew-status-success-fg);
+  --ew-text-warning:   var(--ew-status-warning-fg);
+  --ew-text-info:      var(--ew-status-info-fg);
+  --ew-accent-violet:  var(--ew-color-accent-600);
 
   --ew-action-primary-bg:       var(--ew-color-brand-600);
   --ew-action-primary-bg-hover: var(--ew-color-brand-700);

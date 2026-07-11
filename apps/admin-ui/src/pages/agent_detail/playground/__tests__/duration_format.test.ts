@@ -20,4 +20,9 @@ describe("fmtDuration", () => {
   it("carries rounding that would hit 60s into the next minute", () => {
     expect(fmtDuration(119500)).toBe("2m0s"); // 1m + round(59.5)=60 → 2m0s
   });
+  it("promotes the 59950–59999ms seam to 1m0s instead of '60.0s'", () => {
+    expect(fmtDuration(59950)).toBe("1m0s");
+    expect(fmtDuration(59999)).toBe("1m0s");
+    expect(fmtDuration(59949)).toBe("59.9s"); // just below the seam, still seconds
+  });
 });
