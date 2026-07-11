@@ -1269,6 +1269,60 @@ def build_runs_router() -> APIRouter:
         out = [{"role": t.role, "content": t.content} for t in turns]
         return JSONResponse({"success": True, "data": {"messages": out}})
 
+    @router.get("/{thread_id}/runs", response_model=None)
+    async def list_thread_runs(
+        thread_id: UUID,
+        request: Request,
+        threads: Annotated[object, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        runs: Annotated[RunStore, Depends(_get_run_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        """Playground history reconstruction — the thread's runs, oldest-first.
+
+        Lets the debug console lazily replay each past run's event stream
+        (``GET .../runs/{run_id}/events``) to rebuild a full historical turn.
+        Ownership-gated identically to ``get_thread_messages``; a concrete
+        ``tenant_id`` lets a system_admin read a foreign tenant's runs.
+        Returns ``run_id`` / ``status`` / ``is_resume`` / ``created_at`` only —
+        the debug payload lives in the per-run event replay, not here.
+        """
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/sessions/{thread_id}/runs",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
+        )
+        if isinstance(scope, CrossTenant):
+            raise HTTPException(
+                status_code=422,
+                detail="a thread belongs to one tenant; pass a concrete tenant_id",
+            )
+        target_tenant = scope.tenant_id
+        meta = await threads.get(thread_id, tenant_id=target_tenant)  # type: ignore[attr-defined]
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        rows = await runs.list_by_thread(thread_id=thread_id, tenant_id=target_tenant)
+        out = [
+            {
+                "run_id": str(r.run_id),
+                "status": r.status.value,
+                "is_resume": r.is_resume,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ]
+        return JSONResponse({"success": True, "data": {"runs": out}})
+
     @router.get("/{thread_id}/runs/{run_id}/events", response_model=None)
     async def stream_run_events(
         thread_id: UUID,
