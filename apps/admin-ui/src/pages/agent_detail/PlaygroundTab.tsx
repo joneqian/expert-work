@@ -2108,7 +2108,10 @@ function TurnCard({
                 </>
               ) : eventView === "exact" ? (
                 labeledTrace ? (
-                  <TraceView trace={labeledTrace} />
+                  <TraceView
+                    trace={labeledTrace}
+                    onRefresh={() => setTrace(null)}
+                  />
                 ) : (
                   <Text
                     type="secondary"

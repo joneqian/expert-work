@@ -5,7 +5,7 @@
  * src/i18n's LanguageDetector — see StepTimeline.test.tsx / TimelineFilterBar
  * .test.tsx precedent), so state-text assertions use the English copy.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import "../../../../i18n";
 
@@ -127,7 +127,10 @@ describe("TraceView", () => {
     ["unavailable", "Unavailable", false],
     ["no_trace", "No trace", false],
   ] as const)("renders the %s degraded state (no tree) with its status text", (status, title, expectRefresh) => {
-    render(<TraceView trace={{ status }} />);
+    // onRefresh is always supplied here — the button's presence is gated on
+    // `status === "not_ready"`, not on the prop, so this also proves
+    // unavailable/no_trace never render it even when a handler exists.
+    render(<TraceView trace={{ status }} onRefresh={vi.fn()} />);
     expect(screen.getByTestId("trace-view")).toBeInTheDocument();
     expect(screen.getByText(title)).toBeInTheDocument();
     expect(screen.queryAllByTestId("trace-row")).toHaveLength(0);
@@ -136,5 +139,17 @@ describe("TraceView", () => {
     } else {
       expect(screen.queryByTestId("trace-refresh")).not.toBeInTheDocument();
     }
+  });
+
+  it("not_ready's refresh button calls onRefresh when clicked", () => {
+    const onRefresh = vi.fn();
+    render(<TraceView trace={{ status: "not_ready" }} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByTestId("trace-refresh"));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("not_ready omits the refresh button when onRefresh isn't provided", () => {
+    render(<TraceView trace={{ status: "not_ready" }} />);
+    expect(screen.queryByTestId("trace-refresh")).not.toBeInTheDocument();
   });
 });

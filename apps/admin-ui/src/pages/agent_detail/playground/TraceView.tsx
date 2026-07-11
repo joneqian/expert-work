@@ -44,9 +44,13 @@ const LANE = "300px";
 
 export interface TraceViewProps {
   trace: RunTrace;
+  /** Called when the user clicks "Refresh" on the `not_ready` degraded
+   *  state — the caller should trigger a refetch of `trace` (see
+   *  PlaygroundTab.tsx). Omitted → the refresh button doesn't render. */
+  onRefresh?: () => void;
 }
 
-export function TraceView({ trace }: TraceViewProps) {
+export function TraceView({ trace, onRefresh }: TraceViewProps) {
   // `status: "ok"` doesn't type-narrow `trace`/`spans` into defined (both
   // stay optional on RunTrace) — guard defensively rather than asserting,
   // degrading to "unavailable" on a malformed ok payload instead of crashing.
@@ -55,7 +59,7 @@ export function TraceView({ trace }: TraceViewProps) {
       trace.status === "ok" ? "unavailable" : trace.status;
     return (
       <div data-testid="trace-view">
-        <TraceStateCard status={status} />
+        <TraceStateCard status={status} onRefresh={onRefresh} />
       </div>
     );
   }
@@ -548,7 +552,13 @@ const STATE_TONE: Record<Exclude<TraceStatus, "ok">, string> = {
   no_trace: MUTED,
 };
 
-function TraceStateCard({ status }: { status: Exclude<TraceStatus, "ok"> }) {
+function TraceStateCard({
+  status,
+  onRefresh,
+}: {
+  status: Exclude<TraceStatus, "ok">;
+  onRefresh?: () => void;
+}) {
   const { t } = useTranslation();
   const copy: Record<Exclude<TraceStatus, "ok">, { title: string; msg: string }> = {
     not_ready: {
@@ -584,14 +594,11 @@ function TraceStateCard({ status }: { status: Exclude<TraceStatus, "ok"> }) {
         <strong>{title}</strong>
       </div>
       <p style={{ margin: 0, color: "var(--ew-text-secondary)", fontSize: 12.5, lineHeight: 1.5 }}>{msg}</p>
-      {status === "not_ready" && (
-        // No `onClick` wired — TraceView's props are `{ trace: RunTrace }`
-        // only (no refetch callback), so this affordance is visual-only
-        // until whichever task wires TraceView into PlaygroundTab passes a
-        // real refresh handler.
+      {status === "not_ready" && onRefresh && (
         <button
           type="button"
           data-testid="trace-refresh"
+          onClick={onRefresh}
           style={{
             marginTop: 9,
             font: "inherit",

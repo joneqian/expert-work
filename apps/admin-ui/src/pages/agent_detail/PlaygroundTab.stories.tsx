@@ -5,8 +5,15 @@ import { App } from "antd";
 
 import { PlaygroundTab } from "./PlaygroundTab";
 import type { AgentDetailResponse } from "../../api/agents";
-import { apiClient } from "../../api/client";
+import { apiClient, setStoredToken } from "../../api/client";
+import { AuthProvider } from "../../auth/AuthContext";
 import "../../i18n";
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const header = btoa(JSON.stringify({ alg: "none", typ: "JWT" }));
+  const body = btoa(JSON.stringify(payload));
+  return `${header}.${body}.`;
+}
 
 const detail: AgentDetailResponse = {
   record: {
@@ -28,6 +35,9 @@ const detail: AgentDetailResponse = {
  *  the attach-image affordance visible. The SSE run uses ``fetch`` (not
  *  axios) so it stays inert in Storybook, which is fine for the visual. */
 function withStubs(Story: ComponentType) {
+  setStoredToken(
+    makeJwt({ sub: "u", tenant_id: "22222222-2222-2222-2222-222222222222", roles: [] }),
+  );
   apiClient.defaults.adapter = (config) => {
     const url = config.url ?? "";
     if (url.includes("/workspace")) {
@@ -133,9 +143,11 @@ function withStubs(Story: ComponentType) {
   };
   return (
     <MemoryRouter>
-      <App>
-        <Story />
-      </App>
+      <AuthProvider>
+        <App>
+          <Story />
+        </App>
+      </AuthProvider>
     </MemoryRouter>
   );
 }
