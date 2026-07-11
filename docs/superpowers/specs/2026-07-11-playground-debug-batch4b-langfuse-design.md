@@ -79,11 +79,16 @@ interface TraceSpan {
 - 事件区现有视图切换器(Batch 3 `playground-event-view-toggle` Segmented:时间线/原始)**加第三档「精确」**。选中渲 span 树。
 - 按需 REST 自取 `getRunTrace(threadId, runId)`(新 `api/trace_facade.ts`),循 PlanPanel「走 REST 自取」—— 打开「精确」才拉。
 
-### 3.2 用途标签(前端交叉引用 SSE)
-- span 树视图拿到 facade 的 spans(`kind:"llm"`,泛化 label)+ 本轮 SSE 事件(已由 Batch 3 `parseTimeline` 解析出按序的节点/AgentStep)。
-- 从 SSE 取**有序的 LLM 触发节点序列**(每条 AI message 的 `node`)→ 映射用途(`agent`→主推理、memory 节点→记忆抽取、`reflect`→反思、`planner`→规划…)→ **按序 zip** facade 的 `kind:"llm"` spans。
-- **计数匹配**才贴用途 `detail`;**不匹配 → 泛化「LLM 调用」兜底**(不猜、不错标)。
-- **⚠️ 计划期须先验证的风险**:此关联成立的前提是「每次 LLM 调用在 SSE updates 帧里都有对应节点/AI message」。但**记忆抽取/反思这类内部子调用可能不作为 AI message 进 SSE `messages` 通道**(只在 Langfuse 有 generation)。若如此 → SSE 的 LLM 节点数 < Langfuse generation 数 → 计数不匹配 → 全部退化泛化「LLM 调用」(安全但用途标签失效)。**Plan Task 0 = 跑一条含记忆抽取的 run,核对 SSE updates 帧是否暴露 memory 节点的 LLM 调用**:暴露 → §3.2 关联可行;不暴露 → 用途标签降级为「仅 agent 主调用能标,其余泛化」并在 spec/plan 注明,或改用 Langfuse generation 的 `input` 特征(如"memory extraction module"提示词)启发式判用途(次选,较脆)。**不为拿用途去改埋点(§9)。**
+### 3.2 用途标签(前端交叉引用 SSE)—— A′ 部分标 + 详情兜底
+
+**已验事实(spike，run bf83f831):** SSE updates 帧**暴露 memory 节点**(memory_recall/memory_writeback)但**其 LLM 调用不作为 AI message 进 `messages` 通道** —— 只有 `agent` 节点有 AI message(该 run:2 条 agent ai;tools 1 条 tool)。Langfuse 该 run 有 3 个 generation,SSE 只 2 个 agent ai,差的 1 个 = 记忆抽取(SSE 无)。→ **SSE 节点关联只能覆盖 agent 主调用,覆盖不到记忆抽取/反思这类隐藏子调用。**
+
+**A′ 规则(经用户拍板):**
+- span 树视图拿 facade 的 `kind:"llm"` spans(泛化 label「LLM 调用」)+ 本轮 SSE 事件(Batch 3 `parseTimeline` 已解析出按序的 `agent` 节点 AgentStep)。
+- **仅当能干净对上时贴用途**:把 SSE 的**有序 agent AI message** 与 facade 的 `kind:"llm"` spans 按**到达序/开始时刻**对齐,能 1:1 对上的贴「主推理」(`detail:"主推理"`)。
+- **对不上的(隐藏子调用:记忆抽取/反思等)保持泛化「LLM 调用」**,不猜、不启发式、不乱标。
+- **用途兜底 = 详情面板**:点开任一泛化「LLM 调用」,其 prompt 就自证用途(如 "You are a memory extraction module…")。即用途始终可发现(在详情里),只是不强塞进行标签。
+- 映射表(用于能对上的 SSE 节点):`agent`→主推理;(memory/reflect 的 LLM 调用不在 SSE,无法从 SSE 标)。若将来 SSE 暴露更多节点的 AI message,按同规则自然扩展。**不为拿用途去改埋点(§9)。**
 
 ### 3.3 渲染(转写线框 v4)
 - **左树 + 右瀑布两窗,行对齐**(线框 `.wf`):左 = 树连接线(├─└─)+ 类型点(session 灰 / llm 蓝 / tool 紫)+ label(+ detail 灰后缀)(+ model/cost miniChip 有才显);右 = 时间轴瀑布(每 span 一条 bar,`left=startMs/traceLatency`、`width=latencyMs/traceLatency`,类型色;顶部刻度轴 + 竖网格)。
@@ -109,11 +114,11 @@ interface TraceSpan {
 **前端(vitest):**
 - `getRunTrace` SDK 解析判别响应。
 - span 树:建树(parentId)、瀑布定位(startMs/latency 百分比)、fmtDuration、model/cost 空隐藏、状态四态渲染。
-- 用途标签:SSE 节点序列 zip llm spans(计数匹配贴用途 / 不匹配泛化兜底)。
+- 用途标签(A′):能对上的 agent llm span 贴「主推理」;对不上的隐藏调用保持泛化「LLM 调用」(不误标)。
 - 详情面板:点行显 input/output/meta;空段不渲;× 关闭。
 - 直达外链:isSystemAdmin 门控 + env 未配隐藏。
 
-**手动冒烟:** 跑一条含工具 + 记忆抽取的 run → 「精确」标签显归一操作树 + 瀑布;记忆抽取标对用途;点它详情面板显其 prompt/输出;「在 Langfuse 中打开」(系统管理员)跳对应 trace。
+**手动冒烟:** 跑一条含工具 + 记忆抽取的 run → 「精确」标签显归一操作树 + 瀑布;agent 主调用标「主推理」,记忆抽取显泛化「LLM 调用」;**点记忆抽取那行 → 详情面板 prompt 自证是记忆抽取**;「在 Langfuse 中打开」(系统管理员)跳对应 trace。
 
 ## 5. 不在范围(YAGNI)
 - 改 orchestrator 埋点让 cost/model 落库(§9;cost/model best-effort)。
