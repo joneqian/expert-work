@@ -45,6 +45,7 @@ from control_plane.api._user_scope import (
     get_user_repo,
     resolve_caller_user_id,
 )
+from control_plane.api.trace_facade import fetch_and_normalize
 from control_plane.audit import emit
 from control_plane.kill_switch import run_block_reason
 from control_plane.prompt_render import (
@@ -1150,6 +1151,41 @@ def build_runs_router() -> APIRouter:
                 ),
             }
         )
+
+    @router.get("/{thread_id}/runs/{run_id}/trace", response_model=None)
+    async def get_run_trace(
+        thread_id: UUID,
+        run_id: UUID,
+        request: Request,
+        threads: Annotated[object, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        runs: Annotated[RunStore, Depends(_get_run_store)],
+    ) -> JSONResponse:
+        """Batch 4b Task 2 — the run's Langfuse trace, normalized for the
+        debug console's "precise" view.
+
+        Ownership-gated identically to ``get_run`` (404 hides cross-tenant
+        / cross-user existence); unlike ``get_run`` this does NOT require
+        system_admin — it only ever returns the caller's own run's trace,
+        never a cross-tenant one.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        persisted = await runs.get(run_id=run_id, tenant_id=tenant_id)
+        trace_id = persisted.trace_id if persisted is not None else None
+        if trace_id is None:
+            return JSONResponse(content={"status": "no_trace"})
+
+        client = getattr(request.app.state, "langfuse_read_client", None)
+        return JSONResponse(content=fetch_and_normalize(client, trace_id))
 
     @router.get("/{thread_id}/messages", response_model=None)
     async def get_thread_messages(

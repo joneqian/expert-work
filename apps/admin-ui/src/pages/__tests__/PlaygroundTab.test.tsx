@@ -13,16 +13,19 @@ import "../../i18n";
 import i18n from "../../i18n";
 
 import * as approvalsSdk from "../../api/approvals";
-import { ApiError } from "../../api/client";
+import { ApiError, setStoredToken } from "../../api/client";
 import * as membersSdk from "../../api/members";
 import * as rateCardSdk from "../../api/rate_card";
 import * as runsSdk from "../../api/runs";
 import * as sessionsSdk from "../../api/sessions";
+import * as traceFacadeSdk from "../../api/trace_facade";
 import * as uploadsSdk from "../../api/uploads";
 import { PlaygroundTab } from "../agent_detail/PlaygroundTab";
+import { AuthProvider } from "../../auth/AuthContext";
 import type { AgentDetailResponse } from "../../api/agents";
 import type { ApprovalItem } from "../../api/approvals";
 import type { SseEvent, ThreadMeta } from "../../api/sessions";
+import type { RunTrace } from "../../api/trace_facade";
 
 const sampleDetail: AgentDetailResponse = {
   record: {
@@ -67,8 +70,15 @@ const listRateCardsMock = vi.spyOn(rateCardSdk, "listRateCards");
 const listApprovalsMock = vi.spyOn(approvalsSdk, "listApprovals");
 const decideApprovalsMock = vi.spyOn(approvalsSdk, "decideApprovals");
 const streamRunEventsMock = vi.spyOn(runsSdk, "streamRunEvents");
+const getRunMock = vi.spyOn(runsSdk, "getRun");
+const getRunTraceMock = vi.spyOn(traceFacadeSdk, "getRunTrace");
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  // The event-view toggle persists to localStorage (shared across turns);
+  // clear it so a prior test's "Exact" selection doesn't leak into the next
+  // test's initial render.
+  window.localStorage.clear();
   createSessionMock.mockReset();
   streamRunMock.mockReset();
   uploadImageMock.mockReset();
@@ -100,10 +110,14 @@ beforeEach(() => {
   decideApprovalsMock.mockResolvedValue({ results: [], succeeded: 0 });
   streamRunEventsMock.mockReset();
   streamRunEventsMock.mockReturnValue(makeStream([]));
+  getRunMock.mockReset();
+  getRunTraceMock.mockReset();
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  setStoredToken(null);
 });
 
 function makeStream(events: SseEvent[]): AsyncGenerator<SseEvent, void, void> {
@@ -112,12 +126,32 @@ function makeStream(events: SseEvent[]): AsyncGenerator<SseEvent, void, void> {
   })();
 }
 
+function jwt(roles: string[] = []): string {
+  const header = btoa(JSON.stringify({ alg: "none", typ: "JWT" }));
+  const body = btoa(
+    JSON.stringify({
+      sub: "u",
+      tenant_id: "22222222-2222-2222-2222-222222222222",
+      roles,
+    }),
+  );
+  return `${header}.${body}.`;
+}
+
 // The per-turn run-detail link uses react-router <Link>, so every render needs
-// a Router context.
-function renderPg(detail: AgentDetailResponse = sampleDetail) {
+// a Router context. Batch 4b item 15's Langfuse deep link is system_admin
+// gated (useAuth()), so every render also needs an AuthProvider — default to
+// a non-admin token since most of these tests don't exercise the Langfuse link.
+function renderPg(
+  detail: AgentDetailResponse = sampleDetail,
+  { admin = false }: { admin?: boolean } = {},
+) {
+  setStoredToken(jwt(admin ? ["system_admin"] : []));
   return render(
     <MemoryRouter>
-      <PlaygroundTab detail={detail} />
+      <AuthProvider>
+        <PlaygroundTab detail={detail} />
+      </AuthProvider>
     </MemoryRouter>,
   );
 }
@@ -1083,5 +1117,188 @@ describe("PlaygroundTab", () => {
     await screen.findByTestId("playground-feedback-error");
     // Not marked submitted — the user can retry.
     expect(screen.getByTestId("playground-feedback-up")).toBeEnabled();
+  });
+
+  // Batch 4b Task 5 — third "Exact" event-view tier (item 14) + purpose
+  // labelling (A') + system_admin-gated Langfuse deep link (item 15).
+  describe("exact trace view + Langfuse link", () => {
+    it("does not fetch the trace until 'Exact' is selected, then labels the sole llm span primary reasoning (1:1 with agent steps)", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          {
+            id: "m",
+            event: "metadata",
+            data: { run_id: "run-exact-1" },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          {
+            id: "u",
+            event: "updates",
+            data: { agent: { messages: [{ type: "ai", content: "hi" }] } },
+            rawData: "",
+            receivedAt: "t2",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t3" },
+        ]),
+      );
+      getRunTraceMock.mockResolvedValue({
+        status: "ok",
+        trace: { name: "trace-1", latencyMs: 1000, totalCostUsd: null, spanCount: 1 },
+        spans: [
+          {
+            id: "s1",
+            parentId: null,
+            kind: "llm",
+            label: "LLM call",
+            detail: null,
+            startMs: 0,
+            latencyMs: 500,
+            model: "glm-4.6",
+            inputTokens: 10,
+            outputTokens: 20,
+            costUsd: null,
+            input: "prompt",
+            output: "reply",
+          },
+        ],
+      });
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      // Segmented now has three tiers; still defaults to the tool-call
+      // timeline, and the trace endpoint isn't hit before "Exact" is picked.
+      const toggle = screen.getByTestId("playground-event-view-toggle");
+      expect(within(toggle).getByText(i18n.t("event_stream.view_exact"))).toBeInTheDocument();
+      expect(getRunTraceMock).not.toHaveBeenCalled();
+
+      await user.click(within(toggle).getByText(i18n.t("event_stream.view_exact")));
+
+      await waitFor(() =>
+        expect(getRunTraceMock).toHaveBeenCalledWith(
+          sampleThread.thread_id,
+          "run-exact-1",
+        ),
+      );
+      await screen.findByTestId("trace-view");
+      expect(screen.getByText(/Primary reasoning/)).toBeInTheDocument();
+    });
+
+    it("shows a loading state while the exact trace fetch is in flight", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          {
+            id: "m",
+            event: "metadata",
+            data: { run_id: "run-loading" },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t2" },
+        ]),
+      );
+      let resolveTrace: (value: RunTrace) => void = () => {};
+      getRunTraceMock.mockReturnValue(
+        new Promise((resolve) => {
+          resolveTrace = resolve;
+        }),
+      );
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      await user.click(
+        within(screen.getByTestId("playground-event-view-toggle")).getByText(
+          i18n.t("event_stream.view_exact"),
+        ),
+      );
+      expect(
+        await screen.findByTestId("playground-trace-loading"),
+      ).toBeInTheDocument();
+
+      resolveTrace({ status: "no_trace" });
+      await screen.findByTestId("trace-view");
+      expect(
+        screen.queryByTestId("playground-trace-loading"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides the Langfuse link for a non-admin turn even when the run has a trace_id and the base url is configured", async () => {
+      const user = userEvent.setup();
+      vi.stubEnv("VITE_LANGFUSE_BASE_URL", "https://langfuse.example.com/");
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          {
+            id: "m",
+            event: "metadata",
+            data: { run_id: "run-nolink" },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t2" },
+        ]),
+      );
+
+      renderPg(sampleDetail, { admin: false });
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      // Give any (incorrect) fetch a tick to land before asserting absence.
+      await waitFor(() => expect(screen.getByTestId("playground-turn")).toBeInTheDocument());
+      expect(screen.queryByTestId("playground-turn-langfuse")).not.toBeInTheDocument();
+      expect(getRunMock).not.toHaveBeenCalled();
+    });
+
+    it("shows a direct Langfuse link for a system_admin when the run has a trace_id", async () => {
+      const user = userEvent.setup();
+      vi.stubEnv("VITE_LANGFUSE_BASE_URL", "https://langfuse.example.com/");
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          {
+            id: "m",
+            event: "metadata",
+            data: { run_id: "run-link" },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t2" },
+        ]),
+      );
+      getRunMock.mockResolvedValue({
+        run_id: "run-link",
+        thread_id: sampleThread.thread_id,
+        status: "success",
+        pending_approval: null,
+        trace_id: "tr-xyz",
+      });
+
+      renderPg(sampleDetail, { admin: true });
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const link = await screen.findByTestId("playground-turn-langfuse");
+      expect(link).toHaveAttribute(
+        "href",
+        "https://langfuse.example.com/trace/tr-xyz",
+      );
+      expect(getRunMock).toHaveBeenCalledWith(sampleThread.thread_id, "run-link");
+    });
   });
 });
