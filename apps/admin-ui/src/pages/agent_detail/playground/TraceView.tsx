@@ -33,6 +33,7 @@ import { useTranslation } from "react-i18next";
 
 import type { RunTrace, TraceSpan, TraceStatus } from "../../../api/trace_facade";
 import { fmtDuration } from "./duration_format";
+import { buildRows, isWideBar, type TraceRowData } from "./trace_tree";
 
 const ACCENT = "var(--ew-text-info, #4c8dff)";
 const SUCCESS = "var(--ew-text-success, #3ecf8e)";
@@ -71,39 +72,6 @@ export function TraceView({ trace, onRefresh }: TraceViewProps) {
   );
 }
 
-interface TraceRowData {
-  span: TraceSpan;
-  depth: number;
-  /** One entry per ancestor level (length === depth). Column `i < depth-1`
-   *  draws a through-line when `continues[i]` is true (that ancestor has
-   *  more siblings below); column `depth-1` always draws the elbow
-   *  connecting the immediate parent down to this row. */
-  continues: boolean[];
-}
-
-function buildRows(spans: readonly TraceSpan[]): TraceRowData[] {
-  const byParent = new Map<string | null, TraceSpan[]>();
-  for (const span of spans) {
-    const list = byParent.get(span.parentId) ?? [];
-    list.push(span);
-    byParent.set(span.parentId, list);
-  }
-  for (const list of byParent.values()) {
-    list.sort((a, b) => a.startMs - b.startMs);
-  }
-
-  const rows: TraceRowData[] = [];
-  function walk(parentId: string | null, continues: boolean[]): void {
-    const children = byParent.get(parentId) ?? [];
-    children.forEach((span, i) => {
-      const isLast = i === children.length - 1;
-      rows.push({ span, depth: continues.length, continues });
-      walk(span.id, [...continues, !isLast]);
-    });
-  }
-  walk(null, []);
-  return rows;
-}
 
 function TraceTree({ spans, totalMs }: { spans: readonly TraceSpan[]; totalMs: number }) {
   const { t } = useTranslation();
@@ -234,7 +202,7 @@ function TreeGuideCell({ variant }: { variant: "v" | "elbow" | "blank" }) {
 function GanttBar({ span, totalMs }: { span: TraceSpan; totalMs: number }) {
   const leftPct = totalMs > 0 ? (span.startMs / totalMs) * 100 : 0;
   const widthPct = totalMs > 0 ? (span.latencyMs / totalMs) * 100 : 0;
-  const wide = widthPct >= 50;
+  const wide = isWideBar(widthPct);
   return (
     <div
       data-testid="trace-bar"
