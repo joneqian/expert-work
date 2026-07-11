@@ -1480,6 +1480,57 @@ describe("PlaygroundTab", () => {
       expect(screen.queryByTestId("playground-approval")).not.toBeInTheDocument();
     });
 
+    it("keeps the fallback answer when a history run replays empty (only an end frame)", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      const past: ThreadMeta = {
+        ...sampleThread,
+        thread_id: "aaaaaaaa-0000-0000-0000-000000000004",
+      };
+      listSessionsMock.mockResolvedValue([past]);
+      getMessagesMock.mockResolvedValue([
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+      ]);
+      listThreadRunsMock.mockResolvedValue([
+        { runId: "r1", status: "success", isResume: false, createdAt: "t1" },
+      ]);
+      // The terminal-replay endpoint always appends an ``end`` frame, so an
+      // empty run replays as a lone end frame — no renderable content.
+      streamRunEventsMock.mockReturnValue(
+        makeStream([
+          { id: "e1", event: "end", data: "ok", rawData: "ok", receivedAt: "t1" },
+        ]),
+      );
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.click(screen.getByTestId("playground-history-open"));
+      await user.click(
+        await screen.findByTestId(`session-history-item-${past.thread_id}`),
+      );
+
+      await waitFor(() =>
+        expect(streamRunEventsMock).toHaveBeenCalledWith(
+          past.thread_id,
+          "r1",
+          expect.anything(),
+        ),
+      );
+
+      // An empty replay degrades to the fallback text (from ``/messages``) —
+      // it must NOT fall through to the full render's "no text" empty state,
+      // which would drop content we already have. No crash, no Spin.
+      await screen.findByText("a1");
+      expect(
+        screen.queryByText(i18n.t("playground.turn_no_text")),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(i18n.t("playground.history_loading")),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("playground-approval")).not.toBeInTheDocument();
+    });
+
     it("drops a stale resume's history write when a newer resume superseded it", async () => {
       const user = userEvent.setup();
       createSessionMock.mockResolvedValue(sampleThread);

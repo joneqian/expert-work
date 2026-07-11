@@ -460,9 +460,22 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         collected.push(frame);
         if (frame.event === "end") break;
       }
+      // The terminal-replay endpoint ALWAYS appends an ``end`` frame after the
+      // stored rows (runs.py ``_stream_replay``), so an empty run replays as a
+      // lone ``[{event:"end"}]``. Only mark ``done`` when the replay actually
+      // delivered renderable content AND completed; an empty replay
+      // (no non-end frame) or a truncated one (no end frame) degrades to
+      // ``error`` — which keeps the placeholder showing ``fallbackAnswer``
+      // (the /messages text we already have) instead of the full render's
+      // "no text" empty state. 不丢已有内容。
+      const sawEnd = collected.some((f) => f.event === "end");
+      const hasContent = collected.some((f) => f.event !== "end");
       setHistoryLoads((prev) => ({
         ...prev,
-        [runId]: { state: "done", events: collected },
+        [runId]:
+          hasContent && sawEnd
+            ? { state: "done", events: collected }
+            : { state: "error", events: [] },
       }));
     } catch {
       setHistoryLoads((prev) => ({ ...prev, [runId]: { state: "error", events: [] } }));
