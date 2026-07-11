@@ -6,7 +6,7 @@
  * ``GET /v1/sessions/{thread_id}/runs/{run_id}`` is one of the few
  * endpoints that returns the raw payload (no envelope) — see :func:`getRun`.
  */
-import { apiClient } from "./client";
+import { apiClient, unwrap, type ApiEnvelope } from "./client";
 
 export type RunStatus =
   // Server-side ``RunStatus`` enum (expert_work.runtime.runs.RunStatus).
@@ -153,4 +153,39 @@ export async function* streamRunEvents(
   }
   const { parseSseStream } = await import("./sessions");
   yield* parseSseStream(response.body, signal);
+}
+
+/** Playground history reconstruction — one row of ``GET
+ *  /v1/sessions/{thread_id}/runs``. ``createdAt`` orders turns; ``runId``
+ *  feeds the per-run event replay that rebuilds a full historical turn. */
+export interface ThreadRunSummary {
+  runId: string;
+  status: RunStatus;
+  isResume: boolean;
+  createdAt: string;
+}
+
+interface ThreadRunRow {
+  run_id: string;
+  status: RunStatus;
+  is_resume: boolean;
+  created_at: string;
+}
+
+/** List a thread's runs oldest-first. ``tenantId`` (a system_admin drilling
+ *  into a foreign tenant) is a no-op for a caller's own tenant. */
+export async function listThreadRuns(
+  threadId: string,
+  tenantId?: string,
+): Promise<ThreadRunSummary[]> {
+  const response = await apiClient.get<ApiEnvelope<{ runs: ThreadRunRow[] }>>(
+    `/v1/sessions/${threadId}/runs`,
+    { params: tenantId ? { tenant_id: tenantId } : undefined },
+  );
+  return unwrap(response.data).runs.map((r) => ({
+    runId: r.run_id,
+    status: r.status,
+    isResume: r.is_resume,
+    createdAt: r.created_at,
+  }));
 }
