@@ -35,6 +35,7 @@ import {
   AlertTriangle,
   Check,
   Download,
+  ExternalLink,
   FileText,
   HardDrive,
   History,
@@ -60,7 +61,8 @@ import {
 import { ApiError } from "../../api/client";
 import { listMembers } from "../../api/members";
 import { listRateCards, type RateCardRecord } from "../../api/rate_card";
-import { streamRunEvents } from "../../api/runs";
+import { getRun, streamRunEvents } from "../../api/runs";
+import { getRunTrace, type RunTrace } from "../../api/trace_facade";
 import {
   createSession,
   deleteSessionArtifact,
@@ -98,6 +100,8 @@ import type { AgentDetailResponse } from "../../api/agents";
 import { AgentStatePanels } from "./playground/AgentStatePanels";
 import { StepTimeline } from "./playground/StepTimeline";
 import { TimelineFilterBar } from "./playground/TimelineFilterBar";
+import { TraceView } from "./playground/TraceView";
+import { labelPurpose } from "./playground/trace_purpose";
 import { TurnMeta } from "./playground/TurnMeta";
 import { PlanPanel } from "../run_detail/PlanPanel";
 import {
@@ -105,6 +109,8 @@ import {
   readPromptJinja,
   readPromptVariables,
 } from "../../components/manifest-editor/form_model";
+import { buildLangfuseTraceUrl } from "../../config/env";
+import { useAuth } from "../../auth/AuthContext";
 
 interface Attachment {
   id: string;
@@ -161,6 +167,11 @@ function formatBytes(bytes: number): string {
 export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const { t } = useTranslation();
   const r = detail.record;
+  // Langfuse has no per-tenant isolation (single ClickHouse, all tenants
+  // mixed), so the per-turn deep link (item 15) is platform-ops only — see
+  // TraceToolbar for the same gate.
+  const { identity } = useAuth();
+  const isSystemAdmin = identity?.isSystemAdmin ?? false;
 
   // Dynamic-Prompt — the agent's declared run-time variables (jinja agents only).
   const manifestLike = { spec: r.spec };
@@ -176,13 +187,14 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [creatingThread, setCreatingThread] = useState(false);
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [eventView, setEventViewState] = useState<"timeline" | "raw">(() => {
-    if (typeof window === "undefined") return "timeline";
-    return window.localStorage.getItem(EVENT_VIEW_STORAGE_KEY) === "raw"
-      ? "raw"
-      : "timeline";
-  });
-  const setEventView = useCallback((next: "timeline" | "raw") => {
+  const [eventView, setEventViewState] = useState<"timeline" | "raw" | "exact">(
+    () => {
+      if (typeof window === "undefined") return "timeline";
+      const stored = window.localStorage.getItem(EVENT_VIEW_STORAGE_KEY);
+      return stored === "raw" || stored === "exact" ? stored : "timeline";
+    },
+  );
+  const setEventView = useCallback((next: "timeline" | "raw" | "exact") => {
     setEventViewState(next);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(EVENT_VIEW_STORAGE_KEY, next);
@@ -1385,6 +1397,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               deciding={running}
               onExport={handleExport}
               exporting={exportingId === turn.id}
+              isSystemAdmin={isSystemAdmin}
             />
           ))}
         </div>
@@ -1671,12 +1684,13 @@ function TurnCard({
   deciding,
   onExport,
   exporting,
+  isSystemAdmin,
 }: {
   turn: Turn;
   /** The turn's index in the transcript — sent as feedback ``turn_seq``. */
   turnSeq: number;
-  eventView: "timeline" | "raw";
-  onViewChange: (view: "timeline" | "raw") => void;
+  eventView: "timeline" | "raw" | "exact";
+  onViewChange: (view: "timeline" | "raw" | "exact") => void;
   threadId: string | null;
   onDownloadArtifact: (threadId: string, name: string) => Promise<void>;
   rate: RateCardRecord | null;
@@ -1688,6 +1702,9 @@ function TurnCard({
   deciding: boolean;
   onExport: (turn: Turn) => void;
   exporting: boolean;
+  /** item 15 — gates the "open in Langfuse" deep link (Langfuse has no
+   *  per-tenant isolation; see TraceToolbar for the same gate). */
+  isSystemAdmin: boolean;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
@@ -1749,6 +1766,59 @@ function TurnCard({
     summary.finalText ??
     (turn.status === "running" ? t("playground.turn_running") : null);
   const runId = runIdOf(turn.events);
+
+  // Batch 4b item 14 — "精确" (exact) trace view. Lazy: fetched only once
+  // the user selects "exact" (``eventView`` is shared across every
+  // TurnCard, so selecting it fetches every currently-rendered turn's
+  // trace — but a turn is never fetched while some other view is active).
+  const agentStepCount = useMemo(
+    () => timeline.filter((it) => it.kind === "agent").length,
+    [timeline],
+  );
+  const [trace, setTrace] = useState<RunTrace | null>(null);
+  useEffect(() => {
+    if (eventView !== "exact" || !threadId || !runId || trace !== null) return;
+    let cancelled = false;
+    void getRunTrace(threadId, runId)
+      .then((data) => {
+        if (!cancelled) setTrace(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTrace({ status: "unavailable" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventView, threadId, runId, trace]);
+  // A' purpose labelling (spec §3.2) — see trace_purpose.ts.
+  const labeledTrace = useMemo(
+    () =>
+      trace
+        ? labelPurpose(trace, agentStepCount, t("playground.tr_purpose_primary"))
+        : null,
+    [trace, agentStepCount, t],
+  );
+
+  // item 15 — direct Langfuse deep link. system_admin only (Langfuse has no
+  // per-tenant isolation — see TraceToolbar). Best-effort: a failed getRun
+  // just leaves the link hidden.
+  const [traceId, setTraceId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSystemAdmin || !threadId || !runId) return;
+    let cancelled = false;
+    void getRun(threadId, runId)
+      .then((detail) => {
+        if (!cancelled) setTraceId(detail.trace_id ?? null);
+      })
+      .catch(() => {
+        // Best-effort — the link simply stays hidden on failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSystemAdmin, threadId, runId]);
+  const langfuseUrl = isSystemAdmin ? buildLangfuseTraceUrl(traceId) : null;
+
   // #4 cost — non-cached input + cache_read + output, each at its per-mtok rate
   // (micro-元 per 1M tokens). null when no usage or no rate for the model.
   const costCny =
@@ -1979,7 +2049,7 @@ function TurnCard({
                     gap: 8,
                   }}
                 >
-                  <Segmented<"timeline" | "raw">
+                  <Segmented<"timeline" | "raw" | "exact">
                     size="small"
                     value={eventView}
                     onChange={onViewChange}
@@ -1989,6 +2059,7 @@ function TurnCard({
                         label: t("event_stream.view_timeline"),
                       },
                       { value: "raw", label: t("event_stream.view_raw") },
+                      { value: "exact", label: t("event_stream.view_exact") },
                     ]}
                     data-testid="playground-event-view-toggle"
                   />
@@ -2003,6 +2074,19 @@ function TurnCard({
                   >
                     {t("playground.export_json")}
                   </Button>
+                  {langfuseUrl !== null && (
+                    <Button
+                      size="small"
+                      type="link"
+                      icon={<ExternalLink size={13} strokeWidth={1.75} />}
+                      href={langfuseUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="playground-turn-langfuse"
+                    >
+                      {t("trace_toolbar.open_in_langfuse")}
+                    </Button>
+                  )}
                 </span>
               </div>
             ),
@@ -2022,6 +2106,18 @@ function TurnCard({
                   />
                   <StepTimeline items={visibleTimeline} />
                 </>
+              ) : eventView === "exact" ? (
+                labeledTrace ? (
+                  <TraceView trace={labeledTrace} />
+                ) : (
+                  <Text
+                    type="secondary"
+                    style={{ fontSize: 12 }}
+                    data-testid="playground-trace-loading"
+                  >
+                    {t("common.loading")}
+                  </Text>
+                )
               ) : (
                 <div
                   style={{ display: "flex", flexDirection: "column", gap: 8 }}

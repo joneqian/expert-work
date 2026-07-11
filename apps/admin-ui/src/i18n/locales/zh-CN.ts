@@ -821,6 +821,7 @@ const zhCN: TranslationKeys = {
     tr_io_input_hint: "发给模型的提示词",
     tr_io_output: "输出（response）",
     tr_io_output_hint: "模型回复",
+    tr_purpose_primary: "主推理",
   },
   session_history: {
     title: "会话历史",

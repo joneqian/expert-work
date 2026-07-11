@@ -770,6 +770,7 @@ export interface TranslationKeys {
     tr_io_input_hint: string;
     tr_io_output: string;
     tr_io_output_hint: string;
+    tr_purpose_primary: string;
   };
   session_history: {
     title: string;
@@ -3185,6 +3186,7 @@ const en: TranslationKeys = {
     tr_io_input_hint: "The prompt sent to the model",
     tr_io_output: "Output (response)",
     tr_io_output_hint: "The model's reply",
+    tr_purpose_primary: "Primary reasoning",
   },
   session_history: {
     title: "Session history",
