@@ -72,6 +72,30 @@ const decideApprovalsMock = vi.spyOn(approvalsSdk, "decideApprovals");
 const streamRunEventsMock = vi.spyOn(runsSdk, "streamRunEvents");
 const getRunMock = vi.spyOn(runsSdk, "getRun");
 const getRunTraceMock = vi.spyOn(traceFacadeSdk, "getRunTrace");
+const listThreadRunsMock = vi.spyOn(runsSdk, "listThreadRuns");
+
+// jsdom has no IntersectionObserver — stub one that treats every observed
+// element as immediately visible (fires its callback synchronously from
+// ``observe``), so a history row's lazy replay kicks off without needing to
+// simulate real scrolling.
+class IOStub {
+  private cb: IntersectionObserverCallback;
+  constructor(cb: IntersectionObserverCallback) {
+    this.cb = cb;
+  }
+  observe = (el: Element) => {
+    this.cb(
+      [{ isIntersecting: true, target: el } as IntersectionObserverEntry],
+      this as unknown as IntersectionObserver,
+    );
+  };
+  unobserve = () => {};
+  disconnect = () => {};
+  takeRecords = () => [];
+  root = null;
+  rootMargin = "";
+  thresholds: number[] = [];
+}
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -112,6 +136,13 @@ beforeEach(() => {
   streamRunEventsMock.mockReturnValue(makeStream([]));
   getRunMock.mockReset();
   getRunTraceMock.mockReset();
+  // Default: no runs for a resumed thread — a mismatch against any non-empty
+  // ``history`` (the common case in the existing resume tests below), so
+  // ``buildHistoryTurns`` returns null and those tests keep exercising the
+  // pre-existing flat-text degradation path unless a test opts into runs.
+  listThreadRunsMock.mockReset();
+  listThreadRunsMock.mockResolvedValue([]);
+  vi.stubGlobal("IntersectionObserver", IOStub);
 });
 
 afterEach(() => {
@@ -1299,6 +1330,141 @@ describe("PlaygroundTab", () => {
         "https://langfuse.example.com/trace/tr-xyz",
       );
       expect(getRunMock).toHaveBeenCalledWith(sampleThread.thread_id, "run-link");
+    });
+  });
+
+  // Task 5 — resume reconstructs history as lazy read-only TurnCards when the
+  // message/run counts line up (buildHistoryTurns pairs 1:1); a mismatch or a
+  // failed lookup/replay must degrade — never a crash, never lost content.
+  describe("history lazy rebuild on resume", () => {
+    it("replays a count-matched history run into a full TurnCard when its row scrolls into view", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      const past: ThreadMeta = {
+        ...sampleThread,
+        thread_id: "aaaaaaaa-0000-0000-0000-000000000001",
+      };
+      listSessionsMock.mockResolvedValue([past]);
+      getMessagesMock.mockResolvedValue([
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+      ]);
+      listThreadRunsMock.mockResolvedValue([
+        { runId: "r1", status: "success", isResume: false, createdAt: "2026-05-25T00:00:00Z" },
+      ]);
+      streamRunEventsMock.mockReturnValue(
+        makeStream([
+          {
+            id: "u1",
+            event: "updates",
+            data: {
+              agent: { messages: [{ type: "ai", content: "replayed answer" }] },
+            },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          { id: "e1", event: "end", data: "ok", rawData: "ok", receivedAt: "t2" },
+        ]),
+      );
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.click(screen.getByTestId("playground-history-open"));
+      await user.click(
+        await screen.findByTestId(`session-history-item-${past.thread_id}`),
+      );
+
+      await waitFor(() =>
+        expect(streamRunEventsMock).toHaveBeenCalledWith(
+          past.thread_id,
+          "r1",
+          expect.anything(),
+        ),
+      );
+
+      // The replayed answer renders (not just the flat fallback text) — the
+      // debug panels filled in from the replayed events.
+      await screen.findByText("replayed answer");
+      expect(
+        screen.queryByText(i18n.t("playground.history_loading")),
+      ).not.toBeInTheDocument();
+      // Read-only: no mutating control on a finished historical run.
+      expect(screen.queryByTestId("playground-approval")).not.toBeInTheDocument();
+    });
+
+    it("falls back to the flat history block when message/run counts don't line up", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      const past: ThreadMeta = {
+        ...sampleThread,
+        thread_id: "aaaaaaaa-0000-0000-0000-000000000002",
+      };
+      listSessionsMock.mockResolvedValue([past]);
+      getMessagesMock.mockResolvedValue([
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+        { role: "assistant", content: "a2" },
+      ]);
+      // 2 turns worth of messages, 3 runs — buildHistoryTurns' count guard
+      // rejects the pairing (e.g. an approval split one turn across 2 runs).
+      listThreadRunsMock.mockResolvedValue([
+        { runId: "r1", status: "success", isResume: false, createdAt: "t1" },
+        { runId: "r2", status: "success", isResume: true, createdAt: "t2" },
+        { runId: "r3", status: "success", isResume: true, createdAt: "t3" },
+      ]);
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.click(screen.getByTestId("playground-history-open"));
+      await user.click(
+        await screen.findByTestId(`session-history-item-${past.thread_id}`),
+      );
+
+      // Existing flat degradation block renders the raw text turns.
+      const hist = await screen.findByTestId("playground-history");
+      expect(hist).toHaveTextContent("q1");
+      expect(hist).toHaveTextContent("a2");
+      expect(
+        screen.queryByText(i18n.t("playground.history_loading")),
+      ).not.toBeInTheDocument();
+      // The count mismatch means no replay was ever attempted.
+      expect(streamRunEventsMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps the fallback answer when a history run's replay fails", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      const past: ThreadMeta = {
+        ...sampleThread,
+        thread_id: "aaaaaaaa-0000-0000-0000-000000000003",
+      };
+      listSessionsMock.mockResolvedValue([past]);
+      getMessagesMock.mockResolvedValue([
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+      ]);
+      listThreadRunsMock.mockResolvedValue([
+        { runId: "r1", status: "success", isResume: false, createdAt: "t1" },
+      ]);
+      streamRunEventsMock.mockImplementation(() => {
+        return (async function* () {
+          throw new Error("replay boom");
+        })();
+      });
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.click(screen.getByTestId("playground-history-open"));
+      await user.click(
+        await screen.findByTestId(`session-history-item-${past.thread_id}`),
+      );
+
+      // Fallback answer (from ``/messages``) still shows; no crash, no
+      // approval control on a failed historical replay.
+      await screen.findByText("a1");
+      expect(screen.getByTestId("playground-input")).toBeInTheDocument();
+      expect(screen.queryByTestId("playground-approval")).not.toBeInTheDocument();
     });
   });
 });
