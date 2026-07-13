@@ -18,8 +18,8 @@ export type RenderedMessage = {
 };
 
 /** Structured trace span input/output — either a rendered message list or
- *  plain text (both possibly truncated at the source). Task 8 wires this
- *  into `TraceSpan.input`/`output` once the consumer is updated in lockstep. */
+ *  plain text (both possibly truncated at the source). Wired into
+ *  `TraceSpan.input`/`output` below; consumed by TraceView's `IoSection`. */
 export type RunTraceIo =
   | { kind: "messages"; messages: RenderedMessage[] }
   | { kind: "text"; text: string; truncated: boolean; fullChars: number };
@@ -36,8 +36,8 @@ export interface TraceSpan {
   inputTokens: number | null;
   outputTokens: number | null;
   costUsd: number | null;
-  input: string | null;
-  output: string | null;
+  input: RunTraceIo | null;
+  output: RunTraceIo | null;
   level: "default" | "warning" | "error";
   statusMessage: string | null;
 }

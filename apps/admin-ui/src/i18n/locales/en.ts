@@ -770,10 +770,21 @@ export interface TranslationKeys {
     tr_detail_model: string;
     tr_detail_tokens: string;
     tr_detail_cost: string;
-    tr_io_input: string;
-    tr_io_input_hint: string;
-    tr_io_output: string;
-    tr_io_output_hint: string;
+    tr_io_llm_msgs: string;
+    tr_io_llm_msgs_hint: string;
+    tr_io_llm_out: string;
+    tr_io_llm_out_hint: string;
+    tr_io_tool_args: string;
+    tr_io_tool_args_hint: string;
+    tr_io_tool_result: string;
+    tr_io_tool_result_hint: string;
+    tr_io_in: string;
+    tr_io_out: string;
+    tr_msg_truncated: string;
+    tr_msg_copy: string;
+    tr_msg_raw: string;
+    tr_msg_untrusted: string;
+    tr_msg_toolcall: string;
     tr_purpose_primary: string;
   };
   session_history: {
@@ -3190,10 +3201,21 @@ const en: TranslationKeys = {
     tr_detail_model: "model",
     tr_detail_tokens: "tokens",
     tr_detail_cost: "cost",
-    tr_io_input: "Input (prompt)",
-    tr_io_input_hint: "The prompt sent to the model",
-    tr_io_output: "Output (response)",
-    tr_io_output_hint: "The model's reply",
+    tr_io_llm_msgs: "Messages",
+    tr_io_llm_msgs_hint: "The full context sent to the model",
+    tr_io_llm_out: "Reply",
+    tr_io_llm_out_hint: "The model's output",
+    tr_io_tool_args: "Arguments",
+    tr_io_tool_args_hint: "The input passed to the tool",
+    tr_io_tool_result: "Result",
+    tr_io_tool_result_hint: "What the tool returned",
+    tr_io_in: "Input",
+    tr_io_out: "Output",
+    tr_msg_truncated: "Truncated {{n}} chars",
+    tr_msg_copy: "Copy",
+    tr_msg_raw: "View raw",
+    tr_msg_untrusted: "contains untrusted content",
+    tr_msg_toolcall: "→ called {{name}}",
     tr_purpose_primary: "Primary reasoning",
   },
   session_history: {

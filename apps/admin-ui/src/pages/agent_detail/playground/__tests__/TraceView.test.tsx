@@ -50,8 +50,8 @@ const llm = makeSpan({
   inputTokens: 120,
   outputTokens: 340,
   costUsd: 0.0021,
-  input: "user: 帮我查天气",
-  output: '{"reply":"晴天"}',
+  input: { kind: "text", text: "user: 帮我查天气", truncated: false, fullChars: 11 },
+  output: { kind: "text", text: '{"reply":"晴天"}', truncated: false, fullChars: 14 },
 });
 const tool = makeSpan({
   id: "r2",
@@ -61,6 +61,41 @@ const tool = makeSpan({
   detail: "get_weather",
   startMs: 2800,
   latencyMs: 160,
+});
+
+// Task 8 fixtures — structured `RunTraceIo` (messages / text), kept separate
+// from `llm`/`tool` above so the "empty segments not rendered" case (tool's
+// null i/o) keeps covering that behavior undisturbed.
+const structuredLlm = makeSpan({
+  id: "sr1",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  detail: "主推理",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "system", content: "sys", truncated: false, fullChars: 3, toolCalls: null },
+      { role: "human", content: "现在几点", truncated: false, fullChars: 4, toolCalls: null },
+      {
+        role: "tool",
+        content: "«UNTRUSTED nonce=ab»\n2026▁ 年\n«/UNTRUSTED nonce=ab»",
+        truncated: false,
+        fullChars: 10,
+        toolCalls: null,
+      },
+    ],
+  },
+  output: { kind: "text", text: "晴天", truncated: false, fullChars: 2 },
+});
+const argsTool = makeSpan({
+  id: "sr2",
+  parentId: "r0",
+  kind: "tool",
+  label: "工具调用",
+  detail: "exec_python",
+  input: { kind: "text", text: '{"code":"1"}', truncated: false, fullChars: 11 },
+  output: { kind: "text", text: "ok", truncated: false, fullChars: 2 },
 });
 
 function okTrace(spans: TraceSpan[] = [root, llm, tool]): RunTrace {
@@ -174,5 +209,29 @@ describe("TraceView", () => {
     render(<TraceView trace={okTrace([orphanA, orphanB])} onRefresh={vi.fn()} />);
     expect(screen.queryAllByTestId("trace-row")).toHaveLength(0);
     expect(screen.getByTestId("trace-refresh")).toBeInTheDocument();
+  });
+
+  it("llm span renders structured messages: system collapsed, human/tool visible, untrusted cleaned+badged", () => {
+    render(<TraceView trace={okTrace([root, structuredLlm, argsTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    // system 默认收起:内容 "sys" 不在 DOM,role 标签在
+    expect(within(detail).queryByText("sys")).not.toBeInTheDocument();
+    expect(within(detail).getByText("现在几点")).toBeInTheDocument();
+    // 不可信清洗:▁ 与 UNTRUSTED 不出现,badge 出现
+    expect(within(detail).queryByText(/UNTRUSTED|▁/)).not.toBeInTheDocument();
+    expect(within(detail).getByTestId("msg-untrusted")).toBeInTheDocument();
+  });
+
+  it("tool span uses 参数/结果 labels (Arguments/Result), not the llm span's messages/reply labels", () => {
+    // Test-time i18n resolves to English (see file header) — assert the
+    // English copy for the (kind-aware, translated) io-section titles;
+    // Chinese "参数"/"结果" are the zh-CN values for the same keys.
+    render(<TraceView trace={okTrace([root, structuredLlm, argsTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[2]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByText("Arguments")).toBeInTheDocument();
+    expect(within(detail).getByText("Result")).toBeInTheDocument();
+    expect(within(detail).queryByText(/^Messages$|^Reply$/)).not.toBeInTheDocument();
   });
 });

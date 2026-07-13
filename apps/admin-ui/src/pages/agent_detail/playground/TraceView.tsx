@@ -27,13 +27,20 @@
  *    `bottom:-2000px` hack) and the `.trace-sum` / `.legend` strips are
  *    skipped — they're outside the "核心结构" list in the task brief.
  */
-import { useState, type KeyboardEvent } from "react";
+import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { RunTrace, TraceSpan, TraceStatus } from "../../../api/trace_facade";
+import type {
+  RenderedMessage,
+  RunTrace,
+  RunTraceIo,
+  TraceSpan,
+  TraceStatus,
+} from "../../../api/trace_facade";
 import { fmtDuration } from "./duration_format";
 import { buildRows, isWideBar, type TraceRowData } from "./trace_tree";
+import { cleanUntrusted } from "./untrusted_clean";
 
 const ACCENT = "var(--ew-text-info, #4c8dff)";
 const SUCCESS = "var(--ew-text-success, #3ecf8e)";
@@ -42,6 +49,23 @@ const DANGER = "var(--ew-text-danger, #f0616d)";
 const PURPLE = "var(--ew-accent-violet, #b18cff)";
 const MUTED = "var(--ew-text-tertiary)";
 const LANE = "300px";
+
+const ACTION_LINK_STYLE: CSSProperties = {
+  border: 0,
+  background: "transparent",
+  color: ACCENT,
+  cursor: "pointer",
+  padding: 0,
+  font: "inherit",
+  fontSize: 11,
+};
+
+/** Best-effort clipboard copy — `navigator.clipboard` is unavailable in some
+ *  test/embedded environments; silently no-op rather than throwing. */
+function copyText(text: string): void {
+  if (typeof navigator === "undefined" || !navigator.clipboard) return;
+  navigator.clipboard.writeText(text).catch(() => {});
+}
 
 export interface TraceViewProps {
   trace: RunTrace;
@@ -349,19 +373,210 @@ function TraceRow({
   );
 }
 
+/** `RenderedMessage.role` is LangChain's raw `type` string (`system` /
+ *  `human` / `ai` / `tool` / occasionally something else) — colors match the
+ *  wireframe's `.role.*` classes; anything unrecognized falls back to the
+ *  same muted tone as `system`. */
+function roleColor(role: string): string {
+  if (role === "human") return ACCENT;
+  if (role === "ai") return PURPLE;
+  if (role === "tool") return SUCCESS;
+  return MUTED;
+}
+
+function UntrustedBadge() {
+  const { t } = useTranslation();
+  return (
+    <span
+      data-testid="msg-untrusted"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        fontSize: 10,
+        fontFamily: "var(--ew-font-mono)",
+        color: WARNING,
+        border: `1px solid color-mix(in srgb, ${WARNING} 40%, var(--ew-border-subtle))`,
+        borderRadius: 4,
+        padding: "0 6px",
+        flex: "0 0 auto",
+      }}
+    >
+      ⚑ {t("playground.tr_msg_untrusted")}
+    </span>
+  );
+}
+
+function TruncationRow({
+  fullChars,
+  copySource,
+  onViewRaw,
+}: {
+  fullChars: number;
+  copySource: string;
+  onViewRaw?: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 8,
+        paddingTop: 8,
+        borderTop: "1px dashed var(--ew-border-subtle)",
+        fontSize: 11,
+        color: MUTED,
+        flexWrap: "wrap",
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "var(--ew-font-mono)",
+          color: WARNING,
+          border: `1px solid color-mix(in srgb, ${WARNING} 40%, var(--ew-border-subtle))`,
+          borderRadius: 4,
+          padding: "0 6px",
+        }}
+      >
+        {t("playground.tr_msg_truncated", { n: fullChars })}
+      </span>
+      <button type="button" onClick={() => copyText(copySource)} style={ACTION_LINK_STYLE}>
+        {t("playground.tr_msg_copy")}
+      </button>
+      <span aria-hidden>·</span>
+      {/* Task 9 wires `onViewRaw` to fetchRunTraceRaw; here it's an optional
+       *  no-op placeholder so the action is visible but inert. */}
+      <button type="button" onClick={() => onViewRaw?.()} style={ACTION_LINK_STYLE}>
+        {t("playground.tr_msg_raw")}
+      </button>
+    </div>
+  );
+}
+
+/** One structured chat message inside an `IoSection` whose `io.kind ===
+ *  "messages"` (LLM span i/o). Independently collapsible — `system` starts
+ *  collapsed (usually the bulk of the token budget: skill/tool defs), every
+ *  other role starts expanded. Content is run through `cleanUntrusted`
+ *  before rendering (spotlight-fenced tool output is common here); the raw,
+ *  unclean text is only ever shown by the "查看原文" raw endpoint. */
+function MessageBlock({
+  message,
+  onViewRaw,
+}: {
+  message: RenderedMessage;
+  onViewRaw?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(message.role !== "system");
+  const toggle = (): void => setExpanded((v) => !v);
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggle();
+    }
+  };
+
+  const { text: cleaned, hadUntrusted } = cleanUntrusted(message.content);
+  const hasToolCalls = message.toolCalls !== null && message.toolCalls.length > 0;
+  const showToolCall = message.content === "" && hasToolCalls;
+  const color = roleColor(message.role);
+
+  return (
+    <div
+      data-testid="trace-message"
+      style={{
+        border: "1px solid var(--ew-border-subtle)",
+        borderRadius: 6,
+        background: "var(--ew-surface-base)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={onKeyDown}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", fontSize: 12, cursor: "pointer" }}
+      >
+        <span aria-hidden style={{ color: MUTED, fontSize: 10, width: 9, flex: "0 0 auto" }}>
+          {expanded ? "▾" : "▸"}
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--ew-font-mono)",
+            fontSize: 11,
+            padding: "0 6px",
+            borderRadius: 4,
+            letterSpacing: "0.03em",
+            flex: "0 0 auto",
+            color,
+            background: `color-mix(in srgb, ${color} 14%, transparent)`,
+          }}
+        >
+          {message.role}
+        </span>
+        {hadUntrusted && <UntrustedBadge />}
+        <span
+          style={{
+            marginLeft: "auto",
+            fontFamily: "var(--ew-font-mono)",
+            fontSize: 10.5,
+            color: MUTED,
+            flex: "0 0 auto",
+          }}
+        >
+          {message.fullChars} 字
+        </span>
+      </div>
+      {expanded && (
+        <div style={{ padding: "4px 11px 10px 11px", borderTop: "1px solid var(--ew-border-subtle)" }}>
+          {showToolCall ? (
+            <span style={{ fontFamily: "var(--ew-font-mono)", fontSize: 12, color: PURPLE }}>
+              {t("playground.tr_msg_toolcall", { name: (message.toolCalls ?? []).join(", ") })}
+            </span>
+          ) : (
+            <pre
+              style={{
+                margin: 0,
+                fontFamily: "var(--ew-font-mono)",
+                fontSize: 12,
+                lineHeight: 1.55,
+                color: "var(--ew-text-secondary)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                maxHeight: 280,
+                overflow: "auto",
+              }}
+            >
+              {cleaned}
+            </pre>
+          )}
+          {message.truncated && !showToolCall && (
+            <TruncationRow fullChars={message.fullChars} copySource={cleaned} onViewRaw={onViewRaw} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IoSection({
   testId,
   title,
   hint,
-  content,
+  io,
+  onViewRaw,
 }: {
   testId: string;
   title: string;
-  hint: string;
-  content: string | null;
+  hint?: string;
+  io: RunTraceIo | null;
+  onViewRaw?: () => void;
 }) {
   const [expanded, setExpanded] = useState(true);
-  if (content === null) return null;
+  if (io === null) return null;
 
   const toggle = (): void => setExpanded((v) => !v);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -392,38 +607,92 @@ function IoSection({
           {expanded ? "▾" : "▸"}
         </span>
         {title}
-        <span
-          style={{
-            fontSize: 10,
-            color: MUTED,
-            border: "1px solid var(--ew-border-subtle)",
-            borderRadius: 999,
-            padding: "0 6px",
-          }}
-        >
-          {hint}
-        </span>
+        {hint !== undefined && (
+          <span
+            style={{
+              fontSize: 10,
+              color: MUTED,
+              border: "1px solid var(--ew-border-subtle)",
+              borderRadius: 999,
+              padding: "0 6px",
+            }}
+          >
+            {hint}
+          </span>
+        )}
       </div>
-      {expanded && (
-        <pre
-          style={{
-            margin: 0,
-            padding: "0 13px 12px 30px",
-            fontFamily: "var(--ew-font-mono)",
-            fontSize: 12,
-            lineHeight: 1.55,
-            color: "var(--ew-text-secondary)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            maxHeight: 180,
-            overflow: "auto",
-          }}
-        >
-          {content}
-        </pre>
-      )}
+      {expanded &&
+        (io.kind === "messages" ? (
+          <div style={{ padding: "2px 13px 12px 13px", display: "flex", flexDirection: "column", gap: 5 }}>
+            {io.messages.map((message, i) => (
+              <MessageBlock key={i} message={message} onViewRaw={onViewRaw} />
+            ))}
+          </div>
+        ) : (
+          <IoText io={io} onViewRaw={onViewRaw} />
+        ))}
     </div>
   );
+}
+
+function IoText({
+  io,
+  onViewRaw,
+}: {
+  io: Extract<RunTraceIo, { kind: "text" }>;
+  onViewRaw?: () => void;
+}) {
+  const { text: cleaned } = cleanUntrusted(io.text);
+  return (
+    <div style={{ padding: "0 13px 12px 30px" }}>
+      <pre
+        style={{
+          margin: 0,
+          fontFamily: "var(--ew-font-mono)",
+          fontSize: 12,
+          lineHeight: 1.55,
+          color: "var(--ew-text-secondary)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          maxHeight: 280,
+          overflow: "auto",
+        }}
+      >
+        {cleaned}
+      </pre>
+      {io.truncated && <TruncationRow fullChars={io.fullChars} copySource={cleaned} onViewRaw={onViewRaw} />}
+    </div>
+  );
+}
+
+/** `IoSection` title/hint pick kind-aware copy: LLM spans carry a chat
+ *  message list ("对话消息"/"回复"), tool spans carry a single args/result
+ *  payload ("参数"/"结果"); anything else (session/generic span) falls back
+ *  to the generic in/out labels with no hint chip. */
+function ioLabels(
+  kind: TraceSpan["kind"],
+  t: (key: string, options?: Record<string, unknown>) => string,
+): { inTitle: string; inHint?: string; outTitle: string; outHint?: string } {
+  if (kind === "llm") {
+    return {
+      inTitle: t("playground.tr_io_llm_msgs"),
+      inHint: t("playground.tr_io_llm_msgs_hint"),
+      outTitle: t("playground.tr_io_llm_out"),
+      outHint: t("playground.tr_io_llm_out_hint"),
+    };
+  }
+  if (kind === "tool") {
+    return {
+      inTitle: t("playground.tr_io_tool_args"),
+      inHint: t("playground.tr_io_tool_args_hint"),
+      outTitle: t("playground.tr_io_tool_result"),
+      outHint: t("playground.tr_io_tool_result_hint"),
+    };
+  }
+  return {
+    inTitle: t("playground.tr_io_in"),
+    outTitle: t("playground.tr_io_out"),
+  };
 }
 
 function TraceDetail({ span, onClose }: { span: TraceSpan; onClose: () => void }) {
@@ -431,6 +700,7 @@ function TraceDetail({ span, onClose }: { span: TraceSpan; onClose: () => void }
   const tokenParts: string[] = [];
   if (span.inputTokens !== null) tokenParts.push(`in ${span.inputTokens}`);
   if (span.outputTokens !== null) tokenParts.push(`out ${span.outputTokens}`);
+  const labels = ioLabels(span.kind, t);
 
   return (
     <div
@@ -513,15 +783,15 @@ function TraceDetail({ span, onClose }: { span: TraceSpan; onClose: () => void }
       </div>
       <IoSection
         testId="trace-io-input"
-        title={t("playground.tr_io_input")}
-        hint={t("playground.tr_io_input_hint")}
-        content={span.input}
+        title={labels.inTitle}
+        hint={labels.inHint}
+        io={span.input}
       />
       <IoSection
         testId="trace-io-output"
-        title={t("playground.tr_io_output")}
-        hint={t("playground.tr_io_output_hint")}
-        content={span.output}
+        title={labels.outTitle}
+        hint={labels.outHint}
+        io={span.output}
       />
     </div>
   );
