@@ -1234,6 +1234,98 @@ describe("PlaygroundTab", () => {
       );
       await screen.findByTestId("trace-view");
       expect(screen.getByText(/Primary reasoning/)).toBeInTheDocument();
+      // Task 10 — RunStatusBanner renders above the trace, ok state.
+      expect(screen.getByTestId("run-status-banner")).toBeInTheDocument();
+      expect(screen.queryByTestId("run-status-jump")).not.toBeInTheDocument();
+    });
+
+    // Task 10 — RunStatusBanner error state + jump-to-error scroll.
+    it("shows the RunStatusBanner in error state when a span errored, and 'jump' scrolls the red-marked row into view", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          {
+            id: "m",
+            event: "metadata",
+            data: { run_id: "run-exact-err" },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          {
+            id: "u",
+            event: "updates",
+            data: { agent: { messages: [{ type: "ai", content: "hi" }] } },
+            rawData: "",
+            receivedAt: "t2",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t3" },
+        ]),
+      );
+      getRunTraceMock.mockResolvedValue({
+        status: "ok",
+        trace: { name: "trace-1", latencyMs: 1000, totalCostUsd: 0.0021, spanCount: 2 },
+        spans: [
+          {
+            id: "s1",
+            parentId: null,
+            kind: "session",
+            label: "Session run",
+            detail: null,
+            startMs: 0,
+            latencyMs: 1000,
+            model: null,
+            inputTokens: null,
+            outputTokens: null,
+            costUsd: null,
+            input: null,
+            output: null,
+            level: "default",
+            statusMessage: null,
+          },
+          {
+            id: "s2",
+            parentId: "s1",
+            kind: "tool",
+            label: "Tool call",
+            detail: "exec_python",
+            startMs: 100,
+            latencyMs: 500,
+            model: null,
+            inputTokens: null,
+            outputTokens: null,
+            costUsd: null,
+            input: null,
+            output: null,
+            level: "error",
+            statusMessage: "SandboxTimeout",
+          },
+        ],
+      });
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const toggle = screen.getByTestId("playground-event-view-toggle");
+      await user.click(within(toggle).getByText(i18n.t("event_stream.view_exact")));
+
+      await screen.findByTestId("trace-view");
+      const banner = screen.getByTestId("run-status-banner");
+      expect(banner).toHaveTextContent("Failed at Tool call · exec_python");
+      expect(screen.getByText("SandboxTimeout")).toBeInTheDocument();
+
+      const errorRow = screen
+        .getAllByTestId("trace-row")
+        .find((row) => row.getAttribute("data-error") === "true");
+      expect(errorRow).toBeTruthy();
+      const scrollSpy = vi.fn();
+      if (errorRow) errorRow.scrollIntoView = scrollSpy;
+
+      await user.click(screen.getByTestId("run-status-jump"));
+      expect(scrollSpy).toHaveBeenCalledTimes(1);
     });
 
     it("auto-polls a not_ready trace until it resolves, without a manual refresh", async () => {
