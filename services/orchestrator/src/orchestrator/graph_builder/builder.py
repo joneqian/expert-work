@@ -63,6 +63,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import itertools
+import json
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -96,6 +97,7 @@ from expert_work.protocol import (
     StructuredOutputSpec,
 )
 from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.redactor import DEFAULT_PATTERNS, PII_PATTERNS, DefaultSecretRedactor
 from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
 from expert_work.runtime.middleware import (
     LLMOutputValidationError,
@@ -1952,6 +1954,37 @@ def _extract_post_llm_messages(
     return list(updated)
 
 
+# 10.1 follow-up — the trace detail panel can't show tool call args/result
+# because the tool_call span never carries them. ``_record_tool_io`` fixes
+# that: masked (the OTLP export path does NOT apply Langfuse's PII mask —
+# spike-confirmed, so we mask manually with the same pattern union the
+# Langfuse SDK mask uses) + capped (avoid huge Langfuse payloads) input/output
+# on the two Langfuse-recognised OTel attribute keys.
+_TOOL_IO_CAP = 8192
+_LANGFUSE_OBS_INPUT_KEY = "langfuse.observation.input"
+_LANGFUSE_OBS_OUTPUT_KEY = "langfuse.observation.output"
+_tool_io_redactor = DefaultSecretRedactor(patterns={**DEFAULT_PATTERNS, **PII_PATTERNS})
+
+
+def _record_tool_io(span: Any, args: Mapping[str, Any], result: Any) -> None:
+    """Best-effort: give the tool_call span masked+capped input/output.
+
+    The OTLP export path does not run Langfuse's PII mask (spike-confirmed
+    with a planted secret), so this redacts manually before setting the
+    attributes. This is a side-channel: any failure only drops observability
+    data and must never block tool execution.
+    """
+    try:
+        masked_in = _tool_io_redactor.redact_tree(dict(args))
+        masked_out = _tool_io_redactor.redact_tree(str(result))
+        in_text = json.dumps(masked_in, ensure_ascii=False)[:_TOOL_IO_CAP]
+        out_text = str(masked_out)[:_TOOL_IO_CAP]
+        span.set_attribute(_LANGFUSE_OBS_INPUT_KEY, in_text)
+        span.set_attribute(_LANGFUSE_OBS_OUTPUT_KEY, out_text)
+    except Exception:  # instrumentation side-channel, never blocks a run
+        logger.warning("tool_span_io.record_failed", exc_info=True)
+
+
 async def _dispatch_tool(
     tool_call: dict[str, Any],
     registry: ToolRegistry,
@@ -2001,7 +2034,7 @@ async def _dispatch_tool(
         # dispatch, attached under the session root span.
         with expert_work_span(
             ExpertWorkComponent.ORCHESTRATOR, "tool_call", attributes={"tool": name}
-        ):
+        ) as span:
             outcome = await _invoke_tool(
                 tool,
                 args,
@@ -2011,6 +2044,7 @@ async def _dispatch_tool(
                 spotlight_nonce=spotlight_nonce,
                 budget_enabled=budget_enabled,
             )
+            _record_tool_io(span, args, outcome[0].content)
         ok = outcome[0].status != "error"
         # Stream HX-12 (Mini-ADR HX-I4) — call-through: the model called a
         # deferred name directly (it remembered the tool without a
