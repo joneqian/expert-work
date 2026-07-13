@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from expert_work.runtime.middleware import (
     CircuitOpenError,
+    LangfuseMiddleware,
     LLMClientError,
     LLMKeyUnavailableError,
     LLMNetworkError,
@@ -22,6 +23,8 @@ from expert_work.runtime.middleware import (
     LLMServerError,
     LLMStreamStaleError,
     LLMUnauthorizedError,
+    MiddlewareChain,
+    RecordingLangfuseClient,
 )
 from orchestrator.llm import (
     AllProvidersExhaustedError,
@@ -561,3 +564,73 @@ async def test_mk7_single_key_default_group_regression() -> None:
     with pytest.raises(AllProvidersExhaustedError):
         await router(messages=_msgs(), tools=[])
     assert len(k1.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — terminal populates ctx.payload["llm_response"] for LangfuseMiddleware
+#
+# Spike finding: LangfuseMiddleware._record_response_safe only records
+# output/usage when ctx.payload["llm_response"] is a Mapping (langfuse.py),
+# but production's terminal closure in _invoke_once only ever set
+# ctx.payload["response"] (the raw AIMessage) — never "llm_response". Unit
+# tests for LangfuseMiddleware hid the gap by hand-constructing
+# ctx.payload["llm_response"] directly instead of driving the real
+# terminal. These tests drive the real LLMRouter + terminal through a real
+# LangfuseMiddleware to catch that class of gap.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_terminal_populates_llm_response_for_langfuse_middleware() -> None:
+    """Real terminal (not a hand-built ctx) must set llm_response so
+    LangfuseMiddleware.record_output / record_usage actually fire."""
+    client = RecordingLangfuseClient()
+    chain = MiddlewareChain.from_middlewares("around_llm_call", [LangfuseMiddleware(client=client)])
+    response = AIMessage(
+        content="hello",
+        usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    )
+    provider = _ScriptedProvider(response=response)
+    router = LLMRouter(providers=[_handle(provider)], around_llm_chain=chain)
+
+    result = await router(messages=_msgs(), tools=[])
+
+    assert result is response
+    assert len(client.spans) == 1
+    span = client.spans[0]
+    assert span.output == "hello"
+    assert span.usage == {"input_tokens": 10, "output_tokens": 5}
+
+
+@pytest.mark.asyncio
+async def test_terminal_llm_response_flattens_block_list_content() -> None:
+    """Anthropic-shaped block-list content must flatten to plain text
+    for Langfuse's output field, not the raw block list."""
+    client = RecordingLangfuseClient()
+    chain = MiddlewareChain.from_middlewares("around_llm_call", [LangfuseMiddleware(client=client)])
+    response = AIMessage(
+        content=[{"type": "text", "text": "block "}, {"type": "text", "text": "answer"}]
+    )
+    provider = _ScriptedProvider(response=response)
+    router = LLMRouter(providers=[_handle(provider)], around_llm_chain=chain)
+
+    await router(messages=_msgs(), tools=[])
+
+    assert client.spans[0].output == "block answer"
+
+
+@pytest.mark.asyncio
+async def test_terminal_llm_response_omits_usage_when_no_usage_metadata() -> None:
+    """AIMessage without usage_metadata must not crash the terminal —
+    usage stays an empty mapping rather than raising."""
+    client = RecordingLangfuseClient()
+    chain = MiddlewareChain.from_middlewares("around_llm_call", [LangfuseMiddleware(client=client)])
+    response = AIMessage(content="no usage here")
+    provider = _ScriptedProvider(response=response)
+    router = LLMRouter(providers=[_handle(provider)], around_llm_chain=chain)
+
+    await router(messages=_msgs(), tools=[])
+
+    span = client.spans[0]
+    assert span.output == "no usage here"
+    assert span.usage == {}

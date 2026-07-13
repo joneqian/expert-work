@@ -25,6 +25,7 @@ extraction defends against both.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -76,7 +77,7 @@ class _ParsedObs:
     output: str | None
 
 
-def normalize_trace(trace: object, *, io_cap: int = 8192) -> dict[str, object]:
+def normalize_trace(trace: object, *, io_cap: int = 32768) -> dict[str, object]:
     """Normalize a Langfuse ``TraceWithFullDetails`` into a stable DTO.
 
     Returns ``{"status": "ok", "trace": {...}, "spans": [...]}`` where each
@@ -158,7 +159,7 @@ def normalize_trace(trace: object, *, io_cap: int = 8192) -> dict[str, object]:
     }
 
 
-def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 8192) -> dict[str, object]:
+def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 32768) -> dict[str, object]:
     """Fetch one trace from Langfuse and normalize it — Batch 4b Task 2.
 
     Unlike :func:`normalize_trace` this DOES touch the network (via the
@@ -217,8 +218,8 @@ def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
         input_tokens=_token_count(o, "prompt_tokens", "promptTokens"),
         output_tokens=_token_count(o, "completion_tokens", "completionTokens"),
         cost_usd=_cost_usd(o),
-        input=_cap(getattr(o, "input", None), io_cap),
-        output=_cap(getattr(o, "output", None), io_cap),
+        input=_render_io(getattr(o, "input", None), io_cap),
+        output=_render_io(getattr(o, "output", None), io_cap),
     )
 
 
@@ -320,6 +321,46 @@ def _cost_usd(o: Any) -> float | None:
     if not raw or raw <= 0:
         return None
     return float(raw)
+
+
+def _render_io(value: Any, io_cap: int) -> str | None:
+    """把 observation 的 input/output 渲染成人类可读文本再截断。
+
+    - 消息 list(``[{role?, content}]``)→ 每条 ``role`` 行 + content(真换行),
+      content 为 block-list(``[{type,text}]``)则取 text 拼接。
+    - 其它 list/dict → ``json.dumps(ensure_ascii=False, indent=2)``(真换行、非 ASCII 不转义)。
+    - str → 原样。None → None。
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return _cap(value, io_cap)
+    is_message_list = (
+        isinstance(value, list)
+        and value
+        and all(isinstance(m, dict) and "content" in m for m in value)
+    )
+    if is_message_list:
+        parts: list[str] = []
+        for m in value:
+            role = str(m.get("role", "")) or "message"
+            content = m.get("content")
+            if isinstance(content, list):
+                text = "".join(
+                    b["text"]
+                    for b in content
+                    if isinstance(b, dict) and isinstance(b.get("text"), str)
+                )
+            else:
+                text = (
+                    content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+                )
+            parts.append(f"[{role}]\n{text}")
+        return _cap("\n\n".join(parts), io_cap)
+    try:
+        return _cap(json.dumps(value, ensure_ascii=False, indent=2), io_cap)
+    except (TypeError, ValueError):
+        return _cap(str(value), io_cap)
 
 
 def _cap(value: Any, io_cap: int) -> str | None:
