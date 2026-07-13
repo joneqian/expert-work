@@ -763,6 +763,9 @@ export interface TranslationKeys {
     tr_state_no_trace_title: string;
     tr_state_no_trace_msg: string;
     tr_detail_close: string;
+    rb_ok: string;
+    rb_failed_at: string;
+    rb_jump: string;
     tr_detail_latency: string;
     tr_detail_model: string;
     tr_detail_tokens: string;
@@ -3180,6 +3183,9 @@ const en: TranslationKeys = {
     tr_state_no_trace_msg:
       "This run has no associated trace (Langfuse wasn't enabled, or it's an older run).",
     tr_detail_close: "Close",
+    rb_ok: "Succeeded",
+    rb_failed_at: "Failed at {{label}}",
+    rb_jump: "Jump to error ↓",
     tr_detail_latency: "duration",
     tr_detail_model: "model",
     tr_detail_tokens: "tokens",
