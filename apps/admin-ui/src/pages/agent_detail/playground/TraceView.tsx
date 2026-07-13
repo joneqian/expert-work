@@ -28,15 +28,17 @@
  *    skipped — they're outside the "核心结构" list in the task brief.
  */
 import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { Modal } from "antd";
 import { RefreshCw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type {
-  RenderedMessage,
-  RunTrace,
-  RunTraceIo,
-  TraceSpan,
-  TraceStatus,
+import {
+  fetchRunTraceRaw,
+  type RenderedMessage,
+  type RunTrace,
+  type RunTraceIo,
+  type TraceSpan,
+  type TraceStatus,
 } from "../../../api/trace_facade";
 import { fmtDuration } from "./duration_format";
 import { buildRows, isWideBar, type TraceRowData } from "./trace_tree";
@@ -73,9 +75,14 @@ export interface TraceViewProps {
    *  state — the caller should trigger a refetch of `trace` (see
    *  PlaygroundTab.tsx). Omitted → the refresh button doesn't render. */
   onRefresh?: () => void;
+  /** Identify the run whose trace this is — needed to fetch untruncated raw
+   *  span content (fetchRunTraceRaw) for the detail panel's "查看原文" (view
+   *  raw) action. Omitted → that action no-ops. */
+  threadId?: string;
+  runId?: string;
 }
 
-export function TraceView({ trace, onRefresh }: TraceViewProps) {
+export function TraceView({ trace, onRefresh, threadId, runId }: TraceViewProps) {
   // `status: "ok"` doesn't type-narrow `trace`/`spans` into defined (both
   // stay optional on RunTrace) — guard defensively rather than asserting,
   // degrading to "unavailable" on a malformed ok payload instead of crashing.
@@ -104,13 +111,23 @@ export function TraceView({ trace, onRefresh }: TraceViewProps) {
 
   return (
     <div data-testid="trace-view">
-      <TraceTree spans={spans} totalMs={trace.trace.latencyMs} />
+      <TraceTree spans={spans} totalMs={trace.trace.latencyMs} threadId={threadId} runId={runId} />
     </div>
   );
 }
 
 
-function TraceTree({ spans, totalMs }: { spans: readonly TraceSpan[]; totalMs: number }) {
+function TraceTree({
+  spans,
+  totalMs,
+  threadId,
+  runId,
+}: {
+  spans: readonly TraceSpan[];
+  totalMs: number;
+  threadId?: string;
+  runId?: string;
+}) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const rows = buildRows(spans);
@@ -150,7 +167,15 @@ function TraceTree({ spans, totalMs }: { spans: readonly TraceSpan[]; totalMs: n
           onSelect={() => setSelectedId(row.span.id)}
         />
       ))}
-      {selected && <TraceDetail key={selected.id} span={selected} onClose={() => setSelectedId(null)} />}
+      {selected && (
+        <TraceDetail
+          key={selected.id}
+          span={selected}
+          onClose={() => setSelectedId(null)}
+          threadId={threadId}
+          runId={runId}
+        />
+      )}
     </div>
   );
 }
@@ -181,15 +206,19 @@ function Axis({ totalMs }: { totalMs: number }) {
   );
 }
 
-function kindDotColor(kind: TraceSpan["kind"]): string {
-  if (kind === "llm") return ACCENT;
-  if (kind === "tool") return PURPLE;
+/** Error level overrides the kind-based color everywhere a span's dot/bar
+ *  renders — an errored LLM/tool call is red first, its kind second. */
+function kindDotColor(span: Pick<TraceSpan, "kind" | "level">): string {
+  if (span.level === "error") return DANGER;
+  if (span.kind === "llm") return ACCENT;
+  if (span.kind === "tool") return PURPLE;
   return MUTED;
 }
 
-function kindBarColor(kind: TraceSpan["kind"]): string {
-  if (kind === "llm") return `color-mix(in srgb, ${ACCENT} 62%, transparent)`;
-  if (kind === "tool") return PURPLE;
+function kindBarColor(span: Pick<TraceSpan, "kind" | "level">): string {
+  if (span.level === "error") return DANGER;
+  if (span.kind === "llm") return `color-mix(in srgb, ${ACCENT} 62%, transparent)`;
+  if (span.kind === "tool") return PURPLE;
   return `color-mix(in srgb, ${MUTED} 45%, transparent)`;
 }
 
@@ -252,7 +281,7 @@ function GanttBar({ span, totalMs }: { span: TraceSpan; totalMs: number }) {
         borderRadius: 3,
         display: "flex",
         alignItems: "center",
-        background: kindBarColor(span.kind),
+        background: kindBarColor(span),
       }}
     >
       <span
@@ -283,6 +312,7 @@ function TraceRow({
   onSelect: () => void;
 }) {
   const { span, depth, continues } = row;
+  const isError = span.level === "error";
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (e.key === "Enter" || e.key === " ") {
@@ -294,6 +324,7 @@ function TraceRow({
   return (
     <div
       data-testid="trace-row"
+      data-error={isError ? "true" : undefined}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -305,7 +336,11 @@ function TraceRow({
         minHeight: 31,
         borderTop: "1px solid var(--ew-border-subtle)",
         cursor: "pointer",
-        background: selected ? `color-mix(in srgb, ${ACCENT} 13%, transparent)` : undefined,
+        background: selected
+          ? `color-mix(in srgb, ${isError ? DANGER : ACCENT} ${isError ? 15 : 13}%, transparent)`
+          : isError
+            ? `color-mix(in srgb, ${DANGER} 8%, transparent)`
+            : undefined,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 12px 0 0", minWidth: 0 }}>
@@ -317,7 +352,7 @@ function TraceRow({
         </span>
         <span
           aria-hidden
-          style={{ width: 8, height: 8, borderRadius: 2, flex: "0 0 auto", background: kindDotColor(span.kind) }}
+          style={{ width: 8, height: 8, borderRadius: 2, flex: "0 0 auto", background: kindDotColor(span) }}
         />
         <span
           style={{
@@ -446,8 +481,9 @@ function TruncationRow({
         {t("playground.tr_msg_copy")}
       </button>
       <span aria-hidden>·</span>
-      {/* Task 9 wires `onViewRaw` to fetchRunTraceRaw; here it's an optional
-       *  no-op placeholder so the action is visible but inert. */}
+      {/* `onViewRaw` is bound in `TraceDetail` to the field (input/output)
+       *  this row belongs to and fetches the untruncated raw text via
+       *  fetchRunTraceRaw; optional so isolated renders stay inert. */}
       <button type="button" onClick={() => onViewRaw?.()} style={ACTION_LINK_STYLE}>
         {t("playground.tr_msg_raw")}
       </button>
@@ -696,12 +732,46 @@ function ioLabels(
   };
 }
 
-function TraceDetail({ span, onClose }: { span: TraceSpan; onClose: () => void }) {
+/** State for the "查看原文" (view raw) modal — `null` while closed. Lives in
+ *  `TraceDetail` (not `IoSection`/`MessageBlock`) so a single modal serves
+ *  both the input and output sections; `TraceDetail` remounts per span (its
+ *  `key={selected.id}` in `TraceTree`), so this resets on span change. */
+type RawViewState = { status: "loading" | "ok" | "error"; content: string };
+
+function TraceDetail({
+  span,
+  onClose,
+  threadId,
+  runId,
+}: {
+  span: TraceSpan;
+  onClose: () => void;
+  threadId?: string;
+  runId?: string;
+}) {
   const { t } = useTranslation();
   const tokenParts: string[] = [];
   if (span.inputTokens !== null) tokenParts.push(`in ${span.inputTokens}`);
   if (span.outputTokens !== null) tokenParts.push(`out ${span.outputTokens}`);
   const labels = ioLabels(span.kind, t);
+  const isError = span.level === "error";
+
+  const [rawView, setRawView] = useState<RawViewState | null>(null);
+
+  // threadId/runId are only available once the caller knows which run this
+  // trace belongs to (PlaygroundTab.tsx) — isolated renders (tests, or a
+  // trace shown without run context) leave the action a no-op rather than
+  // throwing.
+  const handleViewRaw = async (field: "input" | "output"): Promise<void> => {
+    if (threadId === undefined || runId === undefined) return;
+    setRawView({ status: "loading", content: "" });
+    try {
+      const content = await fetchRunTraceRaw(threadId, runId, span.id, field);
+      setRawView({ status: "ok", content });
+    } catch {
+      setRawView({ status: "error", content: "" });
+    }
+  };
 
   return (
     <div
@@ -724,7 +794,7 @@ function TraceDetail({ span, onClose }: { span: TraceSpan; onClose: () => void }
         }}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600 }}>
-          <span aria-hidden style={{ width: 8, height: 8, borderRadius: 2, background: kindDotColor(span.kind) }} />
+          <span aria-hidden style={{ width: 8, height: 8, borderRadius: 2, background: kindDotColor(span) }} />
           {span.label}
           {span.detail !== null && (
             <span style={{ color: MUTED, fontWeight: 400 }}> · {span.detail}</span>
@@ -782,18 +852,84 @@ function TraceDetail({ span, onClose }: { span: TraceSpan; onClose: () => void }
           <X size={14} strokeWidth={1.75} />
         </button>
       </div>
+      {isError && (
+        <div
+          data-testid="trace-detail-error"
+          style={{
+            display: "flex",
+            gap: 9,
+            alignItems: "flex-start",
+            padding: "9px 13px",
+            borderBottom: "1px solid var(--ew-border-subtle)",
+            background: `color-mix(in srgb, ${DANGER} 9%, transparent)`,
+            color: "var(--ew-text-primary)",
+            fontSize: 12.5,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontFamily: "var(--ew-font-mono)",
+              color: DANGER,
+              border: `1px solid color-mix(in srgb, ${DANGER} 45%, var(--ew-border-subtle))`,
+              borderRadius: 4,
+              padding: "0 6px",
+              flex: "0 0 auto",
+              marginTop: 1,
+            }}
+          >
+            ERROR
+          </span>
+          {span.statusMessage !== null && <span>{span.statusMessage}</span>}
+        </div>
+      )}
       <IoSection
         testId="trace-io-input"
         title={labels.inTitle}
         hint={labels.inHint}
         io={span.input}
+        onViewRaw={() => void handleViewRaw("input")}
       />
       <IoSection
         testId="trace-io-output"
         title={labels.outTitle}
         hint={labels.outHint}
         io={span.output}
+        onViewRaw={() => void handleViewRaw("output")}
       />
+      <Modal
+        open={rawView !== null}
+        onCancel={() => setRawView(null)}
+        footer={null}
+        title={t("playground.tr_msg_raw")}
+        destroyOnHidden
+      >
+        {/* testid on the content wrapper — antd forwards it to the modal
+         *  root (see CreateBaseModal.tsx's same convention). */}
+        <div data-testid="trace-raw-modal">
+          {rawView?.status === "loading" && <span style={{ color: MUTED }}>{t("common.loading")}</span>}
+          {rawView?.status === "error" && (
+            <span style={{ color: DANGER }}>{t("playground.tr_raw_error")}</span>
+          )}
+          {rawView?.status === "ok" && (
+            <pre
+              style={{
+                margin: 0,
+                fontFamily: "var(--ew-font-mono)",
+                fontSize: 12,
+                lineHeight: 1.55,
+                color: "var(--ew-text-secondary)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                maxHeight: 420,
+                overflow: "auto",
+              }}
+            >
+              {rawView.content}
+            </pre>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

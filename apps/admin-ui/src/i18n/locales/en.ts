@@ -787,6 +787,7 @@ export interface TranslationKeys {
     tr_msg_toolcall: string;
     tr_msg_chars: string;
     tr_purpose_primary: string;
+    tr_raw_error: string;
   };
   session_history: {
     title: string;
@@ -3219,6 +3220,7 @@ const en: TranslationKeys = {
     tr_msg_toolcall: "→ called {{name}}",
     tr_msg_chars: "{{n}} chars",
     tr_purpose_primary: "Primary reasoning",
+    tr_raw_error: "Failed to load raw content",
   },
   session_history: {
     title: "Session history",

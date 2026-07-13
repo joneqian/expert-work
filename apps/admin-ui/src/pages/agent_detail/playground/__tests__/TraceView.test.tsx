@@ -5,12 +5,17 @@
  * src/i18n's LanguageDetector — see StepTimeline.test.tsx / TimelineFilterBar
  * .test.tsx precedent), so state-text assertions use the English copy.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import "../../../../i18n";
 
 import { TraceView } from "../TraceView";
-import type { RunTrace, TraceSpan } from "../../../../api/trace_facade";
+import { fetchRunTraceRaw, type RunTrace, type TraceSpan } from "../../../../api/trace_facade";
+
+// Task 9's raw-view modal calls fetchRunTraceRaw — mock it so tests control
+// the resolved/rejected content instead of hitting the network stub adapter.
+vi.mock("../../../../api/trace_facade", () => ({ fetchRunTraceRaw: vi.fn() }));
+const mockFetchRunTraceRaw = vi.mocked(fetchRunTraceRaw);
 
 function makeSpan(
   over: Partial<TraceSpan> & Pick<TraceSpan, "id" | "parentId" | "kind" | "label">,
@@ -180,6 +185,20 @@ const truncatedLlm = makeSpan({
   },
 });
 
+// Task 9 fixture — an errored span (red waterfall row + `dt-err` detail).
+// startMs after `llm`'s (100) — buildRows sorts siblings by startMs, and the
+// test relies on row order [root, llm, erroredTool].
+const erroredTool = makeSpan({
+  id: "err1",
+  parentId: "r0",
+  kind: "tool",
+  label: "工具调用",
+  detail: "exec_python",
+  startMs: 3000,
+  level: "error",
+  statusMessage: "SandboxTimeout",
+});
+
 function okTrace(spans: TraceSpan[] = [root, llm, tool]): RunTrace {
   return {
     status: "ok",
@@ -189,6 +208,10 @@ function okTrace(spans: TraceSpan[] = [root, llm, tool]): RunTrace {
 }
 
 describe("TraceView", () => {
+  beforeEach(() => {
+    mockFetchRunTraceRaw.mockReset();
+  });
+
   it("renders one row per span (tree order), each span's label/detail + fmtDuration, a waterfall bar per row, and a model chip only where the span has one", () => {
     render(<TraceView trace={okTrace()} />);
     expect(screen.getByTestId("trace-view")).toBeInTheDocument();
@@ -377,5 +400,56 @@ describe("TraceView", () => {
     expect(within(detail).getByText("Truncated 40000 chars")).toBeInTheDocument();
     expect(within(detail).getByText("Copy")).toBeInTheDocument();
     expect(within(detail).getByText("View raw")).toBeInTheDocument();
+  });
+
+  it("an error span's row is red-marked (data-error) and its detail shows the statusMessage; other spans get neither", () => {
+    render(<TraceView trace={okTrace([root, llm, erroredTool])} />);
+    const rows = screen.getAllByTestId("trace-row");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).not.toHaveAttribute("data-error");
+    expect(rows[1]).not.toHaveAttribute("data-error");
+    expect(rows[2]).toHaveAttribute("data-error", "true");
+
+    fireEvent.click(rows[2]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByTestId("trace-detail-error")).toHaveTextContent("SandboxTimeout");
+
+    // A non-error span's detail carries no error block.
+    fireEvent.click(rows[1]);
+    const detail2 = screen.getByTestId("trace-detail");
+    expect(within(detail2).queryByTestId("trace-detail-error")).not.toBeInTheDocument();
+  });
+
+  it("查看原文 fetches the field-scoped raw content via fetchRunTraceRaw and shows it un-cleaned in a modal", async () => {
+    mockFetchRunTraceRaw.mockResolvedValue("RAW FULL CONTENT «UNTRUSTED nonce=x» …");
+    render(<TraceView trace={okTrace([root, truncatedLlm])} threadId="t1" runId="r1" />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    fireEvent.click(within(detail).getByText("View raw"));
+
+    const modal = await screen.findByTestId("trace-raw-modal");
+    // Un-cleaned: the UNTRUSTED fence marker survives verbatim (the raw
+    // layer must NOT run cleanUntrusted — that's its whole purpose).
+    expect(modal.textContent).toContain("RAW FULL CONTENT");
+    expect(modal.textContent).toContain("«UNTRUSTED nonce=x»");
+    expect(mockFetchRunTraceRaw).toHaveBeenCalledWith("t1", "r1", "sr5", "input");
+  });
+
+  it("查看原文 shows an error message in the modal when the raw fetch fails, without crashing", async () => {
+    mockFetchRunTraceRaw.mockRejectedValueOnce(new Error("network down"));
+    render(<TraceView trace={okTrace([root, truncatedLlm])} threadId="t1" runId="r1" />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    fireEvent.click(within(screen.getByTestId("trace-detail")).getByText("View raw"));
+
+    expect(await screen.findByText("Failed to load raw content")).toBeInTheDocument();
+  });
+
+  it("查看原文 no-ops without threadId/runId (no fetch call, no modal, no crash)", () => {
+    render(<TraceView trace={okTrace([root, truncatedLlm])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    fireEvent.click(within(screen.getByTestId("trace-detail")).getByText("View raw"));
+
+    expect(screen.queryByTestId("trace-raw-modal")).not.toBeInTheDocument();
+    expect(mockFetchRunTraceRaw).not.toHaveBeenCalled();
   });
 });
