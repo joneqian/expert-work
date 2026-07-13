@@ -35,6 +35,8 @@ __all__ = ["TraceSpan", "fetch_and_normalize", "normalize_trace"]
 
 _NAME_PREFIX = "expert_work."
 _TRUNCATION_SUFFIX = "…(已截断)"
+_MSG_CAP = 8192
+_TEXT_CAP = 16384
 
 
 @dataclass(frozen=True)
@@ -52,8 +54,8 @@ class TraceSpan:
     input_tokens: int | None
     output_tokens: int | None
     cost_usd: float | None
-    input: str | None
-    output: str | None
+    input: dict[str, Any] | None
+    output: dict[str, Any] | None
     level: str
     status_message: str | None
 
@@ -75,13 +77,13 @@ class _ParsedObs:
     input_tokens: int | None
     output_tokens: int | None
     cost_usd: float | None
-    input: str | None
-    output: str | None
+    input: dict[str, Any] | None
+    output: dict[str, Any] | None
     level: str
     status_message: str | None
 
 
-def normalize_trace(trace: object, *, io_cap: int = 32768) -> dict[str, object]:
+def normalize_trace(trace: object) -> dict[str, object]:
     """Normalize a Langfuse ``TraceWithFullDetails`` into a stable DTO.
 
     Returns ``{"status": "ok", "trace": {...}, "spans": [...]}`` where each
@@ -113,7 +115,7 @@ def normalize_trace(trace: object, *, io_cap: int = 32768) -> dict[str, object]:
     parsed_by_id: dict[str, _ParsedObs] = {}
     children_by_parent: dict[str | None, list[str]] = {}
     for o in raw_observations:
-        parsed = _parse_observation(o, trace_start=trace_start, io_cap=io_cap)
+        parsed = _parse_observation(o, trace_start=trace_start)
         parsed_by_id[parsed.id] = parsed
         children_by_parent.setdefault(parsed.parent_id, []).append(parsed.id)
 
@@ -165,7 +167,7 @@ def normalize_trace(trace: object, *, io_cap: int = 32768) -> dict[str, object]:
     }
 
 
-def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 32768) -> dict[str, object]:
+def fetch_and_normalize(client: Any, trace_id: str) -> dict[str, object]:
     """Fetch one trace from Langfuse and normalize it — Batch 4b Task 2.
 
     Unlike :func:`normalize_trace` this DOES touch the network (via the
@@ -191,7 +193,7 @@ def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 32768) -> d
     if getattr(trace, "latency", None) is None:
         return {"status": "not_ready"}
     try:
-        normalized = normalize_trace(trace, io_cap=io_cap)
+        normalized = normalize_trace(trace)
     except Exception:
         # Belt-and-suspenders: no code path from a successful trace.get()
         # should ever reach an uncaught exception (硬约束「降级永不 500」).
@@ -227,7 +229,7 @@ def _is_renderable_tree(spans: list[Any]) -> bool:
     return has_root and fully_connected
 
 
-def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
+def _parse_observation(o: Any, *, trace_start: Any) -> _ParsedObs:
     obs_id = str(o.id)
     obs_type = str(o.type)
     name = str(o.name)
@@ -253,8 +255,8 @@ def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
         input_tokens=_token_count(o, "prompt_tokens", "promptTokens"),
         output_tokens=_token_count(o, "completion_tokens", "completionTokens"),
         cost_usd=_cost_usd(o),
-        input=_render_io(getattr(o, "input", None), io_cap),
-        output=_render_io(getattr(o, "output", None), io_cap),
+        input=_render_io(getattr(o, "input", None)),
+        output=_render_io(getattr(o, "output", None)),
         level=_level(o),
         status_message=_clean_str(getattr(o, "status_message", None)),
     )
@@ -369,53 +371,78 @@ def _cost_usd(o: Any) -> float | None:
     return float(raw)
 
 
-def _render_io(value: Any, io_cap: int) -> str | None:
-    """把 observation 的 input/output 渲染成人类可读文本再截断。
+def _extract_role(m: dict[str, Any]) -> str:
+    return str(m.get("type") or m.get("role") or "message")
 
-    - 消息 list(``[{role?, content}]``)→ 每条 ``role`` 行 + content(真换行),
-      content 为 block-list(``[{type,text}]``)则取 text 拼接。
-    - 其它 list/dict → ``json.dumps(ensure_ascii=False, indent=2)``(真换行、非 ASCII 不转义)。
-    - str → 原样。None → None。
-    """
-    if value is None:
+
+def _extract_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)
+        )
+    return json.dumps(content, ensure_ascii=False)
+
+
+def _extract_tool_calls(m: dict[str, Any]) -> list[str] | None:
+    raw = m.get("tool_calls")
+    if not raw:
+        ak = m.get("additional_kwargs")
+        raw = ak.get("tool_calls") if isinstance(ak, dict) else None
+    if not isinstance(raw, list) or not raw:
         return None
-    if isinstance(value, str):
-        return _cap(value, io_cap)
-    is_message_list = (
+    names: list[str] = []
+    for c in raw:
+        if isinstance(c, dict):
+            name = c.get("name") or (c.get("function") or {}).get("name")
+            if name:
+                names.append(str(name))
+    return names or None
+
+
+def _cap_text(text: str, cap: int) -> tuple[str, bool, int]:
+    full = len(text)
+    if full > cap:
+        return text[:cap] + _TRUNCATION_SUFFIX, True, full
+    return text, False, full
+
+
+def _is_message_list(value: Any) -> bool:
+    return (
         isinstance(value, list)
-        and value
+        and bool(value)
         and all(isinstance(m, dict) and "content" in m for m in value)
     )
-    if is_message_list:
-        parts: list[str] = []
-        for m in value:
-            role = str(m.get("role", "")) or "message"
-            content = m.get("content")
-            if isinstance(content, list):
-                text = "".join(
-                    b["text"]
-                    for b in content
-                    if isinstance(b, dict) and isinstance(b.get("text"), str)
-                )
-            else:
-                text = (
-                    content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-                )
-            parts.append(f"[{role}]\n{text}")
-        return _cap("\n\n".join(parts), io_cap)
-    try:
-        return _cap(json.dumps(value, ensure_ascii=False, indent=2), io_cap)
-    except (TypeError, ValueError):
-        return _cap(str(value), io_cap)
 
 
-def _cap(value: Any, io_cap: int) -> str | None:
+def _render_io(value: Any) -> dict[str, Any] | None:
+    """结构化渲染 observation 的 input/output(spec §A1)。"""
     if value is None:
         return None
-    text = str(value)
-    if len(text) > io_cap:
-        return text[:io_cap] + _TRUNCATION_SUFFIX
-    return text
+    if _is_message_list(value):
+        messages: list[dict[str, Any]] = []
+        for m in value:
+            capped, truncated, full = _cap_text(_extract_content(m.get("content")), _MSG_CAP)
+            messages.append(
+                {
+                    "role": _extract_role(m),
+                    "content": capped,
+                    "truncated": truncated,
+                    "fullChars": full,
+                    "toolCalls": _extract_tool_calls(m),
+                }
+            )
+        return {"kind": "messages", "messages": messages}
+    if isinstance(value, str):
+        text_full = value
+    else:
+        try:
+            text_full = json.dumps(value, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            text_full = str(value)
+    capped, truncated, full = _cap_text(text_full, _TEXT_CAP)
+    return {"kind": "text", "text": capped, "truncated": truncated, "fullChars": full}
 
 
 def _span_as_dict(span: TraceSpan) -> dict[str, object]:

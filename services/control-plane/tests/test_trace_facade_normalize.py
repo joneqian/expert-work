@@ -82,7 +82,8 @@ def test_normalize_merges_wrapper_and_generation_and_humanizes() -> None:
     assert len(llm) == 1
     assert llm[0]["label"] == "LLM 调用"
     assert llm[0]["model"] == "glm-4.6"
-    assert llm[0]["input"].startswith("You are a memory")
+    assert llm[0]["input"]["kind"] == "text"
+    assert llm[0]["input"]["text"].startswith("You are a memory")
     assert llm[0]["latencyMs"] > 0
     # tool humanized
     tool = [s for s in spans if s["kind"] == "tool"]
@@ -126,15 +127,21 @@ def test_normalize_handles_none_latency_without_raising() -> None:
     assert span["latencyMs"] == 0
 
 
-def test_normalize_caps_oversized_io() -> None:
-    big = "x" * 20000
+def test_normalize_caps_oversized_text_io_at_text_cap() -> None:
+    """纯字符串 input(text kind)超过 _TEXT_CAP → 截断,fullChars 记原长。"""
+    from control_plane.api.trace_facade import _TEXT_CAP
+
+    big = "x" * (_TEXT_CAP + 500)
     obs = [
         _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
         _obs("g", "GENERATION", "llm_call", "sess", 1.0, 0, input=big),
     ]
-    spans = normalize_trace(_trace(obs), io_cap=100)["spans"]
+    spans = normalize_trace(_trace(obs))["spans"]
     g = next(s for s in spans if s["id"] == "g")
-    assert len(g["input"]) <= 130 and "截断" in g["input"]
+    assert g["input"]["kind"] == "text"
+    assert g["input"]["truncated"] is True
+    assert g["input"]["fullChars"] == _TEXT_CAP + 500
+    assert len(g["input"]["text"]) <= _TEXT_CAP + len("…(已截断)")
 
 
 def test_normalize_surfaces_cost_and_tokens_best_effort() -> None:
@@ -187,7 +194,7 @@ def test_normalize_elides_only_root_http_request_not_named_children() -> None:
 
 
 def test_normalize_renders_chat_messages_input_as_readable_text() -> None:
-    """LLM input 是消息 list → 渲染成 role+真换行内容,不是 Python-repr 串。"""
+    """LLM input 是消息 list → 渲染成结构化 messages,content 保留真换行、role 可辨。"""
     obs = [
         _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
         _obs(
@@ -205,12 +212,13 @@ def test_normalize_renders_chat_messages_input_as_readable_text() -> None:
     ]
     spans = normalize_trace(_trace(obs))["spans"]
     g = next(s for s in spans if s["id"] == "g")
-    text = g["input"]
-    # 真换行渲染(非字面 \n),role 可见,不是 repr 串
-    assert "\n\n# Rules\nBe terse." in text
-    assert "You are helpful." in text
-    assert "system" in text and "user" in text
-    assert "{'role'" not in text and "\\n" not in text  # 不是 Python-repr
+    rendered = g["input"]
+    assert rendered["kind"] == "messages"
+    msgs = rendered["messages"]
+    assert msgs[0]["role"] == "system"
+    assert msgs[0]["content"] == "You are helpful.\n\n# Rules\nBe terse."
+    assert msgs[1]["role"] == "user"
+    assert msgs[1]["content"] == "hi"
 
 
 def test_normalize_renders_block_list_content() -> None:
@@ -229,29 +237,45 @@ def test_normalize_renders_block_list_content() -> None:
     ]
     g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
     # 精确断言:区分正确的 text 提取与原样 json.dumps 转储(后者会含 'type'/'{')。
-    assert g["input"] == "[user]\nblock one"
+    assert g["input"] == {
+        "kind": "messages",
+        "messages": [
+            {
+                "role": "user",
+                "content": "block one",
+                "truncated": False,
+                "fullChars": len("block one"),
+                "toolCalls": None,
+            }
+        ],
+    }
 
 
-def test_normalize_io_cap_default_raised_to_32768() -> None:
-    """默认 io_cap 放宽到 32768:20000 字符的 input 不再截断。"""
-    big = "x" * 20000
+def test_normalize_text_io_not_truncated_at_text_cap() -> None:
+    """纯字符串 input(text kind)长度恰为 _TEXT_CAP → 不截断。"""
+    from control_plane.api.trace_facade import _TEXT_CAP
+
+    big = "x" * _TEXT_CAP
     obs = [
         _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
         _obs("g", "GENERATION", "llm_call", "sess", 1.0, 0, input=big),
     ]
     g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
-    assert "截断" not in g["input"] and len(g["input"]) == 20000
+    assert g["input"]["truncated"] is False
+    assert g["input"]["fullChars"] == _TEXT_CAP
 
 
-def test_normalize_io_cap_boundary_at_32768() -> None:
-    """Exactly 32768 chars pass; 32769 truncate — pins the default at 32768."""
-    for n, truncated in ((32768, False), (32769, True)):
+def test_normalize_text_io_boundary_at_text_cap() -> None:
+    """Exactly _TEXT_CAP chars pass; _TEXT_CAP+1 truncate — pins the text-kind cap."""
+    from control_plane.api.trace_facade import _TEXT_CAP
+
+    for n, truncated in ((_TEXT_CAP, False), (_TEXT_CAP + 1, True)):
         obs = [
             _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
             _obs("g", "GENERATION", "llm_call", "sess", 1.0, 0, input="z" * n),
         ]
         g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
-        assert ("截断" in g["input"]) is truncated
+        assert g["input"]["truncated"] is truncated
 
 
 def test_normalize_extracts_level_and_status_message() -> None:
@@ -290,3 +314,57 @@ def test_normalize_defaults_level_when_absent() -> None:
     span = normalize_trace(trace)["spans"][0]
     assert span["level"] == "default"
     assert span["statusMessage"] is None
+
+
+# ---------------------------------------------------------------------------
+# _render_io — structured i/o (Task 3, spec §A1)
+# ---------------------------------------------------------------------------
+
+
+def test_render_io_messages_role_from_type_and_toolcalls() -> None:
+    from control_plane.api.trace_facade import _render_io
+
+    value = [
+        {"type": "system", "content": "you are helpful", "role": None},
+        {"type": "ai", "content": "", "tool_calls": [{"name": "exec_python", "args": {}}]},
+    ]
+    out = _render_io(value)
+    assert out["kind"] == "messages"
+    assert out["messages"][0]["role"] == "system"
+    assert out["messages"][0]["fullChars"] == len("you are helpful")
+    assert out["messages"][1]["role"] == "ai"
+    assert out["messages"][1]["toolCalls"] == ["exec_python"]
+
+
+def test_render_io_message_per_message_truncation() -> None:
+    from control_plane.api.trace_facade import _MSG_CAP, _render_io
+
+    big = "x" * (_MSG_CAP + 10)
+    out = _render_io([{"type": "system", "content": big}])
+    m = out["messages"][0]
+    assert m["truncated"] is True
+    assert m["fullChars"] == _MSG_CAP + 10
+    assert m["content"].endswith("…(已截断)")
+    assert len(m["content"]) <= _MSG_CAP + len("…(已截断)")
+
+
+def test_render_io_text_kind_for_tool_args() -> None:
+    from control_plane.api.trace_facade import _render_io
+
+    out = _render_io({"code": "print(1)"})
+    assert out["kind"] == "text"
+    assert '"code"' in out["text"]
+    assert out["truncated"] is False
+
+
+def test_render_io_block_list_content() -> None:
+    from control_plane.api.trace_facade import _render_io
+
+    out = _render_io([{"type": "human", "content": [{"type": "text", "text": "hi"}]}])
+    assert out["messages"][0]["content"] == "hi"
+
+
+def test_render_io_none() -> None:
+    from control_plane.api.trace_facade import _render_io
+
+    assert _render_io(None) is None
