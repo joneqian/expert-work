@@ -163,9 +163,7 @@ async def test_dispatch_tool_records_masked_io_on_tool_call_span(
     )
 
     spans = [
-        s
-        for s in exporter.get_finished_spans()
-        if s.name == "expert_work.orchestrator.tool_call"
+        s for s in exporter.get_finished_spans() if s.name == "expert_work.orchestrator.tool_call"
     ]
     assert len(spans) == 1
     attrs = spans[0].attributes

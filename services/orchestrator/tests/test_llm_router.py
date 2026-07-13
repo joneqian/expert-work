@@ -585,9 +585,7 @@ async def test_terminal_populates_llm_response_for_langfuse_middleware() -> None
     """Real terminal (not a hand-built ctx) must set llm_response so
     LangfuseMiddleware.record_output / record_usage actually fire."""
     client = RecordingLangfuseClient()
-    chain = MiddlewareChain.from_middlewares(
-        "around_llm_call", [LangfuseMiddleware(client=client)]
-    )
+    chain = MiddlewareChain.from_middlewares("around_llm_call", [LangfuseMiddleware(client=client)])
     response = AIMessage(
         content="hello",
         usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
@@ -609,9 +607,7 @@ async def test_terminal_llm_response_flattens_block_list_content() -> None:
     """Anthropic-shaped block-list content must flatten to plain text
     for Langfuse's output field, not the raw block list."""
     client = RecordingLangfuseClient()
-    chain = MiddlewareChain.from_middlewares(
-        "around_llm_call", [LangfuseMiddleware(client=client)]
-    )
+    chain = MiddlewareChain.from_middlewares("around_llm_call", [LangfuseMiddleware(client=client)])
     response = AIMessage(
         content=[{"type": "text", "text": "block "}, {"type": "text", "text": "answer"}]
     )
@@ -628,9 +624,7 @@ async def test_terminal_llm_response_omits_usage_when_no_usage_metadata() -> Non
     """AIMessage without usage_metadata must not crash the terminal —
     usage stays an empty mapping rather than raising."""
     client = RecordingLangfuseClient()
-    chain = MiddlewareChain.from_middlewares(
-        "around_llm_call", [LangfuseMiddleware(client=client)]
-    )
+    chain = MiddlewareChain.from_middlewares("around_llm_call", [LangfuseMiddleware(client=client)])
     response = AIMessage(content="no usage here")
     provider = _ScriptedProvider(response=response)
     router = LLMRouter(providers=[_handle(provider)], around_llm_chain=chain)
