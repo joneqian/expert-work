@@ -348,6 +348,30 @@ def test_render_io_message_per_message_truncation() -> None:
     assert len(m["content"]) <= _MSG_CAP + len("…(已截断)")
 
 
+def test_render_io_mixed_list_only_oversized_truncated_tail_preserved() -> None:
+    """尾部保留(本任务命门):一条超长 system + 正常 human/ai/tool 兄弟,
+    只有超长那条截断,后面的对话消息全量保留、原样。防 flatten-then-cut 回归。"""
+    from control_plane.api.trace_facade import _MSG_CAP, _render_io
+
+    big = "s" * (_MSG_CAP + 5)
+    out = _render_io(
+        [
+            {"type": "system", "content": big},
+            {"type": "human", "content": "现在几号"},
+            {"type": "ai", "content": "让我查一下"},
+            {"type": "tool", "content": "2026-07-13"},
+        ]
+    )
+    msgs = out["messages"]
+    assert [m["role"] for m in msgs] == ["system", "human", "ai", "tool"]
+    assert msgs[0]["truncated"] is True
+    # 后三条对话消息全量保留、未截断、原样。
+    assert [m["truncated"] for m in msgs[1:]] == [False, False, False]
+    assert msgs[1]["content"] == "现在几号"
+    assert msgs[2]["content"] == "让我查一下"
+    assert msgs[3]["content"] == "2026-07-13"
+
+
 def test_render_io_text_kind_for_tool_args() -> None:
     from control_plane.api.trace_facade import _render_io
 
