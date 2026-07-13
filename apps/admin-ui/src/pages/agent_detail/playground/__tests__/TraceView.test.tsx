@@ -162,4 +162,15 @@ describe("TraceView", () => {
     expect(screen.queryAllByTestId("trace-row")).toHaveLength(0);
     expect(screen.getByTestId("trace-refresh")).toBeInTheDocument();
   });
+
+  it("treats an ok trace whose spans have no root (all orphaned) as not_ready", () => {
+    // Subtler ingestion window: child spans landed before their session-root
+    // parent, so every parentId dangles and none is a root. The tree walk
+    // starts from roots → zero rows → a bare axis. Show not_ready instead.
+    const orphanA = makeSpan({ id: "o1", parentId: "root-not-ingested", kind: "tool", label: "工具调用" });
+    const orphanB = makeSpan({ id: "o2", parentId: "root-not-ingested", kind: "llm", label: "LLM 调用" });
+    render(<TraceView trace={okTrace([orphanA, orphanB])} onRefresh={vi.fn()} />);
+    expect(screen.queryAllByTestId("trace-row")).toHaveLength(0);
+    expect(screen.getByTestId("trace-refresh")).toBeInTheDocument();
+  });
 });

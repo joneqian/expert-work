@@ -190,15 +190,35 @@ def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 32768) -> d
         # Belt-and-suspenders: no code path from a successful trace.get()
         # should ever reach an uncaught exception (硬约束「降级永不 500」).
         return {"status": "unavailable"}
-    # Langfuse ingestion is NOT atomic under load: a multi-span run's trace
-    # root can close (``latency`` populated → passed the None-latency guard
-    # above) BEFORE its child observations land, so the trace normalizes to
-    # zero renderable spans. The waterfall would draw a bare time-axis with no
-    # bars — degrade to ``not_ready`` so the console shows the refresh card
-    # until the observations arrive, instead of a confusing empty ruler.
-    if not normalized.get("spans"):
+    # Langfuse ingestion is NOT atomic under load: a multi-span run's child
+    # observations can land in Langfuse BEFORE their session-root parent does
+    # (the trace root closes → ``latency`` populated → passes the None-latency
+    # guard above, yet the observation set is still partial). Two shapes hit
+    # the waterfall as a bare time-axis with no bars:
+    #   * zero renderable spans, or
+    #   * spans present but NONE is a root / some reference a parent that
+    #     hasn't been ingested (``parentId`` dangles outside the set) — the
+    #     frontend's preorder tree walk starts from the roots, so an
+    #     orphaned-only set renders nothing.
+    # Either way the trace isn't fully ingested — degrade to ``not_ready`` so
+    # the console shows the refresh card (and auto-polls) until it settles,
+    # instead of a confusing empty ruler.
+    spans = normalized.get("spans")
+    if not isinstance(spans, list) or not _is_renderable_tree(spans):
         return {"status": "not_ready"}
     return normalized
+
+
+def _is_renderable_tree(spans: list[Any]) -> bool:
+    """A normalized span set renders iff it is non-empty, has at least one root
+    (``parentId is None``), and every span's ``parentId`` resolves within the
+    set (no dangling parent from a not-yet-ingested observation)."""
+    if not spans:
+        return False
+    ids = {s.get("id") for s in spans}
+    has_root = any(s.get("parentId") is None for s in spans)
+    fully_connected = all(s.get("parentId") is None or s.get("parentId") in ids for s in spans)
+    return has_root and fully_connected
 
 
 def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
