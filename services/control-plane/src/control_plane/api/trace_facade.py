@@ -54,6 +54,8 @@ class TraceSpan:
     cost_usd: float | None
     input: str | None
     output: str | None
+    level: str
+    status_message: str | None
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,8 @@ class _ParsedObs:
     cost_usd: float | None
     input: str | None
     output: str | None
+    level: str
+    status_message: str | None
 
 
 def normalize_trace(trace: object, *, io_cap: int = 32768) -> dict[str, object]:
@@ -142,6 +146,8 @@ def normalize_trace(trace: object, *, io_cap: int = 32768) -> dict[str, object]:
             cost_usd=parsed.cost_usd,
             input=parsed.input,
             output=parsed.output,
+            level=parsed.level,
+            status_message=parsed.status_message,
         )
         for parsed in parsed_by_id.values()
         if parsed.id not in omitted
@@ -249,6 +255,8 @@ def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:
         cost_usd=_cost_usd(o),
         input=_render_io(getattr(o, "input", None), io_cap),
         output=_render_io(getattr(o, "output", None), io_cap),
+        level=_level(o),
+        status_message=_clean_str(getattr(o, "status_message", None)),
     )
 
 
@@ -316,6 +324,15 @@ def _clean_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _level(o: Any) -> str:
+    raw = getattr(o, "level", None)
+    if raw is None:
+        return "default"
+    # ObservationLevel enum → "DEFAULT"/"WARNING"/"ERROR";也兼容裸字符串
+    text = getattr(raw, "value", None) or str(raw)
+    return text.rsplit(".", 1)[-1].lower()
 
 
 def _model(o: Any) -> str | None:
@@ -416,4 +433,6 @@ def _span_as_dict(span: TraceSpan) -> dict[str, object]:
         "costUsd": span.cost_usd,
         "input": span.input,
         "output": span.output,
+        "level": span.level,
+        "statusMessage": span.status_message,
     }

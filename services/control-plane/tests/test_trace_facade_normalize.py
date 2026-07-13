@@ -252,3 +252,41 @@ def test_normalize_io_cap_boundary_at_32768() -> None:
         ]
         g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
         assert ("截断" in g["input"]) is truncated
+
+
+def test_normalize_extracts_level_and_status_message() -> None:
+    obs = SimpleNamespace(
+        id="o1",
+        type="GENERATION",
+        name="llm_call",
+        parent_observation_id=None,
+        start_time=None,
+        latency=1.0,
+        model="glm-4.6",
+        input=None,
+        output=None,
+        level="ERROR",
+        status_message="SandboxTimeout",
+    )
+    trace = SimpleNamespace(name="t", latency=1.0, total_cost=None, observations=[obs])
+    out = normalize_trace(trace)
+    span = out["spans"][0]
+    assert span["level"] == "error"
+    assert span["statusMessage"] == "SandboxTimeout"
+
+
+def test_normalize_defaults_level_when_absent() -> None:
+    obs = SimpleNamespace(
+        id="o1",
+        type="SPAN",
+        name="expert_work.session.run",
+        parent_observation_id=None,
+        start_time=None,
+        latency=1.0,
+        input=None,
+        output=None,
+    )
+    trace = SimpleNamespace(name="t", latency=1.0, total_cost=None, observations=[obs])
+    span = normalize_trace(trace)["spans"][0]
+    assert span["level"] == "default"
+    assert span["statusMessage"] is None
