@@ -1234,6 +1234,78 @@ describe("PlaygroundTab", () => {
       expect(screen.getByText(/Primary reasoning/)).toBeInTheDocument();
     });
 
+    it("auto-polls a not_ready trace until it resolves, without a manual refresh", async () => {
+      // Real timers: the poll uses a 1500ms setTimeout; fake timers deadlock
+      // with userEvent + RTL's waitFor here. A ~2s real wait is reliable.
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          {
+            id: "m",
+            event: "metadata",
+            data: { run_id: "run-poll-1" },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          {
+            id: "u",
+            event: "updates",
+            data: { agent: { messages: [{ type: "ai", content: "hi" }] } },
+            rawData: "",
+            receivedAt: "t2",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t3" },
+        ]),
+      );
+      // Ingestion window: first fetch is still not_ready, the retry resolves.
+      getRunTraceMock.mockResolvedValueOnce({ status: "not_ready" });
+      getRunTraceMock.mockResolvedValue({
+        status: "ok",
+        trace: { name: "trace-1", latencyMs: 1000, totalCostUsd: null, spanCount: 1 },
+        spans: [
+          {
+            id: "s1",
+            parentId: null,
+            kind: "llm",
+            label: "LLM call",
+            detail: null,
+            startMs: 0,
+            latencyMs: 500,
+            model: "glm-4.6",
+            inputTokens: 10,
+            outputTokens: 20,
+            costUsd: null,
+            input: "prompt",
+            output: "reply",
+          },
+        ],
+      });
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const toggle = screen.getByTestId("playground-event-view-toggle");
+      await user.click(within(toggle).getByText(i18n.t("event_stream.view_exact")));
+
+      // First fetch → not_ready card (refreshable), no waterfall yet.
+      await waitFor(() => expect(getRunTraceMock).toHaveBeenCalledTimes(1));
+      expect(screen.getByTestId("trace-refresh")).toBeInTheDocument();
+      expect(screen.queryAllByTestId("trace-row")).toHaveLength(0);
+
+      // The 1500ms poll auto-refetches — no user action — and the waterfall
+      // renders once the retry returns spans.
+      await waitFor(() => expect(getRunTraceMock).toHaveBeenCalledTimes(2), {
+        timeout: 3000,
+      });
+      await waitFor(() =>
+        expect(screen.getAllByTestId("trace-row").length).toBeGreaterThan(0),
+      );
+    }, 10000);
+
     it("shows a loading state while the exact trace fetch is in flight", async () => {
       const user = userEvent.setup();
       createSessionMock.mockResolvedValue(sampleThread);
