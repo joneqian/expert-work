@@ -436,6 +436,31 @@ def test_fetch_span_raw_invalid_field_returns_none() -> None:
     assert fetch_span_raw(client, "trace-1", "obs-1", "bogus") is None
 
 
+def test_fetch_span_raw_unserializable_value_returns_none_not_500() -> None:
+    """非 JSON-可序列化字段(input/output 类型是 Any)必须降级 None → 404,
+    绝不抛(硬约束「降级永不 500」)。守住 fetch_span_raw 序列化的 try/except。"""
+    from control_plane.api.trace_facade import fetch_span_raw
+
+    class _Unserializable:
+        pass
+
+    obs = SimpleNamespace(
+        id="o9",
+        type="GENERATION",
+        name="llm_call",
+        parent_observation_id=None,
+        start_time=None,
+        latency=1.0,
+        input=_Unserializable(),
+        output=None,
+    )
+    trace = _fake_trace()
+    trace.observations = [obs]
+    client = _FakeLangfuseClient(trace=trace)
+
+    assert fetch_span_raw(client, "trace-1", "o9", "input") is None
+
+
 def test_fetch_span_raw_no_client_returns_none() -> None:
     from control_plane.api.trace_facade import fetch_span_raw
 

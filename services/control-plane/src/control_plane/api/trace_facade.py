@@ -229,21 +229,27 @@ def fetch_span_raw(client: Any, trace_id: str, span_id: str, field: str) -> str 
     """
     if client is None or field not in ("input", "output"):
         return None
+    # The fetch AND the post-fetch serialization are both best-effort: a
+    # non-JSON-serializable span field (input/output are typed ``Any``) must
+    # degrade to None → 404, never a 500 (硬约束「降级永不 500」). Mirrors the
+    # defensive ``json.dumps`` guard in :func:`_render_io`.
     try:
         trace = client.api.trace.get(trace_id)
+        for o in getattr(trace, "observations", None) or []:
+            if str(getattr(o, "id", "")) != span_id:
+                continue
+            value = getattr(o, field, None)
+            if value is None:
+                return None
+            if _is_message_list(value):
+                return "\n\n".join(
+                    f"[{_extract_role(m)}]\n{_extract_content(m.get('content'))}" for m in value
+                )
+            return (
+                value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
+            )
     except Exception:
         return None
-    for o in getattr(trace, "observations", None) or []:
-        if str(getattr(o, "id", "")) != span_id:
-            continue
-        value = getattr(o, field, None)
-        if value is None:
-            return None
-        if _is_message_list(value):
-            return "\n\n".join(
-                f"[{_extract_role(m)}]\n{_extract_content(m.get('content'))}" for m in value
-            )
-        return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
     return None
 
 
