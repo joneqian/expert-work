@@ -1206,6 +1206,8 @@ describe("PlaygroundTab", () => {
             costUsd: null,
             input: "prompt",
             output: "reply",
+            level: "default",
+            statusMessage: null,
           },
         ],
       });
@@ -1278,6 +1280,8 @@ describe("PlaygroundTab", () => {
             costUsd: null,
             input: "prompt",
             output: "reply",
+            level: "default",
+            statusMessage: null,
           },
         ],
       });

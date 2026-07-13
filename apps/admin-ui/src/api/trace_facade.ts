@@ -8,6 +8,22 @@ import { apiClient } from "./client";
 
 export type TraceStatus = "ok" | "not_ready" | "unavailable" | "no_trace";
 
+/** A single rendered chat message inside a structured trace I/O payload. */
+export type RenderedMessage = {
+  role: string;
+  content: string;
+  truncated: boolean;
+  fullChars: number;
+  toolCalls: string[] | null;
+};
+
+/** Structured trace span input/output — either a rendered message list or
+ *  plain text (both possibly truncated at the source). Task 8 wires this
+ *  into `TraceSpan.input`/`output` once the consumer is updated in lockstep. */
+export type RunTraceIo =
+  | { kind: "messages"; messages: RenderedMessage[] }
+  | { kind: "text"; text: string; truncated: boolean; fullChars: number };
+
 export interface TraceSpan {
   id: string;
   parentId: string | null;
@@ -22,6 +38,8 @@ export interface TraceSpan {
   costUsd: number | null;
   input: string | null;
   output: string | null;
+  level: "default" | "warning" | "error";
+  statusMessage: string | null;
 }
 
 export interface RunTrace {
@@ -49,4 +67,21 @@ export async function getRunTrace(
     `/v1/sessions/${threadId}/runs/${runId}/trace`,
   );
   return response.data;
+}
+
+/** Fetch the untruncated raw content for one span's input or output field.
+ *
+ * Consumes ``GET /v1/sessions/{thread_id}/runs/{run_id}/trace/raw`` (raw
+ * payload, no envelope — matching :func:`getRunTrace`).
+ */
+export async function fetchRunTraceRaw(
+  threadId: string,
+  runId: string,
+  spanId: string,
+  field: "input" | "output",
+): Promise<string> {
+  const response = await apiClient.get<{ spanId: string; field: string; content: string }>(
+    `/v1/sessions/${threadId}/runs/${runId}/trace/raw?span=${encodeURIComponent(spanId)}&field=${field}`,
+  );
+  return response.data.content;
 }

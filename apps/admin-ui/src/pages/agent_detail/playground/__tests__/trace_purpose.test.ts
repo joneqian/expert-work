@@ -21,6 +21,8 @@ function makeSpan(
     costUsd: null,
     input: null,
     output: null,
+    level: "default",
+    statusMessage: null,
     ...over,
   };
 }
