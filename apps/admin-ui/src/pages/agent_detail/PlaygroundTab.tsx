@@ -143,6 +143,13 @@ type HistoryLoad =
   | { state: "pending" | "loading" | "error"; events: SseEvent[] }
   | { state: "done"; events: SseEvent[] };
 
+// A just-finished run's Langfuse trace lands as `not_ready` for a moment
+// (ingestion isn't atomic — the root closes before its child observations
+// land). Auto-poll a few times so the waterfall appears without a manual
+// refresh, then settle on whatever we last got.
+const TRACE_NOT_READY_MAX_RETRIES = 6;
+const TRACE_NOT_READY_RETRY_MS = 1500;
+
 const { Text } = Typography;
 const { TextArea } = Input;
 
@@ -2036,6 +2043,7 @@ function TurnCard({
     [timeline],
   );
   const [trace, setTrace] = useState<RunTrace | null>(null);
+  const traceRetriesRef = useRef(0);
   useEffect(() => {
     if (eventView !== "exact" || !threadId || !runId || trace !== null) return;
     let cancelled = false;
@@ -2050,6 +2058,26 @@ function TurnCard({
       cancelled = true;
     };
   }, [eventView, threadId, runId, trace]);
+  // Fresh retry budget whenever the turn or the view changes.
+  useEffect(() => {
+    traceRetriesRef.current = 0;
+  }, [runId, eventView]);
+  // Auto-poll while the trace is still ingesting (`not_ready`), up to the cap —
+  // clearing `trace` re-triggers the fetch effect above. Stops the moment the
+  // trace resolves to any non-`not_ready` state (or the budget runs out).
+  useEffect(() => {
+    if (
+      trace?.status !== "not_ready" ||
+      traceRetriesRef.current >= TRACE_NOT_READY_MAX_RETRIES
+    ) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      traceRetriesRef.current += 1;
+      setTrace(null);
+    }, TRACE_NOT_READY_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [trace]);
   // A' purpose labelling (spec §3.2) — see trace_purpose.ts.
   const labeledTrace = useMemo(
     () =>
@@ -2418,7 +2446,10 @@ function TurnCard({
                 labeledTrace ? (
                   <TraceView
                     trace={labeledTrace}
-                    onRefresh={() => setTrace(null)}
+                    onRefresh={() => {
+                      traceRetriesRef.current = 0;
+                      setTrace(null);
+                    }}
                   />
                 ) : (
                   <Text

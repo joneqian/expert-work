@@ -152,4 +152,14 @@ describe("TraceView", () => {
     render(<TraceView trace={{ status: "not_ready" }} />);
     expect(screen.queryByTestId("trace-refresh")).not.toBeInTheDocument();
   });
+
+  it("treats an ok trace with zero spans as not_ready (ingestion-in-progress), not an empty waterfall", () => {
+    // Langfuse's non-atomic ingestion can hand back an ok trace whose child
+    // observations haven't landed → zero spans. Without a guard, TraceTree
+    // would draw the axis header with no rows (a bare ruler). Show the
+    // refreshable not_ready card instead.
+    render(<TraceView trace={okTrace([])} onRefresh={vi.fn()} />);
+    expect(screen.queryAllByTestId("trace-row")).toHaveLength(0);
+    expect(screen.getByTestId("trace-refresh")).toBeInTheDocument();
+  });
 });
