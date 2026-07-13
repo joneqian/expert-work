@@ -31,7 +31,7 @@ from typing import Any
 
 from langfuse.api import NotFoundError
 
-__all__ = ["TraceSpan", "fetch_and_normalize", "normalize_trace"]
+__all__ = ["TraceSpan", "fetch_and_normalize", "fetch_span_raw", "normalize_trace"]
 
 _NAME_PREFIX = "expert_work."
 _TRUNCATION_SUFFIX = "…(已截断)"
@@ -215,6 +215,36 @@ def fetch_and_normalize(client: Any, trace_id: str) -> dict[str, object]:
     if not isinstance(spans, list) or not _is_renderable_tree(spans):
         return {"status": "not_ready"}
     return normalized
+
+
+def fetch_span_raw(client: Any, trace_id: str, span_id: str, field: str) -> str | None:
+    """未截断、未清洗的单 span input/output 全文(raw 层)——Task 4 "查看原文".
+
+    Unlike :func:`_render_io` (used by :func:`normalize_trace`) this applies
+    NO ``_cap_text`` truncation and NO cleaning — the debug console's "查看
+    原文" affordance re-fetches this single field on demand when a facade
+    message was truncated at ``_MSG_CAP``. best-effort: any failure (no
+    client, bad field, network error, unknown span) degrades to ``None``,
+    never an exception — the caller turns that into a 404.
+    """
+    if client is None or field not in ("input", "output"):
+        return None
+    try:
+        trace = client.api.trace.get(trace_id)
+    except Exception:
+        return None
+    for o in getattr(trace, "observations", None) or []:
+        if str(getattr(o, "id", "")) != span_id:
+            continue
+        value = getattr(o, field, None)
+        if value is None:
+            return None
+        if _is_message_list(value):
+            return "\n\n".join(
+                f"[{_extract_role(m)}]\n{_extract_content(m.get('content'))}" for m in value
+            )
+        return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
+    return None
 
 
 def _is_renderable_tree(spans: list[Any]) -> bool:

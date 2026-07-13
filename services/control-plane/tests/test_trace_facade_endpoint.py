@@ -387,3 +387,178 @@ async def test_trace_orphaned_spans_returns_not_ready(trace_client: AsyncClient)
     resp = await trace_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}/trace", headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "not_ready"}
+
+
+# ---------------------------------------------------------------------------
+# fetch_span_raw — facade layer (Task 4: "查看原文")
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_span_raw_returns_full_untruncated() -> None:
+    from control_plane.api.trace_facade import fetch_span_raw
+
+    big = [{"type": "system", "content": "y" * 50000}]
+    obs = SimpleNamespace(
+        id="o9",
+        type="GENERATION",
+        name="llm_call",
+        parent_observation_id=None,
+        start_time=None,
+        latency=1.0,
+        input=big,
+        output=None,
+    )
+    trace = _fake_trace()
+    trace.observations = [obs]
+    client = _FakeLangfuseClient(trace=trace)
+
+    out = fetch_span_raw(client, "trace-1", "o9", "input")
+
+    assert out is not None
+    assert len(out) >= 50000
+    assert "…(已截断)" not in out
+    assert out.startswith("[system]\n")
+
+
+def test_fetch_span_raw_missing_span_returns_none() -> None:
+    from control_plane.api.trace_facade import fetch_span_raw
+
+    client = _FakeLangfuseClient(trace=_fake_trace())
+
+    assert fetch_span_raw(client, "trace-1", "nope", "input") is None
+
+
+def test_fetch_span_raw_invalid_field_returns_none() -> None:
+    from control_plane.api.trace_facade import fetch_span_raw
+
+    client = _FakeLangfuseClient(trace=_fake_trace())
+
+    assert fetch_span_raw(client, "trace-1", "obs-1", "bogus") is None
+
+
+def test_fetch_span_raw_no_client_returns_none() -> None:
+    from control_plane.api.trace_facade import fetch_span_raw
+
+    assert fetch_span_raw(None, "trace-1", "obs-1", "input") is None
+
+
+def test_fetch_span_raw_client_exception_returns_none() -> None:
+    from control_plane.api.trace_facade import fetch_span_raw
+
+    client = _FakeLangfuseClient(exc=RuntimeError("boom"))
+
+    assert fetch_span_raw(client, "trace-1", "obs-1", "input") is None
+
+
+# ---------------------------------------------------------------------------
+# GET .../trace/raw — endpoint layer (ownership gate mirrors get_run_trace)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_trace_raw_owner_returns_full_content(trace_client: AsyncClient) -> None:
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+    app.state.langfuse_read_client = _FakeLangfuseClient(trace=_fake_trace())
+
+    resp = await trace_client.get(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/trace/raw",
+        params={"span": "obs-1", "field": "output"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"spanId": "obs-1", "field": "output", "content": "hello"}
+
+
+@pytest.mark.asyncio
+async def test_trace_raw_non_owner_returns_404(trace_client: AsyncClient) -> None:
+    owner_headers = {
+        "Authorization": "Bearer "
+        + make_test_jwt(tenant_id=_DEFAULT_TENANT, subject="user-a", roles=("viewer",))
+    }
+    intruder_headers = {
+        "Authorization": "Bearer "
+        + make_test_jwt(tenant_id=_DEFAULT_TENANT, subject="user-b", roles=("viewer",))
+    }
+    thread_id = await _create_session(trace_client, owner_headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+    fake_client = _FakeLangfuseClient(trace=_fake_trace())
+    app.state.langfuse_read_client = fake_client
+
+    resp = await trace_client.get(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/trace/raw",
+        params={"span": "obs-1", "field": "output"},
+        headers=intruder_headers,
+    )
+    assert resp.status_code == 404
+    # The ownership gate 404s before ever touching the Langfuse client.
+    assert fake_client.trace_api.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_trace_raw_no_trace_id_returns_404(trace_client: AsyncClient) -> None:
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id=None)
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+    fake_client = _FakeLangfuseClient(trace=_fake_trace())
+    app.state.langfuse_read_client = fake_client
+
+    resp = await trace_client.get(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/trace/raw",
+        params={"span": "obs-1", "field": "output"},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+    assert fake_client.trace_api.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_trace_raw_unknown_span_returns_404(trace_client: AsyncClient) -> None:
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+    app.state.langfuse_read_client = _FakeLangfuseClient(trace=_fake_trace())
+
+    resp = await trace_client.get(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/trace/raw",
+        params={"span": "nope", "field": "output"},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_trace_raw_invalid_field_returns_404(trace_client: AsyncClient) -> None:
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+    app.state.langfuse_read_client = _FakeLangfuseClient(trace=_fake_trace())
+
+    resp = await trace_client.get(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/trace/raw",
+        params={"span": "obs-1", "field": "bogus"},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_trace_raw_client_none_returns_404(trace_client: AsyncClient) -> None:
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    # No app.state.langfuse_read_client set — mirrors production when the
+    # lifespan never wired one (missing env) or (in tests) never ran.
+
+    resp = await trace_client.get(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/trace/raw",
+        params={"span": "obs-1", "field": "output"},
+        headers=headers,
+    )
+    assert resp.status_code == 404
