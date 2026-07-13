@@ -1382,3 +1382,94 @@ async def test_purge_deletes_thread_and_runs(runs_client: AsyncClient) -> None:
 async def test_purge_404_for_unknown(runs_client: AsyncClient) -> None:
     resp = await runs_client.post("/v1/sessions/00000000-0000-0000-0000-000000000099:purge")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Playground history reconstruction — thread run history
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_thread_runs_404_for_unknown(runs_client: AsyncClient) -> None:
+    resp = await runs_client.get("/v1/sessions/00000000-0000-0000-0000-0000000000ff/runs")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_thread_runs_empty_for_fresh_thread(runs_client: AsyncClient) -> None:
+    thread_id = await _create_session(runs_client)
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["runs"] == []
+
+
+@pytest.mark.asyncio
+async def test_thread_runs_lists_oldest_first(runs_client: AsyncClient) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
+
+    thread_id = await _create_session(runs_client)
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+    base = datetime.now(UTC)
+    older, newer = uuid4(), uuid4()
+    # Seed newer first to prove the endpoint sorts by created_at, not insert order.
+    for rid, created, is_resume in (
+        (newer, base + timedelta(seconds=61), True),
+        (older, base, False),
+    ):
+        await app.state.run_store.create(
+            RunInfo(
+                run_id=rid,
+                tenant_id=DEFAULT_DEV_TENANT_ID,
+                thread_id=UUID(thread_id),
+                user_id=None,
+                status=RunStatus.SUCCESS,
+                on_disconnect=DisconnectMode.CANCEL,
+                is_resume=is_resume,
+                error=None,
+                created_at=created,
+                updated_at=created,
+                finished_at=created,
+            )
+        )
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs")
+    assert resp.status_code == 200
+    runs = resp.json()["data"]["runs"]
+    assert [r["run_id"] for r in runs] == [str(older), str(newer)]
+    assert [r["is_resume"] for r in runs] == [False, True]
+    assert runs[0]["status"] == "success"
+    assert "created_at" in runs[0]
+
+
+@pytest.mark.asyncio
+async def test_thread_runs_foreign_tenant_forbidden(runs_client: AsyncClient) -> None:
+    """A plain tenant admin asking for another tenant's runs is rejected by
+    the scope gate (only a system_admin may cross) — same as
+    ``test_thread_messages_foreign_tenant_forbidden``; the tenant-scope gate
+    runs before the per-thread ownership check that returns 404."""
+    thread_id = await _create_session(runs_client)
+    resp = await runs_client.get(
+        f"/v1/sessions/{thread_id}/runs",
+        params={"tenant_id": "11111111-1111-1111-1111-111111111111"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_thread_runs_store_failure_degrades_to_empty(
+    runs_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spec: store 异常 → best-effort 返回 {"runs": []}(不 500),与 /messages 一致。
+    The ownership gate already passed (own thread) — only the store read fails."""
+    thread_id = await _create_session(runs_client)
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+
+    async def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app.state.run_store, "list_by_thread", _boom)
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["runs"] == []

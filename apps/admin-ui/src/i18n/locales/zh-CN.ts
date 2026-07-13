@@ -754,6 +754,7 @@ const zhCN: TranslationKeys = {
     resume_label: "继续会话…",
     resumed_notice: "继续已有会话 —— 历史对话已载入下方。",
     history_divider: "—— 以下为本次新消息 ——",
+    history_loading: "载入调试数据…",
     meta_steps: "步数",
     meta_latency: "延迟",
     view_run: "查看运行",

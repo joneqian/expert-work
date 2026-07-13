@@ -28,6 +28,7 @@ import {
   Popover,
   Segmented,
   Space,
+  Spin,
   Tag,
   Typography,
 } from "antd";
@@ -61,7 +62,7 @@ import {
 import { ApiError } from "../../api/client";
 import { listMembers } from "../../api/members";
 import { listRateCards, type RateCardRecord } from "../../api/rate_card";
-import { getRun, streamRunEvents } from "../../api/runs";
+import { getRun, listThreadRuns, streamRunEvents } from "../../api/runs";
 import { getRunTrace, type RunTrace } from "../../api/trace_facade";
 import {
   createSession,
@@ -98,6 +99,7 @@ import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import type { AgentDetailResponse } from "../../api/agents";
 import { AgentStatePanels } from "./playground/AgentStatePanels";
+import { buildHistoryTurns, type HistoryTurn } from "./playground/history_turns";
 import { StepTimeline } from "./playground/StepTimeline";
 import { TimelineFilterBar } from "./playground/TimelineFilterBar";
 import { TraceView } from "./playground/TraceView";
@@ -132,6 +134,14 @@ interface Turn {
   /** #5 — set when the run paused at an approval gate; cleared on decision. */
   approval: ApprovalItem | null;
 }
+
+/** Historical-turn lazy replay state (one per resumed run). ``pending`` = not
+ *  yet scrolled into view; ``loading`` = replay in flight; ``done`` = replayed
+ *  events collected (TurnCard renders the full debug panels); ``error`` =
+ *  replay failed (TurnCard keeps showing the flat fallback answer). */
+type HistoryLoad =
+  | { state: "pending" | "loading" | "error"; events: SseEvent[] }
+  | { state: "done"; events: SseEvent[] };
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -223,6 +233,13 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [resumed, setResumed] = useState(false);
   // #6 — prior conversation loaded when resuming an existing thread.
   const [history, setHistory] = useState<HistoryMessage[]>([]);
+  // 历史懒重建 — count-paired historical turns (null = not built / count
+  // mismatch, caller falls back to the flat ``history`` block above) + each
+  // turn's lazy replay state, keyed by runId.
+  const [historyTurns, setHistoryTurns] = useState<HistoryTurn[] | null>(null);
+  const [historyLoads, setHistoryLoads] = useState<Record<string, HistoryLoad>>(
+    {},
+  );
 
   const abortRef = useRef<AbortController | null>(null);
   // Resume sets ``runAsUser`` to the thread's owner; that change would otherwise
@@ -232,6 +249,21 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+  // 历史懒重建 — aborts in-flight history fetch/replays when resuming to
+  // another thread. ``observerRef``/``runIdByEl`` back the shared
+  // IntersectionObserver that triggers each history row's replay when it
+  // scrolls into view; torn down explicitly by ``resetDraft``/``handleResume``
+  // (and on unmount) since its callback closure is bound to one thread.
+  const historyAbortRef = useRef<AbortController | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const runIdByEl = useRef<Map<Element, string>>(new Map());
+  // A row's ref callback is a fresh closure every render (curried by
+  // ``registerHistoryRow``), so React re-invokes it — and ``registerHistoryRow``
+  // re-``observe()``s — on every re-render of that row, not just when it first
+  // mounts. Tracking "already started" runIds here (checked synchronously,
+  // unlike state) makes ``replayHistoryRun`` a true one-shot regardless of how
+  // many times its trigger fires.
+  const startedHistoryRunsRef = useRef<Set<string>>(new Set());
 
   // Load active tenant users for the impersonation picker (subject_id == the
   // tenant_user.id that keys the workspace/memory; only active members have one).
@@ -277,6 +309,15 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     setThreadError(null);
     setResumed(false);
     setHistory([]);
+    setHistoryTurns(null);
+    setHistoryLoads({});
+    // A stale observer's callback closure is bound to the previous thread's
+    // id (see ``registerHistoryRow``) — tear it down so a later resume
+    // rebuilds it fresh, and so no leftover row keeps replaying here.
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    runIdByEl.current.clear();
+    startedHistoryRunsRef.current.clear();
     setTurns([]);
     setAttachments([]);
     setUploadError(null);
@@ -335,10 +376,51 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         skipRebindRef.current = true;
         setRunAsUser(nextRunAs);
       }
-      // Load the thread's prior conversation from the checkpoint.
-      void getSessionMessages(picked.thread_id)
-        .then(setHistory)
-        .catch(() => setHistory([]));
+      // 历史重建:并行拉文本轮 + runs,按序配对成懒重建描述符;
+      // 计数守卫失败或任一失败 → 落回扁平文本(setHistory 保留原行为)。
+      setHistoryTurns(null);
+      setHistoryLoads({});
+      historyAbortRef.current?.abort();
+      const ac = new AbortController();
+      historyAbortRef.current = ac;
+      // Tear down the previous thread's observer/registry — its callback
+      // closure is bound to that thread id (see ``registerHistoryRow``), and
+      // any in-flight replay's runId must not block this thread's own runs
+      // (run ids are otherwise assumed globally unique, but this keeps the
+      // one-shot guard scoped to the thread actually being viewed).
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      runIdByEl.current.clear();
+      startedHistoryRunsRef.current.clear();
+      void Promise.all([
+        getSessionMessages(picked.thread_id),
+        listThreadRuns(picked.thread_id).catch(() => null),
+      ])
+        .then(([messages, runs]) => {
+          // A newer resume replaced ``historyAbortRef.current`` before this
+          // fetch resolved — drop the stale write so it can't clobber the
+          // current thread's history (or trigger a wrong-thread replay).
+          if (historyAbortRef.current !== ac) return;
+          setHistory(messages); // 降级路径永远有数据
+          if (!runs) return;
+          const built = buildHistoryTurns(messages, runs);
+          // 计数守卫失败(null)或空 thread(0 轮)→ 保持扁平文本(null 分支
+          // 什么都不渲,不会漏出「以下为本次新消息」分隔线)。
+          if (!built || built.length === 0) return;
+          setHistoryTurns(built);
+          setHistoryLoads(
+            Object.fromEntries(
+              built.map((h) => [h.runId, { state: "pending", events: [] }]),
+            ),
+          );
+        })
+        .catch(() => {
+          // Same staleness guard — a stale failed resume must not wipe the
+          // history a newer resume already loaded.
+          if (historyAbortRef.current !== ac) return;
+          setHistory([]);
+          setHistoryTurns(null);
+        });
     },
     [runAsUser],
   );
@@ -356,6 +438,93 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       abortRef.current?.abort();
     };
   }, [r.name, r.version, runAsUser, resetDraft]);
+
+  // 历史懒重建 — replay one historical run's persisted event stream so its
+  // TurnCard can render the full debug panels (rather than just the flat
+  // fallback answer). Fire-and-forget from the IntersectionObserver callback
+  // below; a replay failure leaves the turn on its fallback (degradation).
+  // ``startedHistoryRunsRef`` makes this idempotent — a row's viewport
+  // trigger can fire more than once (see ``registerHistoryRow``).
+  const replayHistoryRun = useCallback(async (runId: string, threadId: string) => {
+    if (startedHistoryRunsRef.current.has(runId)) return;
+    startedHistoryRunsRef.current.add(runId);
+    setHistoryLoads((prev) => ({
+      ...prev,
+      [runId]: { state: "loading", events: [] },
+    }));
+    try {
+      const collected: SseEvent[] = [];
+      for await (const frame of streamRunEvents(threadId, runId, {
+        signal: historyAbortRef.current?.signal,
+      })) {
+        collected.push(frame);
+        if (frame.event === "end") break;
+      }
+      // The terminal-replay endpoint ALWAYS appends an ``end`` frame after the
+      // stored rows (runs.py ``_stream_replay``), so an empty run replays as a
+      // lone ``[{event:"end"}]``. Only mark ``done`` when the replay actually
+      // delivered renderable content AND completed; an empty replay
+      // (no non-end frame) or a truncated one (no end frame) degrades to
+      // ``error`` — which keeps the placeholder showing ``fallbackAnswer``
+      // (the /messages text we already have) instead of the full render's
+      // "no text" empty state. 不丢已有内容。
+      const sawEnd = collected.some((f) => f.event === "end");
+      const hasContent = collected.some((f) => f.event !== "end");
+      setHistoryLoads((prev) => ({
+        ...prev,
+        [runId]:
+          hasContent && sawEnd
+            ? { state: "done", events: collected }
+            : { state: "error", events: [] },
+      }));
+    } catch {
+      setHistoryLoads((prev) => ({ ...prev, [runId]: { state: "error", events: [] } }));
+    }
+  }, []);
+
+  // Each history row's ref registers itself with a shared IntersectionObserver
+  // (created lazily on first row); a row scrolling into view triggers its
+  // replay. The observer's callback closure is bound to one ``threadId``, so
+  // ``resetDraft``/``handleResume`` tear it down explicitly on a new resume or
+  // agent switch (see the effect below for the unmount case) — otherwise a
+  // later resume's rows would replay against the first-captured (now stale)
+  // thread. ``runIdByEl`` also guards against re-observing the same element:
+  // the ref prop is a fresh closure every render (curried below), so React
+  // re-invokes it on every re-render of the row, not just on mount.
+  const registerHistoryRow = useCallback(
+    (runId: string, threadId: string) => (el: HTMLDivElement | null) => {
+      if (el === null) return;
+      if (runIdByEl.current.has(el)) return;
+      if (observerRef.current === null) {
+        observerRef.current = new IntersectionObserver((entries) => {
+          for (const e of entries) {
+            if (!e.isIntersecting) continue;
+            const rid = runIdByEl.current.get(e.target);
+            if (rid) void replayHistoryRun(rid, threadId);
+          }
+        });
+      }
+      runIdByEl.current.set(el, runId);
+      observerRef.current.observe(el);
+    },
+    [replayHistoryRun],
+  );
+
+  // Tear down the shared observer on unmount only — its callback closure is
+  // bound to one thread id (see ``registerHistoryRow``), so ``resetDraft``
+  // and ``handleResume`` also tear it down explicitly whenever they clear
+  // ``historyTurns`` for a fresh resume/agent switch. (Keying this effect on
+  // ``historyTurns`` instead would also fire on the null→built transition
+  // *within* the same resume — right after a row registers — wiping the
+  // just-created observer and racing a duplicate replay.)
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      runIdByEl.current.clear();
+      startedHistoryRunsRef.current.clear();
+    };
+  }, []);
 
   // Auto-scroll the transcript as turns/frames arrive.
   useEffect(() => {
@@ -1330,8 +1499,12 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               data-testid="playground-empty-log"
             />
           )}
-          {/* #6 — prior conversation (read-only) when resuming a thread. */}
-          {history.length > 0 && (
+          {/* #6 / 历史懒重建 — prior conversation (read-only) when resuming a
+              thread. ``historyTurns`` non-null → count-paired lazy TurnCards
+              (each replays its run's events when scrolled into view); else
+              the flat text block (degradation — count mismatch or a failed
+              ``listThreadRuns``/``buildHistoryTurns``). */}
+          {historyTurns !== null ? (
             <div
               data-testid="playground-history"
               style={{
@@ -1341,47 +1514,88 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                 flexShrink: 0,
               }}
             >
-              {history.map((m, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                    maxWidth: "85%",
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    fontSize: 13,
-                    whiteSpace: "pre-wrap",
-                    background:
-                      m.role === "user"
-                        ? "var(--ew-surface-raised)"
-                        : "transparent",
-                    border:
-                      m.role === "user"
-                        ? "1px solid var(--ew-border-subtle)"
-                        : "none",
-                    opacity: 0.75,
-                  }}
-                >
-                  {m.role === "user" ? (
-                    m.content
-                  ) : (
-                    <MarkdownView>{m.content}</MarkdownView>
-                  )}
-                </div>
-              ))}
+              {historyTurns.map((h, idx) => {
+                const load = historyLoads[h.runId] ?? {
+                  state: "pending" as const,
+                  events: [],
+                };
+                return (
+                  <div
+                    key={h.key}
+                    ref={registerHistoryRow(h.runId, thread?.thread_id ?? "")}
+                  >
+                    <TurnCard
+                      turn={{
+                        id: h.key,
+                        input: h.input,
+                        attachments: [],
+                        events: load.events,
+                        status: "done",
+                        error: null,
+                        approval: null,
+                      }}
+                      turnSeq={idx}
+                      initialEventView={eventView}
+                      onViewChange={setEventView}
+                      threadId={thread?.thread_id ?? null}
+                      onDownloadArtifact={handleDownloadArtifact}
+                      rate={rate}
+                      onDecide={() => {}}
+                      deciding={false}
+                      onExport={handleExport}
+                      exporting={exportingId === h.key}
+                      isSystemAdmin={isSystemAdmin}
+                      readOnly
+                      loadState={load.state}
+                      fallbackAnswer={h.fallbackAnswer}
+                    />
+                  </div>
+                );
+              })}
+              <HistoryDivider />
+            </div>
+          ) : (
+            history.length > 0 && (
               <div
+                data-testid="playground-history"
                 style={{
-                  textAlign: "center",
-                  fontSize: 11,
-                  color: "var(--ew-text-tertiary)",
-                  borderTop: "1px dashed var(--ew-border-subtle)",
-                  paddingTop: 6,
-                  marginTop: 2,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  flexShrink: 0,
                 }}
               >
-                {t("playground.history_divider")}
+                {history.map((m, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                      maxWidth: "85%",
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      fontSize: 13,
+                      whiteSpace: "pre-wrap",
+                      background:
+                        m.role === "user"
+                          ? "var(--ew-surface-raised)"
+                          : "transparent",
+                      border:
+                        m.role === "user"
+                          ? "1px solid var(--ew-border-subtle)"
+                          : "none",
+                      opacity: 0.75,
+                    }}
+                  >
+                    {m.role === "user" ? (
+                      m.content
+                    ) : (
+                      <MarkdownView>{m.content}</MarkdownView>
+                    )}
+                  </div>
+                ))}
+                <HistoryDivider />
               </div>
-            </div>
+            )
           )}
           {turns.map((turn, turnIndex) => (
             <TurnCard
@@ -1402,6 +1616,27 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** #6 / 历史懒重建 — the "以下为本次新消息" divider closing a resumed thread's
+ *  prior conversation, shared by both the lazy (count-paired) and flat
+ *  (degradation) history render branches. */
+function HistoryDivider() {
+  const { t } = useTranslation();
+  return (
+    <div
+      style={{
+        textAlign: "center",
+        fontSize: 11,
+        color: "var(--ew-text-tertiary)",
+        borderTop: "1px dashed var(--ew-border-subtle)",
+        paddingTop: 6,
+        marginTop: 2,
+      }}
+    >
+      {t("playground.history_divider")}
     </div>
   );
 }
@@ -1685,6 +1920,9 @@ function TurnCard({
   onExport,
   exporting,
   isSystemAdmin,
+  readOnly = false,
+  loadState = "done",
+  fallbackAnswer,
 }: {
   turn: Turn;
   /** The turn's index in the transcript — sent as feedback ``turn_seq``. */
@@ -1710,6 +1948,13 @@ function TurnCard({
   /** item 15 — gates the "open in Langfuse" deep link (Langfuse has no
    *  per-tenant isolation; see TraceToolbar for the same gate). */
   isSystemAdmin: boolean;
+  /** Historical-turn rendering: hides the approval gate and feedback bar
+   *  (no mutating control on a finished run). Live turns default false. */
+  readOnly?: boolean;
+  /** Historical-turn lazy load state — drives the placeholder below. */
+  loadState?: "pending" | "loading" | "done" | "error";
+  /** Assistant text shown before this historical turn's events replay. */
+  fallbackAnswer?: string;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
@@ -1848,6 +2093,54 @@ function TurnCard({
         1e12
       : null;
 
+  // 历史轮懒态:事件未到位时显示输入 + 兜底答案 + 载入指示,避免用空 events
+  // 跑完整解析机器。事件到位(loadState==="done")后走下方原完整渲染。此早返回
+  // 必须在上方所有 hook 之后,否则 loadState 切换会改变 hook 数量,违反 Rules of Hooks。
+  if (readOnly && turn.events.length === 0 && loadState !== "done") {
+    return (
+      <div
+        data-testid="playground-turn"
+        style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}
+      >
+        <div
+          style={{
+            alignSelf: "flex-end",
+            maxWidth: "85%",
+            padding: "6px 10px",
+            borderRadius: 8,
+            fontSize: 13,
+            whiteSpace: "pre-wrap",
+            background: "var(--ew-surface-raised)",
+            border: "1px solid var(--ew-border-subtle)",
+          }}
+        >
+          {turn.input}
+        </div>
+        {fallbackAnswer ? (
+          <div
+            style={{
+              alignSelf: "flex-start",
+              maxWidth: "85%",
+              fontSize: 13,
+              whiteSpace: "pre-wrap",
+              opacity: 0.75,
+            }}
+          >
+            <MarkdownView>{fallbackAnswer}</MarkdownView>
+          </div>
+        ) : null}
+        {loadState !== "error" ? (
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.6, fontSize: 12 }}
+          >
+            <Spin size="small" />
+            <span>{t("playground.history_loading")}</span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid="playground-turn"
@@ -1942,7 +2235,7 @@ function TurnCard({
         )}
 
         {/* #5 — approval gate (run paused on an approval-required tool). */}
-        {turn.approval && threadId && (
+        {!readOnly && turn.approval && threadId && (
           <ApprovalGate
             approval={turn.approval}
             busy={deciding}
@@ -1959,7 +2252,7 @@ function TurnCard({
 
         {/* SE-16 (SE-A46) — per-turn 👍/👎 quality signal feeding the
             skill-evolution curation pipeline. Settled turns only. */}
-        {turn.status === "done" && threadId && (
+        {!readOnly && turn.status === "done" && threadId && (
           <FeedbackBar threadId={threadId} turnSeq={turnSeq} />
         )}
       </div>
