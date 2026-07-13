@@ -76,6 +76,7 @@ from jsonschema.exceptions import SchemaError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from opentelemetry.trace import Status, StatusCode
 
 from expert_work.common.dlp import scan_and_redact
 from expert_work.common.observability import (
@@ -1985,6 +1986,28 @@ def _record_tool_io(span: Any, args: Mapping[str, Any], result: Any) -> None:
         logger.warning("tool_span_io.record_failed", exc_info=True)
 
 
+# R1 fix — ``_invoke_tool`` catches tool exceptions and returns a
+# ``ToolMessage(status="error")`` instead of re-raising, so the span body
+# never raises and ``expert_work_span``'s own exception path (which would
+# otherwise set ``StatusCode.ERROR``) never fires. The tool_call span stays
+# ``UNSET`` and Langfuse shows the failed call at ``level=DEFAULT``.
+# ``_record_tool_error`` detects the error outcome inside the span block and
+# sets the status explicitly, so Langfuse gets ``level=ERROR`` +
+# ``status_message`` for the trace waterfall's error red-marking.
+def _record_tool_error(span: Any, outcome: tuple[Any, ...]) -> None:
+    """Best-effort: mark the tool_call span ERROR when the outcome failed.
+
+    Side-channel like ``_record_tool_io`` — any failure only drops
+    observability data and must never affect the tool's return path.
+    """
+    try:
+        classified = outcome[3] if len(outcome) > 3 else None
+        summary = getattr(classified, "summary", None) or str(outcome[0].content)[:200]
+        span.set_status(Status(StatusCode.ERROR, summary))
+    except Exception:  # instrumentation side-channel, never blocks a run
+        logger.warning("tool_span_error.record_failed", exc_info=True)
+
+
 async def _dispatch_tool(
     tool_call: dict[str, Any],
     registry: ToolRegistry,
@@ -2045,6 +2068,8 @@ async def _dispatch_tool(
                 budget_enabled=budget_enabled,
             )
             _record_tool_io(span, args, outcome[0].content)
+            if outcome[0].status == "error":
+                _record_tool_error(span, outcome)
         ok = outcome[0].status != "error"
         # Stream HX-12 (Mini-ADR HX-I4) — call-through: the model called a
         # deferred name directly (it remembered the tool without a
