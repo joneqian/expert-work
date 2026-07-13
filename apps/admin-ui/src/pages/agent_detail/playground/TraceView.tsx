@@ -150,7 +150,7 @@ function TraceTree({ spans, totalMs }: { spans: readonly TraceSpan[]; totalMs: n
           onSelect={() => setSelectedId(row.span.id)}
         />
       ))}
-      {selected && <TraceDetail span={selected} onClose={() => setSelectedId(null)} />}
+      {selected && <TraceDetail key={selected.id} span={selected} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }
@@ -527,7 +527,7 @@ function MessageBlock({
             flex: "0 0 auto",
           }}
         >
-          {message.fullChars} 字
+          {t("playground.tr_msg_chars", { n: message.fullChars })}
         </span>
       </div>
       {expanded && (
@@ -642,9 +642,10 @@ function IoText({
   io: Extract<RunTraceIo, { kind: "text" }>;
   onViewRaw?: () => void;
 }) {
-  const { text: cleaned } = cleanUntrusted(io.text);
+  const { text: cleaned, hadUntrusted } = cleanUntrusted(io.text);
   return (
     <div style={{ padding: "0 13px 12px 30px" }}>
+      {hadUntrusted && <UntrustedBadge />}
       <pre
         style={{
           margin: 0,

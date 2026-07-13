@@ -785,6 +785,7 @@ export interface TranslationKeys {
     tr_msg_raw: string;
     tr_msg_untrusted: string;
     tr_msg_toolcall: string;
+    tr_msg_chars: string;
     tr_purpose_primary: string;
   };
   session_history: {
@@ -3216,6 +3217,7 @@ const en: TranslationKeys = {
     tr_msg_raw: "View raw",
     tr_msg_untrusted: "contains untrusted content",
     tr_msg_toolcall: "→ called {{name}}",
+    tr_msg_chars: "{{n}} chars",
     tr_purpose_primary: "Primary reasoning",
   },
   session_history: {

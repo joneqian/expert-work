@@ -98,6 +98,88 @@ const argsTool = makeSpan({
   output: { kind: "text", text: "ok", truncated: false, fullChars: 2 },
 });
 
+// Review-fix fixtures (Task 8 batch 3 follow-up).
+//
+// Fix 1 regression: two llm spans, each with a single `system` message at
+// index 0 (same array index → same MessageBlock fiber slot unless
+// `TraceDetail` remounts on selection change) with distinct, identifiable
+// content so a leak from A into B is observable.
+const leakSpanA = makeSpan({
+  id: "leak-a",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "system", content: "system-A-secret", truncated: false, fullChars: 15, toolCalls: null },
+    ],
+  },
+});
+const leakSpanB = makeSpan({
+  id: "leak-b",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "system", content: "system-B-secret", truncated: false, fullChars: 15, toolCalls: null },
+    ],
+  },
+});
+
+// Fix 2: a tool span whose text-kind args AND result both contain UNTRUSTED
+// fencing — tool i/o is exactly where untrusted content shows up in
+// practice, and a tool span renders two independent `IoText` sections.
+const untrustedTool = makeSpan({
+  id: "sr3",
+  parentId: "r0",
+  kind: "tool",
+  label: "工具调用",
+  detail: "web_search",
+  input: {
+    kind: "text",
+    text: "«UNTRUSTED nonce=aa»\nargs text\n«/UNTRUSTED nonce=aa»",
+    truncated: false,
+    fullChars: 9,
+  },
+  output: {
+    kind: "text",
+    text: "«UNTRUSTED nonce=zz»\nresult text\n«/UNTRUSTED nonce=zz»",
+    truncated: false,
+    fullChars: 11,
+  },
+});
+
+// Fix 4a: a message with empty content + a toolCalls list — exercises
+// MessageBlock's "→ called {name}" branch instead of an empty pre body.
+const toolCallLlm = makeSpan({
+  id: "sr4",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [{ role: "ai", content: "", truncated: false, fullChars: 0, toolCalls: ["exec_python"] }],
+  },
+});
+
+// Fix 4b: a truncated message — exercises the TruncationRow (copy + view
+// raw affordances) below the message body.
+const truncatedLlm = makeSpan({
+  id: "sr5",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "ai", content: "some long content", truncated: true, fullChars: 40000, toolCalls: null },
+    ],
+  },
+});
+
 function okTrace(spans: TraceSpan[] = [root, llm, tool]): RunTrace {
   return {
     status: "ok",
@@ -233,5 +315,67 @@ describe("TraceView", () => {
     expect(within(detail).getByText("Arguments")).toBeInTheDocument();
     expect(within(detail).getByText("Result")).toBeInTheDocument();
     expect(within(detail).queryByText(/^Messages$|^Reply$/)).not.toBeInTheDocument();
+  });
+
+  it("switching the selected span remounts the detail panel — no cross-span MessageBlock expand-state leak", () => {
+    // Regression test for the missing `key={selected.id}` on `TraceDetail`:
+    // without it, span B's system MessageBlock reuses span A's fiber (same
+    // array index) and inherits A's manually-expanded state.
+    render(<TraceView trace={okTrace([root, leakSpanA, leakSpanB])} />);
+    const rows = screen.getAllByTestId("trace-row");
+
+    fireEvent.click(rows[1]); // select span A
+    const detailA = screen.getByTestId("trace-detail");
+    const messageA = within(detailA).getByTestId("trace-message");
+    // system starts collapsed — expand it by clicking its header.
+    expect(within(messageA).queryByText("system-A-secret")).not.toBeInTheDocument();
+    fireEvent.click(within(messageA).getByRole("button"));
+    expect(within(messageA).getByText("system-A-secret")).toBeInTheDocument();
+
+    fireEvent.click(rows[2]); // select span B directly, without closing
+    const detailB = screen.getByTestId("trace-detail");
+    const messageB = within(detailB).getByTestId("trace-message");
+    // If the leak were present, B's system message would already be
+    // expanded (inheriting A's toggle) and show its content.
+    expect(within(messageB).queryByText("system-B-secret")).not.toBeInTheDocument();
+    expect(within(messageB).queryByText("system-A-secret")).not.toBeInTheDocument();
+  });
+
+  it("IoText (tool span text i/o) shows the untrusted badge for both args and result when each contains UNTRUSTED fencing", () => {
+    render(<TraceView trace={okTrace([root, untrustedTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    // A tool span has two independent IoText sections (args + result), so
+    // multiple badges can coexist — assert with getAllByTestId, not
+    // getByTestId.
+    expect(within(detail).getAllByTestId("msg-untrusted")).toHaveLength(2);
+    expect(within(detail).getByText("args text")).toBeInTheDocument();
+    expect(within(detail).getByText("result text")).toBeInTheDocument();
+    expect(within(detail).queryByText(/UNTRUSTED|▁/)).not.toBeInTheDocument();
+  });
+
+  it("message header shows the localized size hint ('N chars'), not a hardcoded '字'", () => {
+    render(<TraceView trace={okTrace([root, structuredLlm, argsTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    // structuredLlm's human message has fullChars: 4.
+    expect(within(detail).getByText("4 chars")).toBeInTheDocument();
+    expect(within(detail).queryByText(/字/)).not.toBeInTheDocument();
+  });
+
+  it("a message with empty content + toolCalls renders the tool-call text, not an empty body", () => {
+    render(<TraceView trace={okTrace([root, toolCallLlm])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByText("→ called exec_python")).toBeInTheDocument();
+  });
+
+  it("a truncated message renders the truncated-size text plus copy + view-raw affordances", () => {
+    render(<TraceView trace={okTrace([root, truncatedLlm])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByText("Truncated 40000 chars")).toBeInTheDocument();
+    expect(within(detail).getByText("Copy")).toBeInTheDocument();
+    expect(within(detail).getByText("View raw")).toBeInTheDocument();
   });
 });

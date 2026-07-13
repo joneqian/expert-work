@@ -836,6 +836,7 @@ const zhCN: TranslationKeys = {
     tr_msg_raw: "查看原文",
     tr_msg_untrusted: "含不可信内容",
     tr_msg_toolcall: "→ 调用 {{name}}",
+    tr_msg_chars: "{{n}} 字",
     tr_purpose_primary: "主推理",
   },
   session_history: {
