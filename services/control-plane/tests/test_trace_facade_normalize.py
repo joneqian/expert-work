@@ -184,3 +184,68 @@ def test_normalize_elides_only_root_http_request_not_named_children() -> None:
     assert "child" in ids  # non-root .http_request-named span kept
     child = next(s for s in spans if s["id"] == "child")
     assert child["parentId"] == "sess"  # still parented correctly
+
+
+def test_normalize_renders_chat_messages_input_as_readable_text() -> None:
+    """LLM input 是消息 list → 渲染成 role+真换行内容,不是 Python-repr 串。"""
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
+        _obs(
+            "g",
+            "GENERATION",
+            "llm_call",
+            "sess",
+            1.0,
+            0,
+            input=[
+                {"role": "system", "content": "You are helpful.\n\n# Rules\nBe terse."},
+                {"role": "user", "content": "hi"},
+            ],
+        ),
+    ]
+    spans = normalize_trace(_trace(obs))["spans"]
+    g = next(s for s in spans if s["id"] == "g")
+    text = g["input"]
+    # 真换行渲染(非字面 \n),role 可见,不是 repr 串
+    assert "\n\n# Rules\nBe terse." in text
+    assert "You are helpful." in text
+    assert "system" in text and "user" in text
+    assert "{'role'" not in text and "\\n" not in text  # 不是 Python-repr
+
+
+def test_normalize_renders_block_list_content() -> None:
+    """content 是 block-list [{type,text}] → 取 text 拼接。"""
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
+        _obs(
+            "g",
+            "GENERATION",
+            "llm_call",
+            "sess",
+            1.0,
+            0,
+            input=[{"role": "user", "content": [{"type": "text", "text": "block one"}]}],
+        ),
+    ]
+    g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
+    assert "block one" in g["input"]
+
+
+def test_normalize_io_cap_default_raised_to_32768() -> None:
+    """默认 io_cap 放宽到 32768:20000 字符的 input 不再截断。"""
+    big = "x" * 20000
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
+        _obs("g", "GENERATION", "llm_call", "sess", 1.0, 0, input=big),
+    ]
+    g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
+    assert "截断" not in g["input"] and len(g["input"]) == 20000
+
+
+def test_normalize_still_caps_beyond_32768() -> None:
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
+        _obs("g", "GENERATION", "llm_call", "sess", 1.0, 0, input="y" * 40000),
+    ]
+    g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
+    assert "截断" in g["input"]
