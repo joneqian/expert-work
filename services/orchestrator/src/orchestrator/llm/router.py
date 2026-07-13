@@ -205,6 +205,45 @@ def _complete(
     return provider.complete(messages=messages, tools=tools, output_schema=output_schema)
 
 
+def _llm_response_payload(response: AIMessage) -> dict[str, Any]:
+    """Build the ``ctx.payload["llm_response"]`` contract documented in
+    :mod:`expert_work.runtime.middleware.langfuse` — ``{"output": ...,
+    "usage": {...}}`` — from a provider's raw :class:`AIMessage`.
+
+    Defensive by design: this runs on every LLM call inside the
+    ``terminal`` closure, so a bug here must degrade to an empty/partial
+    payload rather than break the call. ``AIMessage.text`` already
+    flattens ``str`` vs. block-list ``content`` (LangChain's own
+    idiom — see ``BaseMessage.text``); ``usage_metadata`` is already
+    normalised to the ``{"input_tokens", "output_tokens", ...}`` shape
+    by the provider adapters (``providers/anthropic.py``,
+    ``providers/openai.py``).
+    """
+    output: str
+    try:
+        # ``.text`` returns a ``TextAccessor`` (a ``str`` subclass kept for
+        # backward-compat callable access) — coerce to plain ``str`` so the
+        # payload's declared shape stays exactly ``str``.
+        output = str(response.text)
+    except Exception:
+        logger.warning("llm_router.llm_response_output_extraction_failed", exc_info=True)
+        output = ""
+
+    usage: dict[str, int] = {}
+    try:
+        usage_metadata = response.usage_metadata
+        if usage_metadata:
+            usage = {
+                "input_tokens": int(usage_metadata["input_tokens"]),
+                "output_tokens": int(usage_metadata["output_tokens"]),
+            }
+    except Exception:
+        logger.warning("llm_router.llm_response_usage_extraction_failed", exc_info=True)
+        usage = {}
+
+    return {"output": output, "usage": usage}
+
+
 def _group_of(handle: ProviderHandle) -> str:
     """The sibling-key group for a handle (Stream Y-MK).
 
@@ -477,6 +516,7 @@ class LLMRouter:
                 output_schema=output_schema,
             )
             c.payload["response"] = response
+            c.payload["llm_response"] = _llm_response_payload(response)
 
         await self._invoke_with_deadline(handle, self.around_llm_chain.invoke(ctx, terminal))
         response = ctx.payload.get("response")
