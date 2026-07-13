@@ -349,3 +349,41 @@ async def test_trace_present_but_no_spans_returns_not_ready(trace_client: AsyncC
     resp = await trace_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}/trace", headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "not_ready"}
+
+
+@pytest.mark.asyncio
+async def test_trace_orphaned_spans_returns_not_ready(trace_client: AsyncClient) -> None:
+    """Same non-atomic ingestion, subtler shape: child observations land BEFORE
+    their session-root parent. ``trace.get`` returns a trace whose spans all
+    point at a ``parent_observation_id`` that isn't in the set (the root hasn't
+    ingested yet) → the frontend's root-first tree walk renders nothing (a bare
+    axis). Must degrade to ``not_ready``, not report a bogus ``ok`` with an
+    empty waterfall."""
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+
+    def _child(obs_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=obs_id,
+            type="SPAN",
+            name="expert_work.orchestrator.tool_call",
+            parent_observation_id="root-not-ingested-yet",  # dangles outside the set
+            latency=1.0,
+            start_time=datetime(2026, 1, 1, tzinfo=UTC),
+            model=None,
+            prompt_tokens=0,
+            completion_tokens=0,
+            calculated_total_cost=0.0,
+            input=None,
+            output=None,
+        )
+
+    trace = _fake_trace()
+    trace.observations = [_child("child-a"), _child("child-b")]
+    app.state.langfuse_read_client = _FakeLangfuseClient(trace=trace)
+
+    resp = await trace_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}/trace", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "not_ready"}

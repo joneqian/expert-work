@@ -55,16 +55,20 @@ export function TraceView({ trace, onRefresh }: TraceViewProps) {
   // `status: "ok"` doesn't type-narrow `trace`/`spans` into defined (both
   // stay optional on RunTrace) — guard defensively rather than asserting,
   // degrading to "unavailable" on a malformed ok payload instead of crashing.
-  if (trace.status !== "ok" || !trace.trace || !trace.spans || trace.spans.length === 0) {
-    // An ok trace with a present trace+spans but ZERO spans is Langfuse's
-    // ingestion-in-progress window (root closed, child observations not landed
-    // yet) — surface it as refreshable `not_ready`, never a bare axis with no
-    // bars. A genuinely malformed ok (missing trace/spans) still degrades to
-    // `unavailable`.
+  const spans = trace.spans;
+  // The waterfall renders nothing unless there's at least one root span
+  // (`parentId === null`) to start the tree walk from. Two ingestion-in-
+  // progress shapes have spans yet no root: zero spans, or child spans that
+  // landed before their session-root parent (every `parentId` dangles). Both
+  // must surface as refreshable `not_ready`, never a bare axis with no bars.
+  const hasRoot = Array.isArray(spans) && spans.some((s) => s.parentId === null);
+  if (trace.status !== "ok" || !trace.trace || !spans || !hasRoot) {
+    // A genuinely malformed ok (missing trace/spans) degrades to `unavailable`;
+    // an ok trace that's simply still ingesting (no root yet) → `not_ready`.
     const status: Exclude<TraceStatus, "ok"> =
       trace.status !== "ok"
         ? trace.status
-        : trace.trace && trace.spans
+        : trace.trace && spans
           ? "not_ready"
           : "unavailable";
     return (
@@ -76,7 +80,7 @@ export function TraceView({ trace, onRefresh }: TraceViewProps) {
 
   return (
     <div data-testid="trace-view">
-      <TraceTree spans={trace.spans} totalMs={trace.trace.latencyMs} />
+      <TraceTree spans={spans} totalMs={trace.trace.latencyMs} />
     </div>
   );
 }
