@@ -55,9 +55,18 @@ export function TraceView({ trace, onRefresh }: TraceViewProps) {
   // `status: "ok"` doesn't type-narrow `trace`/`spans` into defined (both
   // stay optional on RunTrace) — guard defensively rather than asserting,
   // degrading to "unavailable" on a malformed ok payload instead of crashing.
-  if (trace.status !== "ok" || !trace.trace || !trace.spans) {
+  if (trace.status !== "ok" || !trace.trace || !trace.spans || trace.spans.length === 0) {
+    // An ok trace with a present trace+spans but ZERO spans is Langfuse's
+    // ingestion-in-progress window (root closed, child observations not landed
+    // yet) — surface it as refreshable `not_ready`, never a bare axis with no
+    // bars. A genuinely malformed ok (missing trace/spans) still degrades to
+    // `unavailable`.
     const status: Exclude<TraceStatus, "ok"> =
-      trace.status === "ok" ? "unavailable" : trace.status;
+      trace.status !== "ok"
+        ? trace.status
+        : trace.trace && trace.spans
+          ? "not_ready"
+          : "unavailable";
     return (
       <div data-testid="trace-view">
         <TraceStateCard status={status} onRefresh={onRefresh} />

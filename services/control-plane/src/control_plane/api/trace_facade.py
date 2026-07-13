@@ -185,11 +185,20 @@ def fetch_and_normalize(client: Any, trace_id: str, *, io_cap: int = 32768) -> d
     if getattr(trace, "latency", None) is None:
         return {"status": "not_ready"}
     try:
-        return normalize_trace(trace, io_cap=io_cap)
+        normalized = normalize_trace(trace, io_cap=io_cap)
     except Exception:
         # Belt-and-suspenders: no code path from a successful trace.get()
         # should ever reach an uncaught exception (硬约束「降级永不 500」).
         return {"status": "unavailable"}
+    # Langfuse ingestion is NOT atomic under load: a multi-span run's trace
+    # root can close (``latency`` populated → passed the None-latency guard
+    # above) BEFORE its child observations land, so the trace normalizes to
+    # zero renderable spans. The waterfall would draw a bare time-axis with no
+    # bars — degrade to ``not_ready`` so the console shows the refresh card
+    # until the observations arrive, instead of a confusing empty ruler.
+    if not normalized.get("spans"):
+        return {"status": "not_ready"}
+    return normalized
 
 
 def _parse_observation(o: Any, *, trace_start: Any, io_cap: int) -> _ParsedObs:

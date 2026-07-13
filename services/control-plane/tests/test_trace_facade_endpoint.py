@@ -328,3 +328,24 @@ async def test_trace_none_latency_returns_not_ready(trace_client: AsyncClient) -
     resp = await trace_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}/trace", headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "not_ready"}
+
+
+@pytest.mark.asyncio
+async def test_trace_present_but_no_spans_returns_not_ready(trace_client: AsyncClient) -> None:
+    """Langfuse ingestion is NOT atomic under load: a multi-span run's trace
+    root closes (``latency`` populated → passes the None-latency guard) BEFORE
+    its child observations land, so ``trace.get`` returns a trace whose
+    ``observations`` are still empty. That normalizes to zero renderable spans,
+    which the waterfall would draw as a bare time-axis with no bars. Degrade to
+    ``not_ready`` so the console shows the actionable refresh card instead."""
+    headers = _owner_headers()
+    thread_id = await _create_session(trace_client, headers)
+    run_id = await _seed_run(trace_client, thread_id=thread_id, trace_id="trace-1")
+    app = trace_client._transport.app  # type: ignore[attr-defined,union-attr]
+    trace = _fake_trace()
+    trace.observations = []  # root closed (latency set) but children not ingested yet
+    app.state.langfuse_read_client = _FakeLangfuseClient(trace=trace)
+
+    resp = await trace_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}/trace", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "not_ready"}
