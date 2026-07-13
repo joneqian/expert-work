@@ -228,7 +228,8 @@ def test_normalize_renders_block_list_content() -> None:
         ),
     ]
     g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
-    assert "block one" in g["input"]
+    # 精确断言:区分正确的 text 提取与原样 json.dumps 转储(后者会含 'type'/'{')。
+    assert g["input"] == "[user]\nblock one"
 
 
 def test_normalize_io_cap_default_raised_to_32768() -> None:
@@ -242,10 +243,12 @@ def test_normalize_io_cap_default_raised_to_32768() -> None:
     assert "截断" not in g["input"] and len(g["input"]) == 20000
 
 
-def test_normalize_still_caps_beyond_32768() -> None:
-    obs = [
-        _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
-        _obs("g", "GENERATION", "llm_call", "sess", 1.0, 0, input="y" * 40000),
-    ]
-    g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
-    assert "截断" in g["input"]
+def test_normalize_io_cap_boundary_at_32768() -> None:
+    """Exactly 32768 chars pass; 32769 truncate — pins the default at 32768."""
+    for n, truncated in ((32768, False), (32769, True)):
+        obs = [
+            _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
+            _obs("g", "GENERATION", "llm_call", "sess", 1.0, 0, input="z" * n),
+        ]
+        g = next(s for s in normalize_trace(_trace(obs))["spans"] if s["id"] == "g")
+        assert ("截断" in g["input"]) is truncated
