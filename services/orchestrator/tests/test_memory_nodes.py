@@ -541,6 +541,30 @@ async def test_memory_writeback_node_extracts_and_persists() -> None:
 
 
 @pytest.mark.asyncio
+async def test_writeback_trajectory_omits_agent_system_prompt() -> None:
+    # The extraction trajectory must not echo the agent's own system prompt: it
+    # is an instruction to the agent, not signal for memory extraction, and it
+    # dominated the extraction input (the confusing ``[system] ...`` line the
+    # debug console surfaced). Only real turns feed the extractor.
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    llm = _RecordingLLM(responses=[AIMessage(content='{"memories": []}')])
+    node = make_memory_writeback_node(
+        memory_store=store, embedder=FakeEmbedder(dim=_DIM), llm_caller=llm
+    )
+    await node(  # type: ignore[arg-type]
+        _state("what timezone am I in"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    # extraction prompt = [SystemMessage(_EXTRACT_SYSTEM), HumanMessage(trajectory)]
+    _extract_sys, human = llm.calls[0]
+    trajectory = str(human.content)
+    assert "[system]" not in trajectory  # no agent system-role line
+    assert "help" not in trajectory  # agent system-prompt body gone
+    assert "[human] what timezone am I in" in trajectory  # real turn kept
+
+
+@pytest.mark.asyncio
 async def test_memory_writeback_persists_extraction_scores() -> None:
     # Stream Memory-Enhance (M-2) — importance / confidence round-trip from the
     # extraction reply through to the stored item.

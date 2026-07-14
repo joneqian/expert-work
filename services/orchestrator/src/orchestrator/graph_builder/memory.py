@@ -101,6 +101,12 @@ def _last_human_text(messages: list[BaseMessage]) -> str:
 def _render_trajectory(messages: list[BaseMessage]) -> str:
     lines: list[str] = []
     for message in messages:
+        # Skip the agent's own system prompt — it is an instruction to the
+        # agent, not signal for memory extraction, and it otherwise dominated
+        # the extraction input (the confusing ``[system] ...`` line surfaced in
+        # the debug console).
+        if isinstance(message, SystemMessage):
+            continue
         text = _message_text(message).strip()
         if len(text) > _TRAJECTORY_CHAR_CAP:
             text = text[:_TRAJECTORY_CHAR_CAP] + "...[truncated]"
