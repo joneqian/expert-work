@@ -2459,7 +2459,16 @@ function TurnCard({
                               : (timelineBanner.errorText ?? t("playground.rb_ok")))
                           : undefined
                       }
-                      errorMessage={timelineBanner.errorText ?? undefined}
+                      errorMessage={
+                        // errorText already fills errorLabel in the no-step
+                        // fallback branch above — only surface it as the
+                        // message when a step number owns the label, else the
+                        // banner renders the same text twice.
+                        timelineBanner.status === "error" &&
+                        timelineBanner.errorStepCount != null
+                          ? (timelineBanner.errorText ?? undefined)
+                          : undefined
+                      }
                       onJump={
                         timelineBanner.status === "error"
                           ? () => {

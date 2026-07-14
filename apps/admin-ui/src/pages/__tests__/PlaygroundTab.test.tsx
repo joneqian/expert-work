@@ -1260,6 +1260,30 @@ describe("PlaygroundTab", () => {
       await user.click(screen.getByTestId("run-status-jump"));
       expect(scrollSpy).toHaveBeenCalledTimes(1);
     });
+
+    it("shows a top-level error event's message once (not duplicated) when no failing tool step owns the label", async () => {
+      // Marker-only failure path: an SSE `error` event with no failed tool
+      // call → timelineBannerModel has errorText but errorStepCount === null,
+      // so errorText owns the label. It must NOT also render as the message.
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-marker" }, rawData: "", receivedAt: "" },
+          { id: "2", event: "error", data: { message: "运行崩溃了" }, rawData: "", receivedAt: "" },
+          { id: "3", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const banner = await screen.findByTestId("run-status-banner");
+      const occurrences = (banner.textContent?.match(/运行崩溃了/g) ?? []).length;
+      expect(occurrences).toBe(1);
+    });
   });
 
   // Batch 4b Task 5 — third "Exact" event-view tier (item 14) + purpose
