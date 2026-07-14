@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from control_plane.api.trace_facade import normalize_trace
 
 
@@ -102,6 +104,63 @@ def test_normalize_unmapped_span_falls_back_to_cleaned_name() -> None:
     planner = next(s for s in spans if s["id"] == "x")
     assert planner["kind"] == "span"
     assert planner["label"] == "orchestrator.planner"  # expert_work. 前缀去掉
+
+
+@pytest.mark.parametrize(
+    ("action", "label", "purpose"),
+    [
+        ("memory.extract", "记忆抽取", "memory"),
+        ("memory.verify", "记忆校验", "memory"),
+        ("memory.reconcile", "记忆整合", "memory"),
+        ("orchestrator.planner", "规划", "planner"),
+        ("orchestrator.reflect", "反思", "reflect"),
+        ("orchestrator.compress", "上下文压缩", "compress"),
+        ("orchestrator.judge", "输出评审", "judge"),
+    ],
+)
+def test_normalize_labels_auxiliary_llm_by_wrapper_purpose(
+    action: str, label: str, purpose: str
+) -> None:
+    # Each auxiliary LLM call sits under a purpose-named ``expert_work_span``.
+    # The wrapper merges into its lone GENERATION child exactly like the main
+    # ``orchestrator.llm_call`` wrapper, but its purpose becomes the human
+    # label + a ``purpose`` key the console uses for a visual marker.
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 5.0, 0),
+        _obs("wrap", "SPAN", f"expert_work.{action}", "sess", 4.2, 1),
+        _obs("gen", "GENERATION", "llm_call", "wrap", 4.0, 1, model="glm-4.6"),
+    ]
+    spans = normalize_trace(_trace(obs))["spans"]
+    assert not any(s["id"] == "wrap" for s in spans)  # wrapper merged away
+    llm = next(s for s in spans if s["kind"] == "llm")
+    assert llm["id"] == "gen"
+    assert llm["label"] == label
+    assert llm["purpose"] == purpose
+    assert llm["latencyMs"] > 0  # inherited wrapper latency
+    assert llm["parentId"] == "sess"  # re-parented past the merged wrapper
+
+
+def test_normalize_main_llm_call_purpose_is_main() -> None:
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 5.0, 0),
+        _obs("llmspan", "SPAN", "expert_work.orchestrator.llm_call", "sess", 4.2, 1),
+        _obs("gen", "GENERATION", "llm_call", "llmspan", 4.0, 1),
+    ]
+    llm = next(s for s in normalize_trace(_trace(obs))["spans"] if s["kind"] == "llm")
+    assert llm["label"] == "LLM 调用"
+    assert llm["purpose"] == "main"
+
+
+def test_normalize_bare_generation_has_empty_purpose() -> None:
+    # An unwrapped GENERATION (legacy / no purpose span) stays a plain LLM node
+    # with no purpose marker — the console renders it as before.
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 5.0, 0),
+        _obs("gen", "GENERATION", "llm_call", "sess", 4.0, 1),
+    ]
+    llm = next(s for s in normalize_trace(_trace(obs))["spans"] if s["kind"] == "llm")
+    assert llm["label"] == "LLM 调用"
+    assert llm["purpose"] == ""
 
 
 def test_normalize_handles_none_latency_without_raising() -> None:
