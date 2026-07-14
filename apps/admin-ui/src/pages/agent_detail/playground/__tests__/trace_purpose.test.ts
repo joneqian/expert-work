@@ -54,6 +54,45 @@ describe("labelPurpose", () => {
     expect(trace.spans?.find((s) => s.id === "r1")?.detail).toBeNull();
   });
 
+  it("excludes auxiliary llm spans (non-empty purpose) from the count and never labels them primary", () => {
+    const root = makeSpan({ id: "r0", parentId: null, kind: "session", label: "会话运行" });
+    const main1 = makeSpan({ id: "r1", parentId: "r0", kind: "llm", label: "LLM 调用", purpose: "main" });
+    const aux = makeSpan({ id: "r2", parentId: "r0", kind: "llm", label: "记忆抽取", purpose: "memory" });
+    const main2 = makeSpan({ id: "r3", parentId: "r0", kind: "llm", label: "LLM 调用", purpose: "main" });
+    const trace: RunTrace = {
+      status: "ok",
+      trace: { name: "t", latencyMs: 500, totalCostUsd: null, spanCount: 4 },
+      spans: [root, main1, aux, main2],
+    };
+
+    // 2 main llm spans match agentStepCount 2 — the aux span does not inflate it.
+    const result = labelPurpose(trace, 2, PRIMARY);
+
+    expect(result.spans?.find((s) => s.id === "r1")?.detail).toBe(PRIMARY);
+    expect(result.spans?.find((s) => s.id === "r3")?.detail).toBe(PRIMARY);
+    // The auxiliary span is never labelled primary — no "记忆抽取 · 主推理".
+    expect(result.spans?.find((s) => s.id === "r2")?.detail).toBeNull();
+  });
+
+  it("does not mislabel an aux span primary when a cache-hit turn (no llm span) balances the count", () => {
+    // Regression for the collision: a cache-hit agent turn emits an agent frame
+    // (agentStepCount 1) but no llm span, plus one memory-extraction aux span.
+    // Counting all llm spans (1) would equal 1 and stamp 主推理 on the aux span;
+    // counting only main spans (0 != 1) prevents it.
+    const root = makeSpan({ id: "r0", parentId: null, kind: "session", label: "会话运行" });
+    const aux = makeSpan({ id: "r1", parentId: "r0", kind: "llm", label: "记忆抽取", purpose: "memory" });
+    const trace: RunTrace = {
+      status: "ok",
+      trace: { name: "t", latencyMs: 500, totalCostUsd: null, spanCount: 2 },
+      spans: [root, aux],
+    };
+
+    const result = labelPurpose(trace, 1, PRIMARY);
+
+    expect(result).toBe(trace); // main count 0 != agentStepCount 1 → nothing labelled
+    expect(result.spans?.find((s) => s.id === "r1")?.detail).toBeNull();
+  });
+
   it("leaves spans untouched when the llm span count does not match agentStepCount (hidden sub-call, e.g. memory extraction)", () => {
     const root = makeSpan({ id: "r0", parentId: null, kind: "session", label: "会话运行" });
     const llm1 = makeSpan({ id: "r1", parentId: "r0", kind: "llm", label: "LLM 调用" });
