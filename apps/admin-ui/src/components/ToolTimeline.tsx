@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import type { SseEvent } from "../api/sessions";
 import { parseToolCalls, type ToolCallEntry, type ToolCallStatus } from "../api/tool_timeline";
+import { cleanUntrusted } from "../pages/agent_detail/playground/untrusted_clean";
 
 const { Text } = Typography;
 
@@ -63,7 +64,7 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
   const statusLabel = t(`tool_timeline.status_${entry.status}`);
   const hasArgs = Object.keys(entry.args).length > 0;
 
-  const items: { key: string; label: string; children: ReactNode }[] = [];
+  const items: { key: string; label: ReactNode; children: ReactNode }[] = [];
   if (hasArgs) {
     items.push({
       key: "args",
@@ -77,9 +78,30 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
   }
   if (entry.execResult) {
     const { stdout, stderr, exitCode } = entry.execResult;
+    const stdoutClean = cleanUntrusted(stdout);
+    const stderrClean = cleanUntrusted(stderr);
+    // tool_timeline.ts already strips the «UNTRUSTED nonce=…» fence while
+    // parsing the raw SSE frame, so cleanUntrusted's own fence-based
+    // hadUntrusted is always false by the time it reaches this component —
+    // the surviving ▁ datamark glyph is the only remaining evidence the
+    // result was originally spotlighted, so it doubles as the badge signal.
+    const hadUntrusted =
+      stdoutClean.hadUntrusted ||
+      stderrClean.hadUntrusted ||
+      stdout.includes("▁") ||
+      stderr.includes("▁");
     items.push({
       key: "result",
-      label: t("tool_timeline.result_label"),
+      label: (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span>{t("tool_timeline.result_label")}</span>
+          {hadUntrusted && (
+            <Tag color="warning" bordered={false} data-testid="tool-untrusted" style={{ margin: 0 }}>
+              ⚑ {t("playground.tr_msg_untrusted")}
+            </Tag>
+          )}
+        </span>
+      ),
       children: (
         <div data-testid="tool-exec-result" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div>
@@ -91,17 +113,30 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
               {t("tool_timeline.exit_code")}: {exitCode ?? "?"}
             </Tag>
           </div>
-          {stdout && <ExecStream label={t("tool_timeline.stdout_label")} text={stdout} />}
-          {stderr && (
-            <ExecStream label={t("tool_timeline.stderr_label")} text={stderr} tone="error" />
+          {stdoutClean.text && (
+            <ExecStream label={t("tool_timeline.stdout_label")} text={stdoutClean.text} />
+          )}
+          {stderrClean.text && (
+            <ExecStream label={t("tool_timeline.stderr_label")} text={stderrClean.text} tone="error" />
           )}
         </div>
       ),
     });
   } else if (entry.resultPreview) {
+    const previewClean = cleanUntrusted(entry.resultPreview);
+    const hadUntrusted = previewClean.hadUntrusted || entry.resultPreview.includes("▁");
     items.push({
       key: "result",
-      label: t("tool_timeline.result_label"),
+      label: (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span>{t("tool_timeline.result_label")}</span>
+          {hadUntrusted && (
+            <Tag color="warning" bordered={false} data-testid="tool-untrusted" style={{ margin: 0 }}>
+              ⚑ {t("playground.tr_msg_untrusted")}
+            </Tag>
+          )}
+        </span>
+      ),
       children: (
         <pre
           style={{
@@ -114,7 +149,7 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
             overflow: "auto",
           }}
         >
-          {entry.resultPreview}
+          {previewClean.text}
         </pre>
       ),
     });

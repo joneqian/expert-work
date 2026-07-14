@@ -1163,6 +1163,105 @@ describe("PlaygroundTab", () => {
     expect(screen.getByTestId("playground-feedback-up")).toBeEnabled();
   });
 
+  // Task 11 — timeline view's RunStatusBanner, derived from this turn's own
+  // SSE-parsed items (not Langfuse level, unlike the exact view's banner).
+  describe("timeline view RunStatusBanner", () => {
+    it("shows the ok banner (default timeline view) when no step/marker errored", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-ok" }, rawData: "", receivedAt: "" },
+          {
+            id: "2",
+            event: "updates",
+            data: { agent: { messages: [{ type: "ai", content: "hi" }] } },
+            rawData: "",
+            receivedAt: "",
+          },
+          { id: "3", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const banner = await screen.findByTestId("run-status-banner");
+      expect(banner).toHaveTextContent(i18n.t("playground.rb_ok"));
+      expect(screen.queryByTestId("run-status-jump")).not.toBeInTheDocument();
+    });
+
+    it("shows the error banner when a tool call failed, and 'jump' scrolls the errored step-card into view", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-err" }, rawData: "", receivedAt: "" },
+          {
+            id: "2",
+            event: "updates",
+            data: {
+              agent: {
+                step_count: 3,
+                messages: [
+                  {
+                    type: "ai",
+                    content: "",
+                    tool_calls: [
+                      { id: "c1", name: "exec_python", args: { code: "1/0" }, type: "tool_call" },
+                    ],
+                  },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          {
+            id: "3",
+            event: "updates",
+            data: {
+              tools: {
+                messages: [
+                  {
+                    type: "tool",
+                    tool_call_id: "c1",
+                    name: null,
+                    content: "ZeroDivisionError",
+                    status: "error",
+                  },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          { id: "4", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const banner = await screen.findByTestId("run-status-banner");
+      expect(banner).toHaveTextContent(i18n.t("playground.tl_step", { n: 3 }));
+
+      const errorCard = screen
+        .getAllByTestId("step-card")
+        .find((card) => card.getAttribute("data-error") === "true");
+      expect(errorCard).toBeTruthy();
+      const scrollSpy = vi.fn();
+      if (errorCard) errorCard.scrollIntoView = scrollSpy;
+
+      await user.click(screen.getByTestId("run-status-jump"));
+      expect(scrollSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // Batch 4b Task 5 — third "Exact" event-view tier (item 14) + purpose
   // labelling (A') + system_admin-gated Langfuse deep link (item 15).
   describe("exact trace view + Langfuse link", () => {

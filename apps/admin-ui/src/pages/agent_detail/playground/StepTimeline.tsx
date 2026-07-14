@@ -120,6 +120,7 @@ function AgentStepCard({ item }: { item: AgentStep }) {
       />
       <div
         data-testid="step-card"
+        data-error={item.hasError ? "true" : undefined}
         style={{
           border: `1px solid ${
             item.hasError

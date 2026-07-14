@@ -104,6 +104,7 @@ import { buildHistoryTurns, type HistoryTurn } from "./playground/history_turns"
 import { RunStatusBanner } from "./playground/RunStatusBanner";
 import { StepTimeline } from "./playground/StepTimeline";
 import { TimelineFilterBar } from "./playground/TimelineFilterBar";
+import { timelineBannerModel } from "./playground/timeline_banner";
 import { traceBannerModel } from "./playground/trace_banner";
 import { TraceView } from "./playground/TraceView";
 import { labelPurpose } from "./playground/trace_purpose";
@@ -1990,6 +1991,10 @@ function TurnCard({
     tools: timelineToolCount,
     fails: timelineFailCount,
   });
+  // Task 11 — RunStatusBanner status for the timeline view, derived from
+  // this turn's own SSE-parsed items (NOT Langfuse level, unlike the exact
+  // view's traceBanner below).
+  const timelineBanner = useMemo(() => timelineBannerModel(visibleTimeline), [visibleTimeline]);
   // parseAgentState always returns a plain object (never null), so a bare
   // truthiness check on it would always pass — check its channels instead so
   // the run-state section actually hides when every channel is empty.
@@ -2443,6 +2448,31 @@ function TurnCard({
                 </Text>
               ) : eventView === "timeline" ? (
                 <>
+                  {timelineBanner && (
+                    <RunStatusBanner
+                      status={timelineBanner.status}
+                      summary={t("playground.rb_ok")}
+                      errorLabel={
+                        timelineBanner.status === "error"
+                          ? (timelineBanner.errorStepCount != null
+                              ? t("playground.tl_step", { n: timelineBanner.errorStepCount })
+                              : (timelineBanner.errorText ?? t("playground.rb_ok")))
+                          : undefined
+                      }
+                      errorMessage={timelineBanner.errorText ?? undefined}
+                      onJump={
+                        timelineBanner.status === "error"
+                          ? () => {
+                              document
+                                .querySelector(
+                                  '[data-testid="step-timeline"] [data-error="true"]',
+                                )
+                                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
                   <TimelineFilterBar
                     type={tlType}
                     query={tlQuery}
