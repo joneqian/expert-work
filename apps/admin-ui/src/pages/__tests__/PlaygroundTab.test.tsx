@@ -1284,6 +1284,68 @@ describe("PlaygroundTab", () => {
       const occurrences = (banner.textContent?.match(/运行崩溃了/g) ?? []).length;
       expect(occurrences).toBe(1);
     });
+
+    it("keeps the error banner even when a timeline filter hides the failing step (banner derives from unfiltered items)", async () => {
+      // A type/query filter that hides the failing step must NOT flip run
+      // status to a false "succeeded" — the banner reads the full timeline.
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-filter" }, rawData: "", receivedAt: "" },
+          {
+            id: "2",
+            event: "updates",
+            data: {
+              agent: {
+                step_count: 3,
+                messages: [
+                  {
+                    type: "ai",
+                    content: "",
+                    tool_calls: [{ id: "c1", name: "exec_python", args: { code: "1/0" }, type: "tool_call" }],
+                  },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          {
+            id: "3",
+            event: "updates",
+            data: {
+              tools: {
+                messages: [
+                  { type: "tool", tool_call_id: "c1", name: null, content: "ZeroDivisionError", status: "error" },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          { id: "4", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      // banner is in the error state before filtering
+      expect(await screen.findByTestId("run-status-banner")).toHaveTextContent(
+        i18n.t("playground.tl_step", { n: 3 }),
+      );
+
+      // apply a search query that matches no timeline item → visible list empties
+      await user.type(screen.getByTestId("timeline-filter-query"), "zzz-no-such-item");
+
+      // the banner MUST still show the failure (derived from the unfiltered timeline)
+      expect(screen.getByTestId("run-status-banner")).toHaveTextContent(
+        i18n.t("playground.tl_step", { n: 3 }),
+      );
+    });
   });
 
   // Batch 4b Task 5 — third "Exact" event-view tier (item 14) + purpose

@@ -1993,8 +1993,10 @@ function TurnCard({
   });
   // Task 11 — RunStatusBanner status for the timeline view, derived from
   // this turn's own SSE-parsed items (NOT Langfuse level, unlike the exact
-  // view's traceBanner below).
-  const timelineBanner = useMemo(() => timelineBannerModel(visibleTimeline), [visibleTimeline]);
+  // view's traceBanner below). Derives from the UNFILTERED `timeline`, not
+  // `visibleTimeline`: a type/query filter that hides the failing step must
+  // never flip run status to a false "succeeded".
+  const timelineBanner = useMemo(() => timelineBannerModel(timeline), [timeline]);
   // parseAgentState always returns a plain object (never null), so a bare
   // truthiness check on it would always pass — check its channels instead so
   // the run-state section actually hides when every channel is empty.

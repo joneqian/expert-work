@@ -442,7 +442,12 @@ function MarkerRow({ item }: { item: MarkerItem }) {
   const color = MARKER_TONE_COLOR[item.tone];
   const isCircle = item.tone === "good";
   return (
-    <div style={{ position: "relative", marginBottom: 10 }}>
+    <div
+      style={{ position: "relative", marginBottom: 10 }}
+      // Scroll target for the run-status banner's "jump" on a marker-only
+      // failure (an `error` SSE event with no failing tool step).
+      data-error={item.kind === "error" ? "true" : undefined}
+    >
       <span
         aria-hidden
         style={{
