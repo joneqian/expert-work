@@ -29,8 +29,9 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from expert_work.common.observability import LLM_SPAN_PURPOSES
 from langfuse.api import NotFoundError
+
+from expert_work.common.observability import LLM_SPAN_PURPOSES
 
 __all__ = ["TraceSpan", "fetch_and_normalize", "fetch_span_raw", "normalize_trace"]
 
