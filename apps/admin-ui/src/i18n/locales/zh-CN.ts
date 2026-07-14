@@ -838,6 +838,7 @@ const zhCN: TranslationKeys = {
     tr_msg_toolcall: "→ 调用 {{name}}",
     tr_msg_chars: "{{n}} 字",
     tr_purpose_primary: "主推理",
+    tr_aux_llm: "辅助 LLM 调用",
     tr_raw_error: "原文加载失败",
   },
   session_history: {

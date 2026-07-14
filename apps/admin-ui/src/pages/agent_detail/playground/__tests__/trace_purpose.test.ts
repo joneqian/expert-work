@@ -24,6 +24,7 @@ function makeSpan(
     level: "default",
     statusMessage: null,
     ...over,
+    purpose: over.purpose ?? "",
   };
 }
 

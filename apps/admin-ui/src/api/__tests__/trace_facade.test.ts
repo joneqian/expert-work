@@ -62,6 +62,7 @@ describe("getRunTrace", () => {
           output: null,
           level: "default",
           statusMessage: null,
+          purpose: "",
         },
         {
           id: "span-2",
@@ -79,6 +80,7 @@ describe("getRunTrace", () => {
           output: { kind: "text", text: '{"response":"world"}', truncated: false, fullChars: 21 },
           level: "default",
           statusMessage: null,
+          purpose: "",
         },
       ],
     };

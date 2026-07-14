@@ -20,6 +20,7 @@ function span(id: string, parentId: string | null, startMs: number): TraceSpan {
     output: null,
     level: "default",
     statusMessage: null,
+    purpose: "",
   };
 }
 

@@ -29,7 +29,7 @@
  */
 import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import { Modal } from "antd";
-import { RefreshCw, X } from "lucide-react";
+import { Cog, RefreshCw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -50,6 +50,10 @@ const WARNING = "var(--ew-text-warning, #e8a33d)";
 const DANGER = "var(--ew-text-danger, #f0616d)";
 const PURPLE = "var(--ew-accent-violet, #b18cff)";
 const MUTED = "var(--ew-text-tertiary)";
+// Auxiliary LLM calls render in a muted LLM tint — still the LLM (blue) family
+// so the kind reads at a glance, but dimmed so a background sub-call never
+// competes with the main conversation for attention.
+const AUX_LLM = `color-mix(in srgb, ${ACCENT} 48%, ${MUTED})`;
 const LANE = "300px";
 
 const ACTION_LINK_STYLE: CSSProperties = {
@@ -206,18 +210,28 @@ function Axis({ totalMs }: { totalMs: number }) {
   );
 }
 
+/** An auxiliary LLM call — memory extract/verify/reconcile, planner, reflect,
+ *  compress, judge — as opposed to the main agent conversation turn. The facade
+ *  tags each via the span's `purpose` ("main"/"" is the main conversation). */
+function isAuxLlm(span: Pick<TraceSpan, "kind" | "purpose">): boolean {
+  return span.kind === "llm" && span.purpose !== "" && span.purpose !== "main";
+}
+
 /** Error level overrides the kind-based color everywhere a span's dot/bar
- *  renders — an errored LLM/tool call is red first, its kind second. */
-function kindDotColor(span: Pick<TraceSpan, "kind" | "level">): string {
+ *  renders — an errored LLM/tool call is red first, its kind second. An
+ *  auxiliary LLM call renders in a muted LLM tint so it reads apart from the
+ *  main conversation without competing with it. */
+function kindDotColor(span: Pick<TraceSpan, "kind" | "level" | "purpose">): string {
   if (span.level === "error") return DANGER;
-  if (span.kind === "llm") return ACCENT;
+  if (span.kind === "llm") return isAuxLlm(span) ? AUX_LLM : ACCENT;
   if (span.kind === "tool") return PURPLE;
   return MUTED;
 }
 
-function kindBarColor(span: Pick<TraceSpan, "kind" | "level">): string {
+function kindBarColor(span: Pick<TraceSpan, "kind" | "level" | "purpose">): string {
   if (span.level === "error") return DANGER;
-  if (span.kind === "llm") return `color-mix(in srgb, ${ACCENT} 62%, transparent)`;
+  if (span.kind === "llm")
+    return `color-mix(in srgb, ${isAuxLlm(span) ? AUX_LLM : ACCENT} 62%, transparent)`;
   if (span.kind === "tool") return PURPLE;
   return `color-mix(in srgb, ${MUTED} 45%, transparent)`;
 }
@@ -311,6 +325,7 @@ function TraceRow({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   const { span, depth, continues } = row;
   const isError = span.level === "error";
 
@@ -354,6 +369,14 @@ function TraceRow({
           aria-hidden
           style={{ width: 8, height: 8, borderRadius: 2, flex: "0 0 auto", background: kindDotColor(span) }}
         />
+        {isAuxLlm(span) && (
+          <Cog
+            data-testid="trace-aux-marker"
+            aria-label={t("playground.tr_aux_llm")}
+            size={11}
+            style={{ color: AUX_LLM, flex: "0 0 auto" }}
+          />
+        )}
         <span
           style={{
             fontFamily: "var(--ew-font-mono)",
@@ -795,6 +818,14 @@ function TraceDetail({
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600 }}>
           <span aria-hidden style={{ width: 8, height: 8, borderRadius: 2, background: kindDotColor(span) }} />
+          {isAuxLlm(span) && (
+            <Cog
+              data-testid="trace-aux-marker"
+              aria-label={t("playground.tr_aux_llm")}
+              size={12}
+              style={{ color: AUX_LLM, flex: "0 0 auto" }}
+            />
+          )}
           {span.label}
           {span.detail !== null && (
             <span style={{ color: MUTED, fontWeight: 400 }}> · {span.detail}</span>
