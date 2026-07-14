@@ -307,7 +307,7 @@ class LLMActionJudge:
     ) -> ActionVerdict:
         rendered = ", ".join(f"{k}={v!r}" for k, v in tool_args.items())
         user = f"REQUEST: {user_request}\nTOOL CALL: {tool_name}({rendered})"
-        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "judge"):
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "judge_action"):
             reply = await self.caller(
                 messages=[SystemMessage(content=_ACTION_JUDGE_SYSTEM), HumanMessage(content=user)],
                 tools=(),

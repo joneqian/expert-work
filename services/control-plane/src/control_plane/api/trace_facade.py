@@ -29,6 +29,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from expert_work.common.observability import LLM_SPAN_PURPOSES
 from langfuse.api import NotFoundError
 
 __all__ = ["TraceSpan", "fetch_and_normalize", "fetch_span_raw", "normalize_trace"]
@@ -306,29 +307,38 @@ def _parse_observation(o: Any, *, trace_start: Any) -> _ParsedObs:
     )
 
 
-#: Maps a purpose-named LLM wrapper span (``expert_work.<component>.<action>``,
-#: ``expert_work.`` prefix stripped) to ``(label, purpose)``. Every orchestrator
-#: LLM call — main and auxiliary — is a bare ``llm_call`` GENERATION in Langfuse
-#: (the router never names them per-purpose), so the *wrapper span* is the only
-#: place the call's intent survives. ``purpose`` is the machine key the debug
-#: console keys its visual marker on; ``label`` is the human title.
-_LLM_PURPOSES: dict[str, tuple[str, str]] = {
-    "orchestrator.llm_call": ("LLM 调用", "main"),
-    "memory.extract": ("记忆抽取", "memory"),
-    "memory.verify": ("记忆校验", "memory"),
-    "memory.reconcile": ("记忆整合", "memory"),
-    "orchestrator.planner": ("规划", "planner"),
-    "orchestrator.reflect": ("反思", "reflect"),
-    "orchestrator.compress": ("上下文压缩", "compress"),
-    "orchestrator.judge": ("输出评审", "judge"),
+#: Human labels for each purpose-wrapped LLM span, keyed by the full span name.
+#: The machine ``purpose`` is the single source of truth in common's
+#: :data:`LLM_SPAN_PURPOSES`; the UI label is this module's presentation
+#: concern. Keys are kept in parity with ``LLM_SPAN_PURPOSES`` by the facade
+#: tests, so a purpose added in common without a label here fails CI rather than
+#: silently rendering the raw span name. Every orchestrator LLM call is a bare
+#: ``llm_call`` GENERATION in Langfuse (the router never names them
+#: per-purpose), so the wrapper span name is the only surviving intent signal.
+_LLM_LABELS: dict[str, str] = {
+    "expert_work.orchestrator.llm_call": "LLM 调用",
+    "expert_work.memory.extract": "记忆抽取",
+    "expert_work.memory.verify": "记忆校验",
+    "expert_work.memory.reconcile": "记忆整合",
+    "expert_work.orchestrator.planner": "规划",
+    "expert_work.orchestrator.reflect": "反思",
+    "expert_work.orchestrator.compress": "上下文压缩",
+    "expert_work.orchestrator.judge": "输出评审",
+    "expert_work.orchestrator.judge_action": "行动评审",
+    "expert_work.orchestrator.vision": "视觉理解",
+    "expert_work.orchestrator.rerank": "文档重排",
 }
 
 
 def _llm_wrapper_purpose(name: str) -> tuple[str, str] | None:
     """Return ``(label, purpose)`` if ``name`` is a known LLM wrapper span,
-    else ``None``. Matches on the ``expert_work.``-stripped suffix."""
-    key = name[len(_NAME_PREFIX) :] if name.startswith(_NAME_PREFIX) else name
-    return _LLM_PURPOSES.get(key)
+    else ``None``. ``purpose`` comes from common's single-source
+    ``LLM_SPAN_PURPOSES``; ``label`` is this module's UI text (keys kept in
+    parity by the facade tests)."""
+    purpose = LLM_SPAN_PURPOSES.get(name)
+    if purpose is None:
+        return None
+    return _LLM_LABELS.get(name, name), purpose
 
 
 def _resolve_omissions(
@@ -339,7 +349,7 @@ def _resolve_omissions(
 
     Two independent omission rules (spec §2.3 步骤 3-4):
 
-    * A known LLM wrapper SPAN (``_LLM_PURPOSES`` — the main
+    * A known LLM wrapper SPAN (``LLM_SPAN_PURPOSES`` — the main
       ``orchestrator.llm_call`` plus each auxiliary ``memory.extract`` /
       ``orchestrator.planner`` / … purpose span) with exactly one GENERATION
       child is a wrapper — omit the SPAN, let the GENERATION inherit the SPAN's

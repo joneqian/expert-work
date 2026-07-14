@@ -62,6 +62,40 @@ class ExpertWorkComponent(StrEnum):
     OBSERVABILITY = "observability"
 
 
+def _llm_span_name(component: ExpertWorkComponent, action: str) -> str:
+    """Build the span name ``_expert_work_span_cm`` would emit for this call.
+
+    Mirrors that function's ``f"expert_work.{component}.{action}"`` format in one
+    place so :data:`LLM_SPAN_PURPOSES` keys can never drift from real spans.
+    """
+    return f"expert_work.{component}.{action}"
+
+
+#: SINGLE SOURCE OF TRUTH for the debug console's LLM-call purpose contract.
+#: Maps every purpose-wrapped LLM span the orchestrator emits (via
+#: ``expert_work_span(component, action)``) to a machine ``purpose`` key. The
+#: control-plane trace facade attaches a human label per name (``_LLM_LABELS``)
+#: and forwards this ``purpose`` to the admin-ui console, which renders
+#: auxiliary calls (purpose != "main") apart from the main agent turn.
+#: Producers: orchestrator graph_builder/{memory,planner,reflect},
+#: context/compressor, output_judge, tools/{vision,knowledge}. Any new
+#: purpose-wrapped LLM call MUST be added here — ``test_aux_llm_spans`` asserts
+#: every emitted span name is a key, and the facade tests assert label parity.
+LLM_SPAN_PURPOSES: dict[str, str] = {
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "llm_call"): "main",
+    _llm_span_name(ExpertWorkComponent.MEMORY, "extract"): "memory",
+    _llm_span_name(ExpertWorkComponent.MEMORY, "verify"): "memory",
+    _llm_span_name(ExpertWorkComponent.MEMORY, "reconcile"): "memory",
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "planner"): "planner",
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "reflect"): "reflect",
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "compress"): "compress",
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "judge"): "judge",
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "judge_action"): "judge",
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "vision"): "vision",
+    _llm_span_name(ExpertWorkComponent.ORCHESTRATOR, "rerank"): "rerank",
+}
+
+
 _TRACER_NAME: Final[str] = "expert-work"
 
 # Mutable process-wide state populated by ``init_tracing``. The

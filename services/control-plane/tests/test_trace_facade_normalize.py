@@ -116,6 +116,9 @@ def test_normalize_unmapped_span_falls_back_to_cleaned_name() -> None:
         ("orchestrator.reflect", "反思", "reflect"),
         ("orchestrator.compress", "上下文压缩", "compress"),
         ("orchestrator.judge", "输出评审", "judge"),
+        ("orchestrator.judge_action", "行动评审", "judge"),
+        ("orchestrator.vision", "视觉理解", "vision"),
+        ("orchestrator.rerank", "文档重排", "rerank"),
     ],
 )
 def test_normalize_labels_auxiliary_llm_by_wrapper_purpose(
@@ -138,6 +141,17 @@ def test_normalize_labels_auxiliary_llm_by_wrapper_purpose(
     assert llm["purpose"] == purpose
     assert llm["latencyMs"] > 0  # inherited wrapper latency
     assert llm["parentId"] == "sess"  # re-parented past the merged wrapper
+
+
+def test_facade_labels_stay_in_parity_with_common_purposes() -> None:
+    # The facade's UI labels and common's single-source purpose map must stay in
+    # lockstep: a purpose added to common without a label here (or a stale label
+    # for a removed purpose) is a contract gap that would render the raw span
+    # name instead of a friendly label.
+    from control_plane.api.trace_facade import _LLM_LABELS
+    from expert_work.common.observability import LLM_SPAN_PURPOSES
+
+    assert set(_LLM_LABELS) == set(LLM_SPAN_PURPOSES)
 
 
 def test_normalize_main_llm_call_purpose_is_main() -> None:
