@@ -35,6 +35,7 @@ from typing import Any, Literal, cast
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from expert_work.common.observability import ExpertWorkComponent, expert_work_span
 from expert_work.protocol import Plan, PlanStep, Reflection
 from orchestrator.graph_builder._config import cancellation_token, current_run_id
 from orchestrator.llm import LLMCaller
@@ -191,10 +192,11 @@ def make_reflect_node(llm_caller: LLMCaller, *, budget: int, deadline_s: int = 3
         # path above): a hung reflection should not block the run from
         # ending.
         try:
-            response = await asyncio.wait_for(
-                token.run_cancellable(llm_caller(messages=reflect_messages, tools=[])),
-                timeout=deadline_s,
-            )
+            with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "reflect"):
+                response = await asyncio.wait_for(
+                    token.run_cancellable(llm_caller(messages=reflect_messages, tools=[])),
+                    timeout=deadline_s,
+                )
         except TimeoutError:
             logger.warning(
                 "reflect.timeout deadline_s=%d — accepting to keep the run bounded",

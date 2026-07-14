@@ -23,6 +23,7 @@ from typing import Any, Protocol, runtime_checkable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from expert_work.common.observability import ExpertWorkComponent, expert_work_span
 from expert_work.protocol import StructuredOutputSpec
 from orchestrator.llm.caller import LLMCaller
 from orchestrator.llm.structured_output import strip_json_fences
@@ -199,11 +200,12 @@ class LLMOutputJudge:
             else ""
         )
         user = f"REQUEST: {user_request}\nRESPONSE: {response}{hint}"
-        reply = await self.caller(
-            messages=[SystemMessage(content=_JUDGE_SYSTEM), HumanMessage(content=user)],
-            tools=(),
-            output_schema=_OUTPUT_JUDGE_SPEC,
-        )
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "judge"):
+            reply = await self.caller(
+                messages=[SystemMessage(content=_JUDGE_SYSTEM), HumanMessage(content=user)],
+                tools=(),
+                output_schema=_OUTPUT_JUDGE_SPEC,
+            )
         verdict = _validated_verdict(reply, AlignmentVerdictModel, "judge")
         return OutputJudgeVerdict(
             aligned=verdict.aligned,
@@ -305,11 +307,12 @@ class LLMActionJudge:
     ) -> ActionVerdict:
         rendered = ", ".join(f"{k}={v!r}" for k, v in tool_args.items())
         user = f"REQUEST: {user_request}\nTOOL CALL: {tool_name}({rendered})"
-        reply = await self.caller(
-            messages=[SystemMessage(content=_ACTION_JUDGE_SYSTEM), HumanMessage(content=user)],
-            tools=(),
-            output_schema=_ACTION_JUDGE_SPEC,
-        )
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "judge"):
+            reply = await self.caller(
+                messages=[SystemMessage(content=_ACTION_JUDGE_SYSTEM), HumanMessage(content=user)],
+                tools=(),
+                output_schema=_ACTION_JUDGE_SPEC,
+            )
         verdict = _validated_verdict(reply, ActionAlignmentVerdictModel, "action judge")
         return ActionVerdict(aligned=verdict.aligned, reason=verdict.reason[:200])
 
