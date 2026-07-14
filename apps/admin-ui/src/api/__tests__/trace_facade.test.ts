@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { apiClient } from "../client";
-import { getRunTrace, type RunTrace } from "../trace_facade";
+import { fetchRunTraceRaw, getRunTrace, type RunTrace } from "../trace_facade";
 
 vi.mock("../client");
 
@@ -60,6 +60,8 @@ describe("getRunTrace", () => {
           costUsd: null,
           input: null,
           output: null,
+          level: "default",
+          statusMessage: null,
         },
         {
           id: "span-2",
@@ -73,8 +75,10 @@ describe("getRunTrace", () => {
           inputTokens: 100,
           outputTokens: 200,
           costUsd: 0.05,
-          input: '{"prompt":"hello"}',
-          output: '{"response":"world"}',
+          input: { kind: "text", text: '{"prompt":"hello"}', truncated: false, fullChars: 19 },
+          output: { kind: "text", text: '{"response":"world"}', truncated: false, fullChars: 21 },
+          level: "default",
+          statusMessage: null,
         },
       ],
     };
@@ -130,5 +134,33 @@ describe("getRunTrace", () => {
     expect(result.status).toBe("no_trace");
     expect(result.trace).toBeUndefined();
     expect(result.spans).toBeUndefined();
+  });
+});
+
+describe("fetchRunTraceRaw", () => {
+  it("hits the raw endpoint and returns content", async () => {
+    (apiClient.get as Mock).mockResolvedValue({
+      data: { spanId: "o1", field: "input", content: "FULL" },
+    });
+
+    const result = await fetchRunTraceRaw("t1", "r1", "o1", "input");
+
+    expect(apiClient.get).toHaveBeenCalledWith(
+      "/v1/sessions/t1/runs/r1/trace/raw?span=o1&field=input",
+    );
+    expect(result).toBe("FULL");
+  });
+
+  it("URL-encodes the span id", async () => {
+    (apiClient.get as Mock).mockResolvedValue({
+      data: { spanId: "a/b c", field: "output", content: "RAW" },
+    });
+
+    const result = await fetchRunTraceRaw("t1", "r1", "a/b c", "output");
+
+    expect(apiClient.get).toHaveBeenCalledWith(
+      "/v1/sessions/t1/runs/r1/trace/raw?span=a%2Fb%20c&field=output",
+    );
+    expect(result).toBe("RAW");
   });
 });

@@ -763,15 +763,31 @@ export interface TranslationKeys {
     tr_state_no_trace_title: string;
     tr_state_no_trace_msg: string;
     tr_detail_close: string;
+    rb_ok: string;
+    rb_failed_at: string;
+    rb_jump: string;
     tr_detail_latency: string;
     tr_detail_model: string;
     tr_detail_tokens: string;
     tr_detail_cost: string;
-    tr_io_input: string;
-    tr_io_input_hint: string;
-    tr_io_output: string;
-    tr_io_output_hint: string;
+    tr_io_llm_msgs: string;
+    tr_io_llm_msgs_hint: string;
+    tr_io_llm_out: string;
+    tr_io_llm_out_hint: string;
+    tr_io_tool_args: string;
+    tr_io_tool_args_hint: string;
+    tr_io_tool_result: string;
+    tr_io_tool_result_hint: string;
+    tr_io_in: string;
+    tr_io_out: string;
+    tr_msg_truncated: string;
+    tr_msg_copy: string;
+    tr_msg_raw: string;
+    tr_msg_untrusted: string;
+    tr_msg_toolcall: string;
+    tr_msg_chars: string;
     tr_purpose_primary: string;
+    tr_raw_error: string;
   };
   session_history: {
     title: string;
@@ -3180,15 +3196,31 @@ const en: TranslationKeys = {
     tr_state_no_trace_msg:
       "This run has no associated trace (Langfuse wasn't enabled, or it's an older run).",
     tr_detail_close: "Close",
+    rb_ok: "Succeeded",
+    rb_failed_at: "Failed at {{label}}",
+    rb_jump: "Jump to error ↓",
     tr_detail_latency: "duration",
     tr_detail_model: "model",
     tr_detail_tokens: "tokens",
     tr_detail_cost: "cost",
-    tr_io_input: "Input (prompt)",
-    tr_io_input_hint: "The prompt sent to the model",
-    tr_io_output: "Output (response)",
-    tr_io_output_hint: "The model's reply",
+    tr_io_llm_msgs: "Messages",
+    tr_io_llm_msgs_hint: "The full context sent to the model",
+    tr_io_llm_out: "Reply",
+    tr_io_llm_out_hint: "The model's output",
+    tr_io_tool_args: "Arguments",
+    tr_io_tool_args_hint: "The input passed to the tool",
+    tr_io_tool_result: "Result",
+    tr_io_tool_result_hint: "What the tool returned",
+    tr_io_in: "Input",
+    tr_io_out: "Output",
+    tr_msg_truncated: "Truncated {{n}} chars",
+    tr_msg_copy: "Copy",
+    tr_msg_raw: "View raw",
+    tr_msg_untrusted: "contains untrusted content",
+    tr_msg_toolcall: "→ called {{name}}",
+    tr_msg_chars: "{{n}} chars",
     tr_purpose_primary: "Primary reasoning",
+    tr_raw_error: "Failed to load raw content",
   },
   session_history: {
     title: "Session history",

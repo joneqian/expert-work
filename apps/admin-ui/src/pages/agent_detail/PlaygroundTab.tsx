@@ -99,9 +99,13 @@ import { MarkdownView } from "../../components/MarkdownView";
 import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import type { AgentDetailResponse } from "../../api/agents";
 import { AgentStatePanels } from "./playground/AgentStatePanels";
+import { fmtDuration } from "./playground/duration_format";
 import { buildHistoryTurns, type HistoryTurn } from "./playground/history_turns";
+import { RunStatusBanner } from "./playground/RunStatusBanner";
 import { StepTimeline } from "./playground/StepTimeline";
 import { TimelineFilterBar } from "./playground/TimelineFilterBar";
+import { timelineBannerModel } from "./playground/timeline_banner";
+import { traceBannerModel } from "./playground/trace_banner";
 import { TraceView } from "./playground/TraceView";
 import { labelPurpose } from "./playground/trace_purpose";
 import { TurnMeta } from "./playground/TurnMeta";
@@ -1987,6 +1991,12 @@ function TurnCard({
     tools: timelineToolCount,
     fails: timelineFailCount,
   });
+  // Task 11 — RunStatusBanner status for the timeline view, derived from
+  // this turn's own SSE-parsed items (NOT Langfuse level, unlike the exact
+  // view's traceBanner below). Derives from the UNFILTERED `timeline`, not
+  // `visibleTimeline`: a type/query filter that hides the failing step must
+  // never flip run status to a false "succeeded".
+  const timelineBanner = useMemo(() => timelineBannerModel(timeline), [timeline]);
   // parseAgentState always returns a plain object (never null), so a bare
   // truthiness check on it would always pass — check its channels instead so
   // the run-state section actually hides when every channel is empty.
@@ -2085,6 +2095,13 @@ function TurnCard({
         ? labelPurpose(trace, agentStepCount, t("playground.tr_purpose_primary"))
         : null,
     [trace, agentStepCount, t],
+  );
+  // Task 10 — RunStatusBanner status for the exact view, derived from the
+  // trace's spans (null hides the banner: still loading / not a fully-loaded
+  // ok trace).
+  const traceBanner = useMemo(
+    () => (labeledTrace ? traceBannerModel(labeledTrace) : null),
+    [labeledTrace],
   );
 
   // item 15 — direct Langfuse deep link. system_admin only (Langfuse has no
@@ -2433,6 +2450,40 @@ function TurnCard({
                 </Text>
               ) : eventView === "timeline" ? (
                 <>
+                  {timelineBanner && (
+                    <RunStatusBanner
+                      status={timelineBanner.status}
+                      summary={t("playground.rb_ok")}
+                      errorLabel={
+                        timelineBanner.status === "error"
+                          ? (timelineBanner.errorStepCount != null
+                              ? t("playground.tl_step", { n: timelineBanner.errorStepCount })
+                              : (timelineBanner.errorText ?? t("playground.rb_ok")))
+                          : undefined
+                      }
+                      errorMessage={
+                        // errorText already fills errorLabel in the no-step
+                        // fallback branch above — only surface it as the
+                        // message when a step number owns the label, else the
+                        // banner renders the same text twice.
+                        timelineBanner.status === "error" &&
+                        timelineBanner.errorStepCount != null
+                          ? (timelineBanner.errorText ?? undefined)
+                          : undefined
+                      }
+                      onJump={
+                        timelineBanner.status === "error"
+                          ? () => {
+                              document
+                                .querySelector(
+                                  '[data-testid="step-timeline"] [data-error="true"]',
+                                )
+                                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
                   <TimelineFilterBar
                     type={tlType}
                     query={tlQuery}
@@ -2444,13 +2495,54 @@ function TurnCard({
                 </>
               ) : eventView === "exact" ? (
                 labeledTrace ? (
-                  <TraceView
-                    trace={labeledTrace}
-                    onRefresh={() => {
-                      traceRetriesRef.current = 0;
-                      setTrace(null);
-                    }}
-                  />
+                  <>
+                    {traceBanner && (
+                      <RunStatusBanner
+                        status={traceBanner.status}
+                        summary={t("playground.rb_ok")}
+                        metrics={
+                          traceBanner.status === "ok"
+                            ? [
+                                {
+                                  label: t("playground.tr_detail_latency"),
+                                  value: fmtDuration(traceBanner.latencyMs ?? 0),
+                                },
+                                ...(traceBanner.totalCostUsd != null
+                                  ? [
+                                      {
+                                        label: t("playground.tr_detail_cost"),
+                                        value: `$${traceBanner.totalCostUsd.toFixed(4)}`,
+                                      },
+                                    ]
+                                  : []),
+                              ]
+                            : undefined
+                        }
+                        errorLabel={traceBanner.errorLabel ?? undefined}
+                        errorMessage={traceBanner.errorMessage ?? undefined}
+                        onJump={
+                          traceBanner.status === "error"
+                            ? () => {
+                                document
+                                  .querySelector(
+                                    '[data-testid="trace-view"] [data-error="true"]',
+                                  )
+                                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                              }
+                            : undefined
+                        }
+                      />
+                    )}
+                    <TraceView
+                      trace={labeledTrace}
+                      threadId={threadId ?? undefined}
+                      runId={runId ?? undefined}
+                      onRefresh={() => {
+                        traceRetriesRef.current = 0;
+                        setTrace(null);
+                      }}
+                    />
+                  </>
                 ) : (
                   <Text
                     type="secondary"

@@ -18,6 +18,8 @@ function span(id: string, parentId: string | null, startMs: number): TraceSpan {
     costUsd: null,
     input: null,
     output: null,
+    level: "default",
+    statusMessage: null,
   };
 }
 

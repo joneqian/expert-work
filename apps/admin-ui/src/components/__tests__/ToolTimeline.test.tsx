@@ -2,11 +2,33 @@ import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import "../../i18n";
 
-import { ToolTimeline } from "../ToolTimeline";
+import { ToolCallCard, ToolTimeline } from "../ToolTimeline";
 import type { SseEvent } from "../../api/sessions";
+import type { ToolCallEntry } from "../../api/tool_timeline";
 
 function updates(node: string, messages: unknown[]): SseEvent {
   return { id: null, event: "updates", data: { [node]: { messages } }, rawData: "", receivedAt: "" };
+}
+
+function baseEntry(over: Partial<ToolCallEntry> = {}): ToolCallEntry {
+  return {
+    id: "c1",
+    rawName: "search",
+    isMcp: false,
+    server: null,
+    toolName: "search",
+    args: { q: "test" },
+    status: "success",
+    resultPreview: null,
+    durationMs: null,
+    ...over,
+  };
+}
+
+/** Opens the "结果/Result" collapse panel — the badge lives in the header
+ *  (always visible), but the cleaned text is inside the collapsed body. */
+function openResultPanel() {
+  fireEvent.click(screen.getByText(/^(Result|结果)$/));
 }
 
 describe("ToolTimeline", () => {
@@ -64,5 +86,72 @@ describe("ToolTimeline", () => {
     fireEvent.click(screen.getByText(/^(Result|结果)$/));
     expect(screen.getByTestId("tool-exec-result")).toBeInTheDocument();
     expect(screen.getByTestId("tool-exit-code")).toHaveTextContent("0");
+  });
+
+  it("cleans an untrusted resultPreview (fence + ▁ glyph) and shows the badge", () => {
+    const dirty = "«UNTRUSTED nonce=abc»\n搜索结果▁ 有效\n«/UNTRUSTED nonce=abc»";
+    render(<ToolCallCard entry={baseEntry({ resultPreview: dirty })} />);
+    // The badge lives in the always-visible header label.
+    expect(screen.getByTestId("tool-untrusted")).toBeInTheDocument();
+    openResultPanel();
+    const pre = screen.getByText(/搜索结果 有效/);
+    expect(pre.textContent).not.toContain("▁");
+    expect(pre.textContent).not.toContain("UNTRUSTED");
+  });
+
+  it("cleans an untrusted execResult.stdout and shows the badge", () => {
+    const entry = baseEntry({
+      toolName: "exec_python",
+      execResult: {
+        stdout: "«UNTRUSTED nonce=x»\n1▁ 2▁ 3\n«/UNTRUSTED nonce=x»",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    render(<ToolCallCard entry={entry} />);
+    expect(screen.getByTestId("tool-untrusted")).toBeInTheDocument();
+    openResultPanel();
+    const stdout = screen.getByText(/1 2 3/);
+    expect(stdout.textContent).not.toContain("▁");
+    expect(stdout.textContent).not.toContain("UNTRUSTED");
+  });
+
+  it("does not show the badge for a clean result, and leaves args untouched", () => {
+    render(
+      <ToolCallCard
+        entry={baseEntry({ resultPreview: "clean result", args: { q: "▁contains-glyph" } })}
+      />,
+    );
+    expect(screen.queryByTestId("tool-untrusted")).not.toBeInTheDocument();
+    // Arguments are trusted model input — never cleaned, even if they happen
+    // to contain a ▁ character.
+    fireEvent.click(screen.getByText(/^(Arguments|参数)$/));
+    expect(screen.getByText(/▁contains-glyph/)).toBeInTheDocument();
+  });
+
+  it("shows the badge end-to-end via the real SSE→parseToolCalls pipeline (fence already stripped upstream, ▁ glyph remains)", () => {
+    const events = [
+      updates("agent", [
+        {
+          type: "ai",
+          content: "",
+          tool_calls: [{ id: "c1", name: "search", args: { q: "test" }, type: "tool_call" }],
+        },
+      ]),
+      updates("tools", [
+        {
+          type: "tool",
+          tool_call_id: "c1",
+          name: null,
+          content: "«UNTRUSTED nonce=xyz»\n结果▁ 内容\n«/UNTRUSTED nonce=xyz»",
+          status: "success",
+        },
+      ]),
+    ];
+    render(<ToolTimeline events={events} />);
+    expect(screen.getByTestId("tool-untrusted")).toBeInTheDocument();
+    openResultPanel();
+    const pre = screen.getByText(/结果 内容/);
+    expect(pre.textContent).not.toContain("▁");
   });
 });

@@ -45,7 +45,7 @@ from control_plane.api._user_scope import (
     get_user_repo,
     resolve_caller_user_id,
 )
-from control_plane.api.trace_facade import fetch_and_normalize
+from control_plane.api.trace_facade import fetch_and_normalize, fetch_span_raw
 from control_plane.audit import emit
 from control_plane.kill_switch import run_block_reason
 from control_plane.prompt_render import (
@@ -1186,6 +1186,46 @@ def build_runs_router() -> APIRouter:
 
         client = getattr(request.app.state, "langfuse_read_client", None)
         return JSONResponse(content=fetch_and_normalize(client, trace_id))
+
+    @router.get("/{thread_id}/runs/{run_id}/trace/raw", response_model=None)
+    async def get_run_trace_raw(
+        thread_id: UUID,
+        run_id: UUID,
+        request: Request,
+        threads: Annotated[object, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        runs: Annotated[RunStore, Depends(_get_run_store)],
+        span: Annotated[str, Query()],
+        field: Annotated[str, Query()],
+    ) -> JSONResponse:
+        """Task 4 —— 单 span input/output 的未截断全文("查看原文").
+
+        Ownership-gated identically to ``get_run_trace`` (404 hides
+        cross-tenant / cross-user existence). ``fetch_span_raw`` is
+        best-effort — bad ``field``, unknown ``span``, no client, or a
+        Langfuse outage all degrade to ``None``, which this route turns
+        into a 404 rather than ever 500ing.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        persisted = await runs.get(run_id=run_id, tenant_id=tenant_id)
+        trace_id = persisted.trace_id if persisted is not None else None
+        if trace_id is None:
+            raise HTTPException(status_code=404, detail="trace not found")
+
+        client = getattr(request.app.state, "langfuse_read_client", None)
+        content = fetch_span_raw(client, trace_id, span, field)
+        if content is None:
+            raise HTTPException(status_code=404, detail="span not found")
+        return JSONResponse(content={"spanId": span, "field": field, "content": content})
 
     @router.get("/{thread_id}/messages", response_model=None)
     async def get_thread_messages(

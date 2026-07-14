@@ -5,12 +5,17 @@
  * src/i18n's LanguageDetector — see StepTimeline.test.tsx / TimelineFilterBar
  * .test.tsx precedent), so state-text assertions use the English copy.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import "../../../../i18n";
 
 import { TraceView } from "../TraceView";
-import type { RunTrace, TraceSpan } from "../../../../api/trace_facade";
+import { fetchRunTraceRaw, type RunTrace, type TraceSpan } from "../../../../api/trace_facade";
+
+// Task 9's raw-view modal calls fetchRunTraceRaw — mock it so tests control
+// the resolved/rejected content instead of hitting the network stub adapter.
+vi.mock("../../../../api/trace_facade", () => ({ fetchRunTraceRaw: vi.fn() }));
+const mockFetchRunTraceRaw = vi.mocked(fetchRunTraceRaw);
 
 function makeSpan(
   over: Partial<TraceSpan> & Pick<TraceSpan, "id" | "parentId" | "kind" | "label">,
@@ -25,6 +30,8 @@ function makeSpan(
     costUsd: null,
     input: null,
     output: null,
+    level: "default",
+    statusMessage: null,
     ...over,
   };
 }
@@ -48,8 +55,8 @@ const llm = makeSpan({
   inputTokens: 120,
   outputTokens: 340,
   costUsd: 0.0021,
-  input: "user: 帮我查天气",
-  output: '{"reply":"晴天"}',
+  input: { kind: "text", text: "user: 帮我查天气", truncated: false, fullChars: 11 },
+  output: { kind: "text", text: '{"reply":"晴天"}', truncated: false, fullChars: 14 },
 });
 const tool = makeSpan({
   id: "r2",
@@ -61,6 +68,137 @@ const tool = makeSpan({
   latencyMs: 160,
 });
 
+// Task 8 fixtures — structured `RunTraceIo` (messages / text), kept separate
+// from `llm`/`tool` above so the "empty segments not rendered" case (tool's
+// null i/o) keeps covering that behavior undisturbed.
+const structuredLlm = makeSpan({
+  id: "sr1",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  detail: "主推理",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "system", content: "sys", truncated: false, fullChars: 3, toolCalls: null },
+      { role: "human", content: "现在几点", truncated: false, fullChars: 4, toolCalls: null },
+      {
+        role: "tool",
+        content: "«UNTRUSTED nonce=ab»\n2026▁ 年\n«/UNTRUSTED nonce=ab»",
+        truncated: false,
+        fullChars: 10,
+        toolCalls: null,
+      },
+    ],
+  },
+  output: { kind: "text", text: "晴天", truncated: false, fullChars: 2 },
+});
+const argsTool = makeSpan({
+  id: "sr2",
+  parentId: "r0",
+  kind: "tool",
+  label: "工具调用",
+  detail: "exec_python",
+  input: { kind: "text", text: '{"code":"1"}', truncated: false, fullChars: 11 },
+  output: { kind: "text", text: "ok", truncated: false, fullChars: 2 },
+});
+
+// Review-fix fixtures (Task 8 batch 3 follow-up).
+//
+// Fix 1 regression: two llm spans, each with a single `system` message at
+// index 0 (same array index → same MessageBlock fiber slot unless
+// `TraceDetail` remounts on selection change) with distinct, identifiable
+// content so a leak from A into B is observable.
+const leakSpanA = makeSpan({
+  id: "leak-a",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "system", content: "system-A-secret", truncated: false, fullChars: 15, toolCalls: null },
+    ],
+  },
+});
+const leakSpanB = makeSpan({
+  id: "leak-b",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "system", content: "system-B-secret", truncated: false, fullChars: 15, toolCalls: null },
+    ],
+  },
+});
+
+// Fix 2: a tool span whose text-kind args AND result both contain UNTRUSTED
+// fencing — tool i/o is exactly where untrusted content shows up in
+// practice, and a tool span renders two independent `IoText` sections.
+const untrustedTool = makeSpan({
+  id: "sr3",
+  parentId: "r0",
+  kind: "tool",
+  label: "工具调用",
+  detail: "web_search",
+  input: {
+    kind: "text",
+    text: "«UNTRUSTED nonce=aa»\nargs text\n«/UNTRUSTED nonce=aa»",
+    truncated: false,
+    fullChars: 9,
+  },
+  output: {
+    kind: "text",
+    text: "«UNTRUSTED nonce=zz»\nresult text\n«/UNTRUSTED nonce=zz»",
+    truncated: false,
+    fullChars: 11,
+  },
+});
+
+// Fix 4a: a message with empty content + a toolCalls list — exercises
+// MessageBlock's "→ called {name}" branch instead of an empty pre body.
+const toolCallLlm = makeSpan({
+  id: "sr4",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [{ role: "ai", content: "", truncated: false, fullChars: 0, toolCalls: ["exec_python"] }],
+  },
+});
+
+// Fix 4b: a truncated message — exercises the TruncationRow (copy + view
+// raw affordances) below the message body.
+const truncatedLlm = makeSpan({
+  id: "sr5",
+  parentId: "r0",
+  kind: "llm",
+  label: "LLM 调用",
+  input: {
+    kind: "messages",
+    messages: [
+      { role: "ai", content: "some long content", truncated: true, fullChars: 40000, toolCalls: null },
+    ],
+  },
+});
+
+// Task 9 fixture — an errored span (red waterfall row + `dt-err` detail).
+// startMs after `llm`'s (100) — buildRows sorts siblings by startMs, and the
+// test relies on row order [root, llm, erroredTool].
+const erroredTool = makeSpan({
+  id: "err1",
+  parentId: "r0",
+  kind: "tool",
+  label: "工具调用",
+  detail: "exec_python",
+  startMs: 3000,
+  level: "error",
+  statusMessage: "SandboxTimeout",
+});
+
 function okTrace(spans: TraceSpan[] = [root, llm, tool]): RunTrace {
   return {
     status: "ok",
@@ -70,6 +208,10 @@ function okTrace(spans: TraceSpan[] = [root, llm, tool]): RunTrace {
 }
 
 describe("TraceView", () => {
+  beforeEach(() => {
+    mockFetchRunTraceRaw.mockReset();
+  });
+
   it("renders one row per span (tree order), each span's label/detail + fmtDuration, a waterfall bar per row, and a model chip only where the span has one", () => {
     render(<TraceView trace={okTrace()} />);
     expect(screen.getByTestId("trace-view")).toBeInTheDocument();
@@ -172,5 +314,142 @@ describe("TraceView", () => {
     render(<TraceView trace={okTrace([orphanA, orphanB])} onRefresh={vi.fn()} />);
     expect(screen.queryAllByTestId("trace-row")).toHaveLength(0);
     expect(screen.getByTestId("trace-refresh")).toBeInTheDocument();
+  });
+
+  it("llm span renders structured messages: system collapsed, human/tool visible, untrusted cleaned+badged", () => {
+    render(<TraceView trace={okTrace([root, structuredLlm, argsTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    // system 默认收起:内容 "sys" 不在 DOM,role 标签在
+    expect(within(detail).queryByText("sys")).not.toBeInTheDocument();
+    expect(within(detail).getByText("现在几点")).toBeInTheDocument();
+    // 不可信清洗:▁ 与 UNTRUSTED 不出现,badge 出现
+    expect(within(detail).queryByText(/UNTRUSTED|▁/)).not.toBeInTheDocument();
+    expect(within(detail).getByTestId("msg-untrusted")).toBeInTheDocument();
+  });
+
+  it("tool span uses 参数/结果 labels (Arguments/Result), not the llm span's messages/reply labels", () => {
+    // Test-time i18n resolves to English (see file header) — assert the
+    // English copy for the (kind-aware, translated) io-section titles;
+    // Chinese "参数"/"结果" are the zh-CN values for the same keys.
+    render(<TraceView trace={okTrace([root, structuredLlm, argsTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[2]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByText("Arguments")).toBeInTheDocument();
+    expect(within(detail).getByText("Result")).toBeInTheDocument();
+    expect(within(detail).queryByText(/^Messages$|^Reply$/)).not.toBeInTheDocument();
+  });
+
+  it("switching the selected span remounts the detail panel — no cross-span MessageBlock expand-state leak", () => {
+    // Regression test for the missing `key={selected.id}` on `TraceDetail`:
+    // without it, span B's system MessageBlock reuses span A's fiber (same
+    // array index) and inherits A's manually-expanded state.
+    render(<TraceView trace={okTrace([root, leakSpanA, leakSpanB])} />);
+    const rows = screen.getAllByTestId("trace-row");
+
+    fireEvent.click(rows[1]); // select span A
+    const detailA = screen.getByTestId("trace-detail");
+    const messageA = within(detailA).getByTestId("trace-message");
+    // system starts collapsed — expand it by clicking its header.
+    expect(within(messageA).queryByText("system-A-secret")).not.toBeInTheDocument();
+    fireEvent.click(within(messageA).getByRole("button"));
+    expect(within(messageA).getByText("system-A-secret")).toBeInTheDocument();
+
+    fireEvent.click(rows[2]); // select span B directly, without closing
+    const detailB = screen.getByTestId("trace-detail");
+    const messageB = within(detailB).getByTestId("trace-message");
+    // If the leak were present, B's system message would already be
+    // expanded (inheriting A's toggle) and show its content.
+    expect(within(messageB).queryByText("system-B-secret")).not.toBeInTheDocument();
+    expect(within(messageB).queryByText("system-A-secret")).not.toBeInTheDocument();
+  });
+
+  it("IoText (tool span text i/o) shows the untrusted badge for both args and result when each contains UNTRUSTED fencing", () => {
+    render(<TraceView trace={okTrace([root, untrustedTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    // A tool span has two independent IoText sections (args + result), so
+    // multiple badges can coexist — assert with getAllByTestId, not
+    // getByTestId.
+    expect(within(detail).getAllByTestId("msg-untrusted")).toHaveLength(2);
+    expect(within(detail).getByText("args text")).toBeInTheDocument();
+    expect(within(detail).getByText("result text")).toBeInTheDocument();
+    expect(within(detail).queryByText(/UNTRUSTED|▁/)).not.toBeInTheDocument();
+  });
+
+  it("message header shows the localized size hint ('N chars'), not a hardcoded '字'", () => {
+    render(<TraceView trace={okTrace([root, structuredLlm, argsTool])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    // structuredLlm's human message has fullChars: 4.
+    expect(within(detail).getByText("4 chars")).toBeInTheDocument();
+    expect(within(detail).queryByText(/字/)).not.toBeInTheDocument();
+  });
+
+  it("a message with empty content + toolCalls renders the tool-call text, not an empty body", () => {
+    render(<TraceView trace={okTrace([root, toolCallLlm])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByText("→ called exec_python")).toBeInTheDocument();
+  });
+
+  it("a truncated message renders the truncated-size text plus copy + view-raw affordances", () => {
+    render(<TraceView trace={okTrace([root, truncatedLlm])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByText("Truncated 40000 chars")).toBeInTheDocument();
+    expect(within(detail).getByText("Copy")).toBeInTheDocument();
+    expect(within(detail).getByText("View raw")).toBeInTheDocument();
+  });
+
+  it("an error span's row is red-marked (data-error) and its detail shows the statusMessage; other spans get neither", () => {
+    render(<TraceView trace={okTrace([root, llm, erroredTool])} />);
+    const rows = screen.getAllByTestId("trace-row");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).not.toHaveAttribute("data-error");
+    expect(rows[1]).not.toHaveAttribute("data-error");
+    expect(rows[2]).toHaveAttribute("data-error", "true");
+
+    fireEvent.click(rows[2]);
+    const detail = screen.getByTestId("trace-detail");
+    expect(within(detail).getByTestId("trace-detail-error")).toHaveTextContent("SandboxTimeout");
+
+    // A non-error span's detail carries no error block.
+    fireEvent.click(rows[1]);
+    const detail2 = screen.getByTestId("trace-detail");
+    expect(within(detail2).queryByTestId("trace-detail-error")).not.toBeInTheDocument();
+  });
+
+  it("查看原文 fetches the field-scoped raw content via fetchRunTraceRaw and shows it un-cleaned in a modal", async () => {
+    mockFetchRunTraceRaw.mockResolvedValue("RAW FULL CONTENT «UNTRUSTED nonce=x» …");
+    render(<TraceView trace={okTrace([root, truncatedLlm])} threadId="t1" runId="r1" />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    const detail = screen.getByTestId("trace-detail");
+    fireEvent.click(within(detail).getByText("View raw"));
+
+    const modal = await screen.findByTestId("trace-raw-modal");
+    // Un-cleaned: the UNTRUSTED fence marker survives verbatim (the raw
+    // layer must NOT run cleanUntrusted — that's its whole purpose).
+    expect(modal.textContent).toContain("RAW FULL CONTENT");
+    expect(modal.textContent).toContain("«UNTRUSTED nonce=x»");
+    expect(mockFetchRunTraceRaw).toHaveBeenCalledWith("t1", "r1", "sr5", "input");
+  });
+
+  it("查看原文 shows an error message in the modal when the raw fetch fails, without crashing", async () => {
+    mockFetchRunTraceRaw.mockRejectedValueOnce(new Error("network down"));
+    render(<TraceView trace={okTrace([root, truncatedLlm])} threadId="t1" runId="r1" />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    fireEvent.click(within(screen.getByTestId("trace-detail")).getByText("View raw"));
+
+    expect(await screen.findByText("Failed to load raw content")).toBeInTheDocument();
+  });
+
+  it("查看原文 no-ops without threadId/runId (no fetch call, no modal, no crash)", () => {
+    render(<TraceView trace={okTrace([root, truncatedLlm])} />);
+    fireEvent.click(screen.getAllByTestId("trace-row")[1]);
+    fireEvent.click(within(screen.getByTestId("trace-detail")).getByText("View raw"));
+
+    expect(screen.queryByTestId("trace-raw-modal")).not.toBeInTheDocument();
+    expect(mockFetchRunTraceRaw).not.toHaveBeenCalled();
   });
 });

@@ -1163,6 +1163,191 @@ describe("PlaygroundTab", () => {
     expect(screen.getByTestId("playground-feedback-up")).toBeEnabled();
   });
 
+  // Task 11 — timeline view's RunStatusBanner, derived from this turn's own
+  // SSE-parsed items (not Langfuse level, unlike the exact view's banner).
+  describe("timeline view RunStatusBanner", () => {
+    it("shows the ok banner (default timeline view) when no step/marker errored", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-ok" }, rawData: "", receivedAt: "" },
+          {
+            id: "2",
+            event: "updates",
+            data: { agent: { messages: [{ type: "ai", content: "hi" }] } },
+            rawData: "",
+            receivedAt: "",
+          },
+          { id: "3", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const banner = await screen.findByTestId("run-status-banner");
+      expect(banner).toHaveTextContent(i18n.t("playground.rb_ok"));
+      expect(screen.queryByTestId("run-status-jump")).not.toBeInTheDocument();
+    });
+
+    it("shows the error banner when a tool call failed, and 'jump' scrolls the errored step-card into view", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-err" }, rawData: "", receivedAt: "" },
+          {
+            id: "2",
+            event: "updates",
+            data: {
+              agent: {
+                step_count: 3,
+                messages: [
+                  {
+                    type: "ai",
+                    content: "",
+                    tool_calls: [
+                      { id: "c1", name: "exec_python", args: { code: "1/0" }, type: "tool_call" },
+                    ],
+                  },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          {
+            id: "3",
+            event: "updates",
+            data: {
+              tools: {
+                messages: [
+                  {
+                    type: "tool",
+                    tool_call_id: "c1",
+                    name: null,
+                    content: "ZeroDivisionError",
+                    status: "error",
+                  },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          { id: "4", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const banner = await screen.findByTestId("run-status-banner");
+      expect(banner).toHaveTextContent(i18n.t("playground.tl_step", { n: 3 }));
+
+      const errorCard = screen
+        .getAllByTestId("step-card")
+        .find((card) => card.getAttribute("data-error") === "true");
+      expect(errorCard).toBeTruthy();
+      const scrollSpy = vi.fn();
+      if (errorCard) errorCard.scrollIntoView = scrollSpy;
+
+      await user.click(screen.getByTestId("run-status-jump"));
+      expect(scrollSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows a top-level error event's message once (not duplicated) when no failing tool step owns the label", async () => {
+      // Marker-only failure path: an SSE `error` event with no failed tool
+      // call → timelineBannerModel has errorText but errorStepCount === null,
+      // so errorText owns the label. It must NOT also render as the message.
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-marker" }, rawData: "", receivedAt: "" },
+          { id: "2", event: "error", data: { message: "运行崩溃了" }, rawData: "", receivedAt: "" },
+          { id: "3", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const banner = await screen.findByTestId("run-status-banner");
+      const occurrences = (banner.textContent?.match(/运行崩溃了/g) ?? []).length;
+      expect(occurrences).toBe(1);
+    });
+
+    it("keeps the error banner even when a timeline filter hides the failing step (banner derives from unfiltered items)", async () => {
+      // A type/query filter that hides the failing step must NOT flip run
+      // status to a false "succeeded" — the banner reads the full timeline.
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          { id: "1", event: "metadata", data: { run_id: "run-tl-filter" }, rawData: "", receivedAt: "" },
+          {
+            id: "2",
+            event: "updates",
+            data: {
+              agent: {
+                step_count: 3,
+                messages: [
+                  {
+                    type: "ai",
+                    content: "",
+                    tool_calls: [{ id: "c1", name: "exec_python", args: { code: "1/0" }, type: "tool_call" }],
+                  },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          {
+            id: "3",
+            event: "updates",
+            data: {
+              tools: {
+                messages: [
+                  { type: "tool", tool_call_id: "c1", name: null, content: "ZeroDivisionError", status: "error" },
+                ],
+              },
+            },
+            rawData: "",
+            receivedAt: "",
+          },
+          { id: "4", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+        ]),
+      );
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      // banner is in the error state before filtering
+      expect(await screen.findByTestId("run-status-banner")).toHaveTextContent(
+        i18n.t("playground.tl_step", { n: 3 }),
+      );
+
+      // apply a search query that matches no timeline item → visible list empties
+      await user.type(screen.getByTestId("timeline-filter-query"), "zzz-no-such-item");
+
+      // the banner MUST still show the failure (derived from the unfiltered timeline)
+      expect(screen.getByTestId("run-status-banner")).toHaveTextContent(
+        i18n.t("playground.tl_step", { n: 3 }),
+      );
+    });
+  });
+
   // Batch 4b Task 5 — third "Exact" event-view tier (item 14) + purpose
   // labelling (A') + system_admin-gated Langfuse deep link (item 15).
   describe("exact trace view + Langfuse link", () => {
@@ -1204,8 +1389,10 @@ describe("PlaygroundTab", () => {
             inputTokens: 10,
             outputTokens: 20,
             costUsd: null,
-            input: "prompt",
-            output: "reply",
+            input: null,
+            output: null,
+            level: "default",
+            statusMessage: null,
           },
         ],
       });
@@ -1232,6 +1419,98 @@ describe("PlaygroundTab", () => {
       );
       await screen.findByTestId("trace-view");
       expect(screen.getByText(/Primary reasoning/)).toBeInTheDocument();
+      // Task 10 — RunStatusBanner renders above the trace, ok state.
+      expect(screen.getByTestId("run-status-banner")).toBeInTheDocument();
+      expect(screen.queryByTestId("run-status-jump")).not.toBeInTheDocument();
+    });
+
+    // Task 10 — RunStatusBanner error state + jump-to-error scroll.
+    it("shows the RunStatusBanner in error state when a span errored, and 'jump' scrolls the red-marked row into view", async () => {
+      const user = userEvent.setup();
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(
+        makeStream([
+          {
+            id: "m",
+            event: "metadata",
+            data: { run_id: "run-exact-err" },
+            rawData: "",
+            receivedAt: "t1",
+          },
+          {
+            id: "u",
+            event: "updates",
+            data: { agent: { messages: [{ type: "ai", content: "hi" }] } },
+            rawData: "",
+            receivedAt: "t2",
+          },
+          { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t3" },
+        ]),
+      );
+      getRunTraceMock.mockResolvedValue({
+        status: "ok",
+        trace: { name: "trace-1", latencyMs: 1000, totalCostUsd: 0.0021, spanCount: 2 },
+        spans: [
+          {
+            id: "s1",
+            parentId: null,
+            kind: "session",
+            label: "Session run",
+            detail: null,
+            startMs: 0,
+            latencyMs: 1000,
+            model: null,
+            inputTokens: null,
+            outputTokens: null,
+            costUsd: null,
+            input: null,
+            output: null,
+            level: "default",
+            statusMessage: null,
+          },
+          {
+            id: "s2",
+            parentId: "s1",
+            kind: "tool",
+            label: "Tool call",
+            detail: "exec_python",
+            startMs: 100,
+            latencyMs: 500,
+            model: null,
+            inputTokens: null,
+            outputTokens: null,
+            costUsd: null,
+            input: null,
+            output: null,
+            level: "error",
+            statusMessage: "SandboxTimeout",
+          },
+        ],
+      });
+
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(screen.getByTestId("playground-input"), "hello");
+      await user.click(screen.getByTestId("playground-run"));
+      await screen.findByTestId("playground-turn");
+
+      const toggle = screen.getByTestId("playground-event-view-toggle");
+      await user.click(within(toggle).getByText(i18n.t("event_stream.view_exact")));
+
+      await screen.findByTestId("trace-view");
+      const banner = screen.getByTestId("run-status-banner");
+      expect(banner).toHaveTextContent("Failed at Tool call · exec_python");
+      expect(screen.getByText("SandboxTimeout")).toBeInTheDocument();
+
+      const errorRow = screen
+        .getAllByTestId("trace-row")
+        .find((row) => row.getAttribute("data-error") === "true");
+      expect(errorRow).toBeTruthy();
+      const scrollSpy = vi.fn();
+      if (errorRow) errorRow.scrollIntoView = scrollSpy;
+
+      await user.click(screen.getByTestId("run-status-jump"));
+      expect(scrollSpy).toHaveBeenCalledTimes(1);
     });
 
     it("auto-polls a not_ready trace until it resolves, without a manual refresh", async () => {
@@ -1276,8 +1555,10 @@ describe("PlaygroundTab", () => {
             inputTokens: 10,
             outputTokens: 20,
             costUsd: null,
-            input: "prompt",
-            output: "reply",
+            input: null,
+            output: null,
+            level: "default",
+            statusMessage: null,
           },
         ],
       });
