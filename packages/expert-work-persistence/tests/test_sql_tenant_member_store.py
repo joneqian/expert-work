@@ -185,7 +185,13 @@ async def test_get_by_subject_id_is_tenant_scoped(sql_store: SqlStoreFixture) ->
     try:
         tenant, other = uuid4(), uuid4()
         subject = uuid4()  # the employee's tenant_user.id
-        m = await store.create(tenant_id=tenant, email="e@co.com", role="operator", invited_by="a")
+        m = await store.create(
+            tenant_id=tenant,
+            email="e@co.com",
+            role="operator",
+            invited_by="a",
+            keycloak_user_id="kc-e",  # active-consistency CHECK needs this non-NULL
+        )
         # Not linked yet → no hit.
         assert await store.get_by_subject_id(tenant_id=tenant, subject_id=subject) is None
         # Back-fill subject_id via the first-login transition.

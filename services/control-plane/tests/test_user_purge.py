@@ -337,7 +337,11 @@ async def test_purge_endpoint_refuses_employee_member() -> None:
     )
     members = app.state.tenant_member_repo
     member = await members.create(
-        tenant_id=_ENDPOINT_TENANT, email="e@corp.test", role="operator", invited_by="admin"
+        tenant_id=_ENDPOINT_TENANT,
+        email="e@corp.test",
+        role="operator",
+        invited_by="admin",
+        keycloak_user_id="kc-e",  # active-consistency CHECK needs this non-NULL
     )
     # Back-fill subject_id == the employee's tenant_user.id (W3 first-login link).
     assert await members.transition(
