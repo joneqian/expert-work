@@ -40,3 +40,13 @@ class TenantUser(BaseModel):
         default=None,
         description="bumped on every resolve(); drives J.15 idle/hibernate later",
     )
+    deleted_at: datetime | None = Field(
+        default=None,
+        description=(
+            "soft-deactivation stamp (Phase 3a purge_user). NON-NULL = the user "
+            "was purged; list_by_tenant excludes these rows so a purged user "
+            "never reappears in the roster. get still returns them (re-purge "
+            "stays idempotent); resolve clears the stamp so a returning identity "
+            "reactivates cleanly."
+        ),
+    )

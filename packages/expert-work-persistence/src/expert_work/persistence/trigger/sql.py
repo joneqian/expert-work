@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 from uuid import UUID
@@ -214,6 +215,20 @@ class SqlTriggerStore(TriggerStore):
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> list[UUID]:
+        stmt = (
+            sa_delete(AgentTriggerRow)
+            .where(
+                AgentTriggerRow.tenant_id == tenant_id,
+                AgentTriggerRow.user_id == user_id,
+            )
+            .returning(AgentTriggerRow.id)
+        )
+        async with self._sf() as session:
+            deleted = (await session.execute(stmt)).scalars().all()
+            await session.commit()
+        return list(deleted)
+
     async def get_for_webhook(self, *, trigger_id: UUID) -> TriggerRecord | None:
         # Tenant-unscoped — RLS is bypassed by the caller's contextvar.
         async with self._sf() as session:
@@ -339,6 +354,19 @@ class SqlTriggerRunStore(TriggerRunStore):
                 .all()
             )
         return [_run_row_to_dto(r) for r in rows]
+
+    async def delete_for_triggers(self, *, trigger_ids: Sequence[UUID], tenant_id: UUID) -> int:
+        ids = list(trigger_ids)
+        if not ids:
+            return 0
+        stmt = sa_delete(TriggerRunRow).where(
+            TriggerRunRow.tenant_id == tenant_id,
+            TriggerRunRow.trigger_id.in_(ids),
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def list_fired(self, *, limit: int = 1000) -> list[TriggerRunRecord]:
         async with self._sf() as session:

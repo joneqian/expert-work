@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -146,5 +147,31 @@ async def test_list_by_tenant_filters_orders_paginates(sql_store: SqlStoreFixtur
         # Pagination.
         page = await store.list_by_tenant(owner, subject_type="user", limit=1, offset=1)
         assert len(page) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_deactivate_then_resolve_reactivates(sql_store: SqlStoreFixture) -> None:
+    """Phase 3a: ``deactivate`` soft-deletes (hidden from the roster, still
+    gettable for idempotent re-purge); a returning identity re-``resolve``s to the
+    same row with ``deleted_at`` cleared — reactivated + visible again."""
+    store, engine = sql_store
+    try:
+        tenant = uuid4()
+        u = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="x")
+        assert await store.deactivate(u.id, tenant_id=tenant, now=datetime.now(UTC)) is True
+        # Idempotent re-deactivate still True; wrong tenant False.
+        assert await store.deactivate(u.id, tenant_id=tenant, now=datetime.now(UTC)) is True
+        assert await store.deactivate(u.id, tenant_id=uuid4(), now=datetime.now(UTC)) is False
+        # Hidden from the roster, but get still returns it (deleted_at set).
+        assert await store.list_by_tenant(tenant, subject_type="user") == []
+        got = await store.get(u.id, tenant_id=tenant)
+        assert got is not None and got.deleted_at is not None
+        # A returning identity reactivates cleanly.
+        again = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="x")
+        assert again.id == u.id
+        assert again.deleted_at is None
+        assert {r.id for r in await store.list_by_tenant(tenant, subject_type="user")} == {u.id}
     finally:
         await engine.dispose()

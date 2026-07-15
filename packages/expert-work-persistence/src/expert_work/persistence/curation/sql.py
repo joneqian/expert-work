@@ -168,6 +168,20 @@ class SqlEvalDatasetStore(EvalDatasetStore):
             )
         return int(result.scalar_one())
 
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        stmt = (
+            sa_update(EvalDatasetRow)
+            .where(
+                EvalDatasetRow.tenant_id == tenant_id,
+                EvalDatasetRow.source_user_id == user_id,
+            )
+            .values(source_user_id=None)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
+
 
 def _candidate_row_to_dto(row: CurationCandidateRow) -> CurationCandidateRecord:
     return CurationCandidateRecord(
@@ -353,3 +367,17 @@ class SqlCurationCandidateStore(CurationCandidateStore):
             )
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        stmt = (
+            sa_update(CurationCandidateRow)
+            .where(
+                CurationCandidateRow.tenant_id == tenant_id,
+                CurationCandidateRow.user_id == user_id,
+            )
+            .values(user_id=None)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)

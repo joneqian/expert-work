@@ -96,3 +96,14 @@ class ImageUploadStore(abc.ABC):
         """Remove rows from the table; caller must have already cleared
         the corresponding object-store keys. Returns the count of rows
         actually deleted (idempotent — already-removed ids contribute 0)."""
+
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — hard-delete EVERY image upload for a user.
+
+        Removes all of the user's ``image_upload`` rows (active AND soft-
+        deleted) and returns the count deleted (0 when none / re-purge).
+        Tenant- AND user-scoped — the ``(tenant_id, user_id)`` predicate never
+        touches another tenant's or user's rows; rows with a NULL ``user_id``
+        are not this user's and are left untouched. The object-store bytes are
+        reaped separately by the retention sweep (orphaned key < stuck row)."""

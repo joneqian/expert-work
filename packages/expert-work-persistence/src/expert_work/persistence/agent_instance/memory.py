@@ -60,6 +60,17 @@ class InMemoryAgentInstanceStore(AgentInstanceStore):
         rows.sort(key=lambda r: r.last_active_at, reverse=True)
         return rows[offset : offset + limit]
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        async with self._lock:
+            victims = [
+                key
+                for key, r in self._rows.items()
+                if r.tenant_id == tenant_id and r.user_id == user_id
+            ]
+            for key in victims:
+                del self._rows[key]
+            return len(victims)
+
     async def list_by_user(
         self, *, tenant_id: UUID, user_id: UUID, limit: int = 100, offset: int = 0
     ) -> list[AgentInstanceRecord]:

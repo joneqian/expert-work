@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from expert_work.persistence.models import SandboxInstanceRow, TenantQuotaRow
@@ -52,6 +52,16 @@ class SandboxStore(Protocol):
         guarded on the row still being ``READY``; returns ``False`` when
         the guard lost (the row was claimed / destroyed concurrently),
         in which case the caller falls back to a cold start.
+        """
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — hard-delete a user's ``sandbox_instance`` rows.
+
+        Removes every row for ``(tenant_id, user_id)`` (any state) and returns
+        the count deleted. Called by :meth:`SandboxSupervisor.mark_workspace_deleted`
+        AFTER any live warm session was force-destroyed, so no orphaned
+        container is left behind. Tenant- AND user-scoped; NULL-``user_id``
+        ephemeral rows are not this user's and are left untouched.
         """
 
 
@@ -149,6 +159,17 @@ class DbSandboxStore:
             )
             await session.commit()
             return int(getattr(result, "rowcount", 0) or 0) == 1
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        async with self._sf() as session:
+            result = await session.execute(
+                delete(SandboxInstanceRow).where(
+                    SandboxInstanceRow.tenant_id == tenant_id,
+                    SandboxInstanceRow.user_id == user_id,
+                )
+            )
+            await session.commit()
+            return int(getattr(result, "rowcount", 0) or 0)
 
 
 def _session_idle(record: SandboxRecord, now: datetime, idle_ttl_s: int) -> bool:

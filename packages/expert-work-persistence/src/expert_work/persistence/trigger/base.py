@@ -17,6 +17,7 @@ Implementations:
 from __future__ import annotations
 
 import abc
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -114,6 +115,17 @@ class TriggerStore(abc.ABC):
         """Delete a trigger row; return ``True`` iff it existed."""
 
     @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> list[UUID]:
+        """Phase 3a (purge_user) — hard-delete EVERY trigger owned by a user.
+
+        Removes all of the user's ``agent_trigger`` rows and returns the ids of
+        the rows deleted (empty on none / re-purge) so the caller can drop the
+        matching ``trigger_run`` children via
+        :meth:`TriggerRunStore.delete_for_triggers` (there is no FK cascade —
+        ``trigger_run.trigger_id`` is a bare column). Tenant- AND user-scoped;
+        a NULL ``user_id`` trigger is not this user's and is left untouched."""
+
+    @abc.abstractmethod
     async def get_for_webhook(self, *, trigger_id: UUID) -> TriggerRecord | None:
         """Tenant-unscoped lookup for the webhook ingest path.
 
@@ -162,6 +174,16 @@ class TriggerRunStore(abc.ABC):
     @abc.abstractmethod
     async def list_by_trigger(self, *, trigger_id: UUID, tenant_id: UUID) -> list[TriggerRunRecord]:
         """Return every firing of ``trigger_id`` under the tenant, newest first."""
+
+    @abc.abstractmethod
+    async def delete_for_triggers(self, *, trigger_ids: Sequence[UUID], tenant_id: UUID) -> int:
+        """Phase 3a (purge_user) — hard-delete every firing of the given triggers.
+
+        Removes the ``trigger_run`` rows whose ``trigger_id`` is in
+        ``trigger_ids`` (the parent triggers a purged user owned) and returns
+        the count deleted. Tenant-scoped; an empty ``trigger_ids`` is a no-op
+        returning 0. Called after :meth:`TriggerStore.delete_all_for_user`
+        (there is no FK cascade)."""
 
     @abc.abstractmethod
     async def list_fired(self, *, limit: int = 1000) -> list[TriggerRunRecord]:

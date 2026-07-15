@@ -134,3 +134,14 @@ class InMemoryMcpOAuthConnectionStore(McpOAuthConnectionStore):
             if existing is None or existing.tenant_id != tenant_id or existing.user_id != user_id:
                 raise McpOAuthConnectionNotFoundError(connection_id=connection_id)
             del self._rows[connection_id]
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: str) -> int:
+        async with self._lock:
+            victims = [
+                cid
+                for cid, r in self._rows.items()
+                if r.tenant_id == tenant_id and r.user_id == user_id
+            ]
+            for cid in victims:
+                del self._rows[cid]
+            return len(victims)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Collection
+from datetime import datetime
 from uuid import UUID
 
 from expert_work.protocol import SubjectType, TenantUser
@@ -75,4 +76,20 @@ class TenantUserStore(abc.ABC):
         agent (both API-supplied end-users and logged-in employees) and
         exclude service accounts. Ordered by ``last_active_at`` desc, then
         ``created_at`` desc for a stable tiebreak.
+
+        Phase 3a — soft-deactivated rows (``deleted_at IS NOT NULL``) are
+        excluded: a purged user never reappears in the roster.
+        """
+
+    @abc.abstractmethod
+    async def deactivate(self, user_id: UUID, *, tenant_id: UUID, now: datetime) -> bool:
+        """Soft-deactivate a user — stamp ``deleted_at`` (Phase 3a purge_user).
+
+        Idempotent: a second call on an already-deactivated user is a safe
+        no-op that still returns ``True`` (the row exists). Returns ``False``
+        only when no such row exists in ``tenant_id`` (never reveals
+        cross-tenant existence). Tenant-scoped — never touches another
+        tenant's row. The row is KEPT (owned data may still be recoverable
+        within the retention window); ``resolve`` leaves ``deleted_at`` as-is
+        so a returning purged identity stays deactivated.
         """

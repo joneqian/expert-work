@@ -552,6 +552,25 @@ class SkillStore(abc.ABC):
         row alongside the tenant row.
         """
 
+    @abc.abstractmethod
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — null a user's actor columns, KEEP the rows.
+
+        A skill is a tenant asset, not per-user PII — the row is KEPT and only
+        the 5 actor columns that named the purged user are nulled:
+
+        * ``skill.created_by_user_id``
+        * ``skill_promote_request.requested_by_user_id`` / ``decided_by_user_id``
+        * ``skill_evolution_kill_switch.engaged_by_user_id`` / ``released_by_user_id``
+
+        Returns the count of rows updated (summed across the 3 tables; a row
+        matched on two of its own actor columns counts once). ONLY rows whose
+        ``tenant_id`` equals the purged user's tenant are touched — platform
+        (NULL-tenant ``skill``) and global (NULL-tenant kill-switch) rows are
+        NEVER matched by the concrete ``tenant_id`` predicate, so a
+        cross-tenant / platform actor column is left intact (correct isolation:
+        we cannot prove those belong to this tenant's user)."""
+
     # -------------------------------------------------- platform (Stream X)
     #
     # Platform skills are NULL-tenant rows in the SAME ``skill`` /

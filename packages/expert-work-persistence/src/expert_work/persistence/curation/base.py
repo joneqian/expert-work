@@ -70,6 +70,16 @@ class EvalDatasetStore(abc.ABC):
     async def count_by_tenant(self, *, tenant_id: UUID) -> int:
         """Count a tenant's curated cases — backs the create-time quota."""
 
+    @abc.abstractmethod
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — null ``source_user_id``, KEEP the eval cases.
+
+        An eval case is a tenant asset (curated test data), not per-user PII —
+        the row is KEPT and only ``source_user_id`` (the provenance link to the
+        purged user) is nulled. Returns the count updated. Tenant- AND
+        user-scoped; ``tenant_id`` is NOT NULL on this table so the predicate is
+        unambiguous."""
+
 
 class CurationCandidateStore(abc.ABC):
     """Registry of curation candidates — the ``curation_candidate`` table."""
@@ -146,3 +156,13 @@ class CurationCandidateStore(abc.ABC):
 
         Used by the curation API to record promote / dismiss verdicts.
         """
+
+    @abc.abstractmethod
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — null ``user_id``, KEEP the candidate rows.
+
+        A curation candidate is tenant learning-loop data, not per-user PII —
+        the row is KEPT and only ``user_id`` (the provenance link to the purged
+        user) is nulled. Returns the count updated. Tenant- AND user-scoped;
+        ``tenant_id`` is NOT NULL on this table so the predicate is
+        unambiguous."""

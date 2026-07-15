@@ -357,6 +357,20 @@ def _register_routes(app: FastAPI) -> None:
         await supervisor.delete_workspace_file(tenant_id=tenant_id, user_id=user_id, path=path)
         return Response(status_code=204)
 
+    @app.post("/v1/workspaces/{tenant_id}/{user_id}:delete", status_code=204)
+    async def mark_workspace_deleted(
+        tenant_id: UUID,
+        user_id: UUID,
+        supervisor: SupervisorDep,
+    ) -> Response:
+        # Phase 3a (purge_user) — soft-delete the whole per-user workspace
+        # (Mini-ADR J-36): destroy any warm session, drop the user's
+        # sandbox_instance rows, mark the volume deleted (the reaper archives
+        # it). Only the supervisor owns these; the control-plane proxies here.
+        # Idempotent.
+        await supervisor.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
+        return Response(status_code=204)
+
     @app.get("/v1/health")
     async def health(supervisor: SupervisorDep) -> HealthResponse:
         docker_ok = await supervisor.docker_ok()

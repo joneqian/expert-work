@@ -1990,6 +1990,9 @@ def create_app(
     # only applies when a runtime is injected (tests) and the lifespan wiring
     # block above was skipped.
     app.state.memory_repo = resolved_memory_store
+    # Phase 3a (purge_user) — expose the writeback DLQ so the cascade purge can
+    # drop a purged user's pending memory writebacks (they carry extracted PII).
+    app.state.memory_writeback_dlq = resolved_memory_dlq
     if not hasattr(app.state, "embedder"):
         app.state.embedder = None
 

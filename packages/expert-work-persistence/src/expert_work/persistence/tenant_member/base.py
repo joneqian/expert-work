@@ -69,6 +69,16 @@ class TenantMemberStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def get_by_subject_id(self, *, tenant_id: UUID, subject_id: UUID) -> TenantMember | None:
+        """Reverse lookup by the back-filled ``subject_id`` (== ``tenant_user.id``).
+
+        Returns the member an employee's ``tenant_user`` row is linked to, or
+        ``None`` for an external end-user (no member). Tenant-scoped. Used by the
+        Phase 3a purge endpoint to refuse purging an employee — that path must go
+        through the members page (which also revokes roles + the Keycloak account).
+        """
+
+    @abc.abstractmethod
     async def list_for_tenant(
         self,
         *,

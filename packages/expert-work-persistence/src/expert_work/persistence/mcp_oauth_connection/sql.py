@@ -201,3 +201,13 @@ class SqlMcpOAuthConnectionStore(McpOAuthConnectionStore):
             await session.commit()
         if deleted is None:
             raise McpOAuthConnectionNotFoundError(connection_id=connection_id)
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: str) -> int:
+        stmt = sa_delete(McpOAuthConnectionRow).where(
+            McpOAuthConnectionRow.tenant_id == tenant_id,
+            McpOAuthConnectionRow.user_id == user_id,
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)

@@ -35,6 +35,10 @@ class InMemoryTenantUserStore(TenantUserStore):
                         "display_name": (
                             display_name if display_name is not None else row.display_name
                         ),
+                        # A returning identity reactivates cleanly (Phase 3a):
+                        # clear any purge stamp so the user is active + visible
+                        # in the roster again, not invisible-but-producing-data.
+                        "deleted_at": None,
                     }
                 )
                 self._rows[uid] = updated
@@ -79,6 +83,7 @@ class InMemoryTenantUserStore(TenantUserStore):
             row
             for row in self._rows.values()
             if row.tenant_id == tenant_id
+            and row.deleted_at is None
             and (subject_type is None or row.subject_type == subject_type)
         ]
         rows.sort(
@@ -89,3 +94,12 @@ class InMemoryTenantUserStore(TenantUserStore):
             reverse=True,
         )
         return rows[offset : offset + limit]
+
+    async def deactivate(self, user_id: UUID, *, tenant_id: UUID, now: datetime) -> bool:
+        row = self._rows.get(user_id)
+        if row is None or row.tenant_id != tenant_id:
+            return False
+        # Idempotent: keep the existing stamp so a re-purge is a no-op.
+        if row.deleted_at is None:
+            self._rows[user_id] = row.model_copy(update={"deleted_at": now})
+        return True

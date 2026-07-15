@@ -98,3 +98,13 @@ class InMemoryApprovalStore(ApprovalStore):
             update["binding_digest"] = binding_digest
         self._rows[run_id] = row.model_copy(update=update)
         return True
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        victims = [
+            run_id
+            for run_id, r in self._rows.items()
+            if r.tenant_id == tenant_id and r.user_id == user_id
+        ]
+        for run_id in victims:
+            del self._rows[run_id]
+        return len(victims)

@@ -258,6 +258,15 @@ class InMemoryMemoryStore(MemoryStore):
                 return True
         return False
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        now = datetime.now(UTC)
+        removed = 0
+        for idx, row in enumerate(self._rows):
+            if row.tenant_id == tenant_id and row.user_id == user_id and row.deleted_at is None:
+                self._rows[idx] = row.model_copy(update={"deleted_at": now})
+                removed += 1
+        return removed
+
     # ------------------------------------------------------------------
     # Capability Uplift Sprint #7 — MemoryConsolidator interface
     # ------------------------------------------------------------------

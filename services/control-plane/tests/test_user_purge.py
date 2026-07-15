@@ -1,0 +1,359 @@
+"""Phase 3a — ``purge_user`` orchestration + the ``POST /v1/users/{id}:purge`` route.
+
+The orchestration test seeds two users in one tenant plus a user in a second
+tenant, purges user A, and asserts: A's high-PII rows are gone, A's billing
+rows are anonymized (present, ``user_id`` null), the workspace mark was sent,
+the ``tenant_user`` row is deactivated, ``USER_PURGE`` is audited, user B and
+the other tenant are untouched, and a re-run is a safe no-op.
+
+The endpoint test asserts the admin/viewer authz split.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from uuid import UUID, uuid4
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from control_plane.app import create_app
+from control_plane.audit import build_default_audit_logger
+from control_plane.purge import PurgeUserDeps, purge_user
+from control_plane.settings import Settings
+from expert_work.persistence import (
+    InMemoryApprovalStore,
+    InMemoryArtifactStore,
+    InMemoryCurationCandidateStore,
+    InMemoryEvalDatasetStore,
+    InMemoryMcpOAuthConnectionStore,
+    InMemoryMemoryStore,
+    InMemoryTenantUserStore,
+    InMemoryThreadMetaStore,
+    InMemoryTriggerRunStore,
+    InMemoryTriggerStore,
+    InMemoryWebhookDeliveryStore,
+    InMemoryWebhookEndpointStore,
+)
+from expert_work.persistence.agent_instance.memory import InMemoryAgentInstanceStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.image_upload import InMemoryImageUploadStore
+from expert_work.persistence.memory.dlq import InMemoryMemoryWritebackDLQ
+from expert_work.persistence.skill import InMemorySkillStore
+from expert_work.persistence.token_usage_store import InMemoryTokenUsageStore, TokenUsageRecord
+from expert_work.persistence.workspace.dlq import InMemoryVolumeBackupDLQ
+from expert_work.protocol import AuditAction, AuditQuery, MemoryItem
+from expert_work.runtime.runs import (
+    DisconnectMode,
+    InMemoryRunStore,
+    RunInfo,
+    RunManager,
+    RunStatus,
+)
+from orchestrator.tools.sandbox import RecordingSupervisorClient
+from tests.auth_fixtures import (
+    TEST_AUDIENCE,
+    TEST_ISSUER,
+    build_test_jwt_verifier,
+    make_test_jwt,
+)
+
+
+def _mem(*, tenant: UUID, user: UUID, content: str) -> MemoryItem:
+    return MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",  # type: ignore[arg-type]
+        content=content,
+        embedding=(1.0, 0.0),
+    )
+
+
+def _tok(*, tenant: UUID, user: UUID) -> TokenUsageRecord:
+    return TokenUsageRecord(
+        tenant_id=tenant,
+        agent_name="alpha",
+        agent_version="1.0.0",
+        model="m1",
+        user_id=user,
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+
+_NOW = datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
+
+
+def _run(*, tenant: UUID, user: UUID, thread: UUID) -> RunInfo:
+    return RunInfo(
+        run_id=uuid4(),
+        tenant_id=tenant,
+        thread_id=thread,
+        user_id=user,
+        status=RunStatus.SUCCESS,
+        on_disconnect=DisconnectMode.CANCEL,
+        is_resume=False,
+        error=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+        finished_at=_NOW,
+        trace_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_purge_user_cascade_isolates_other_user_and_tenant_and_is_idempotent() -> None:
+    t1, t2 = uuid4(), uuid4()
+    threads = InMemoryThreadMetaStore()
+    memory = InMemoryMemoryStore()
+    memory_dlq = InMemoryMemoryWritebackDLQ()
+    artifacts = InMemoryArtifactStore()
+    mcp_oauth = InMemoryMcpOAuthConnectionStore()
+    agent_instances = InMemoryAgentInstanceStore()
+    approvals = InMemoryApprovalStore()
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    webhook_endpoints = InMemoryWebhookEndpointStore()
+    webhook_deliveries = InMemoryWebhookDeliveryStore()
+    image_uploads = InMemoryImageUploadStore()
+    volume_backup_dlq = InMemoryVolumeBackupDLQ()
+    token_usage = InMemoryTokenUsageStore()
+    runs = InMemoryRunStore()
+    skills = InMemorySkillStore()
+    eval_datasets = InMemoryEvalDatasetStore()
+    curation = InMemoryCurationCandidateStore()
+    users = InMemoryTenantUserStore()
+    audit_store = InMemoryAuditLogStore()
+    supervisor = RecordingSupervisorClient()
+
+    a = await users.resolve(tenant_id=t1, subject_type="user", subject_id="subj-a")
+    b = await users.resolve(tenant_id=t1, subject_type="user", subject_id="subj-b")
+    c = await users.resolve(tenant_id=t2, subject_type="user", subject_id="subj-c")
+
+    # --- User A (the purge target) — one of every relevant kind. ---
+    t_a = uuid4()
+    await threads.create(
+        thread_id=t_a,
+        tenant_id=t1,
+        created_by="seed",
+        user_id=a.id,
+        agent_name="alpha",
+        agent_version="1.0.0",
+    )
+    await runs.create(
+        _run(tenant=t1, user=a.id, thread=t_a)
+    )  # on A's thread → deleted by thread purge
+    orphan_thread = uuid4()  # no thread_meta row → survives thread purge → anonymized
+    await runs.create(_run(tenant=t1, user=a.id, thread=orphan_thread))
+    await memory.write([_mem(tenant=t1, user=a.id, content="a-secret")])
+    await token_usage.insert(_tok(tenant=t1, user=a.id))
+    await artifacts.save_version(
+        tenant_id=t1,
+        user_id=a.id,
+        name="doc",
+        kind="document",
+        path_in_workspace="/w",
+        created_in_thread="t",
+    )
+    await agent_instances.touch(tenant_id=t1, agent_code="alpha", user_id=a.id)
+    await mcp_oauth.create(
+        tenant_id=t1, user_id="subj-a", catalog_id=uuid4(), name="c", resolved_url="https://x"
+    )
+    await skills.create_skill(skill_id=uuid4(), tenant_id=t1, name="s-a", created_by_user_id=a.id)
+
+    # --- User B (same tenant) + User C (other tenant) — must survive intact. ---
+    await memory.write([_mem(tenant=t1, user=b.id, content="b-keep")])
+    await token_usage.insert(_tok(tenant=t1, user=b.id))
+    await memory.write([_mem(tenant=t2, user=c.id, content="c-keep")])
+    await token_usage.insert(_tok(tenant=t2, user=c.id))
+
+    deps = PurgeUserDeps(
+        threads=threads,
+        runtime=SimpleNamespace(durable_checkpointer=None, run_manager=RunManager(store=runs)),  # type: ignore[arg-type]
+        memory=memory,
+        memory_dlq=memory_dlq,
+        artifacts=artifacts,
+        mcp_oauth=mcp_oauth,
+        agent_instances=agent_instances,
+        approvals=approvals,
+        triggers=triggers,
+        trigger_runs=trigger_runs,
+        webhook_endpoints=webhook_endpoints,
+        webhook_deliveries=webhook_deliveries,
+        image_uploads=image_uploads,
+        volume_backup_dlq=volume_backup_dlq,
+        token_usage=token_usage,
+        runs=runs,
+        skills=skills,
+        eval_datasets=eval_datasets,
+        curation_candidates=curation,
+        tenant_users=users,
+        audit=build_default_audit_logger(audit_store),
+        supervisor=supervisor,
+    )
+
+    summary = await purge_user(
+        tenant_id=t1, user_id=a.id, subject_id="subj-a", deps=deps, actor_id="admin"
+    )
+
+    # --- A's high-PII rows are gone. ---
+    assert summary.threads_purged == 1
+    assert await threads.get(t_a, tenant_id=t1) is None
+    assert await memory.list_for_user(tenant_id=t1, user_id=a.id) == []
+    assert await artifacts.list_for_user(tenant_id=t1, user_id=a.id, include_deleted=True) == []
+    assert await agent_instances.list_by_user(tenant_id=t1, user_id=a.id) == []
+    assert await mcp_oauth.list_for_user(tenant_id=t1, user_id="subj-a") == []
+
+    # --- A's billing / tenant-asset rows are KEPT + anonymized. ---
+    a_tokens = [
+        r for r in await token_usage.list_for_tenant(tenant_id=t1, limit=100) if r.user_id == a.id
+    ]
+    assert a_tokens == []  # no token row still points at A
+    all_t1_tokens = await token_usage.list_for_tenant(tenant_id=t1, limit=100)
+    assert len(all_t1_tokens) == 2  # A's row KEPT (nulled) + B's row
+    # The surviving orphan agent_run was anonymized (kept, user link nulled).
+    all_runs = await runs.list_for_tenant(tenant_id=t1, limit=100)
+    assert [r.thread_id for r in all_runs] == [orphan_thread]
+    assert all_runs[0].user_id is None
+
+    # --- Workspace mark sent; tenant_user deactivated; USER_PURGE audited. ---
+    assert (t1, a.id) in supervisor.workspace_deletions
+    assert summary.workspace_marked_deleted is True
+    assert summary.deactivated is True
+    assert {u.id for u in await users.list_by_tenant(t1, subject_type="user")} == {b.id}
+    page = await audit_store.query(AuditQuery(tenant_id=t1, action=AuditAction.USER_PURGE))
+    assert len(page.entries) == 1
+    assert page.entries[0].resource_id == str(a.id)
+
+    # --- User B + the other tenant are UNTOUCHED. ---
+    assert len(await memory.list_for_user(tenant_id=t1, user_id=b.id)) == 1
+    b_tokens = [r for r in all_t1_tokens if r.user_id == b.id]
+    assert len(b_tokens) == 1
+    assert len(await memory.list_for_user(tenant_id=t2, user_id=c.id)) == 1
+    assert {u.id for u in await users.list_by_tenant(t2, subject_type="user")} == {c.id}
+
+    # --- Re-running is a safe no-op (idempotent). ---
+    summary2 = await purge_user(
+        tenant_id=t1, user_id=a.id, subject_id="subj-a", deps=deps, actor_id="admin"
+    )
+    assert not summary2.failures
+    assert summary2.deleted["memory_item"] == 0
+    assert summary2.anonymized["token_usage"] == 0
+    assert summary2.deactivated is True  # idempotent-True
+
+
+# --------------------------------------------------------------------------- #
+# Endpoint authz — admin 200, viewer 403
+# --------------------------------------------------------------------------- #
+_ENDPOINT_TENANT = UUID("22222222-2222-2222-2222-222222222222")
+
+
+@pytest.fixture
+async def app_client() -> AsyncIterator[tuple[AsyncClient, UUID]]:
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    user = await app.state.tenant_user_repo.resolve(
+        tenant_id=_ENDPOINT_TENANT, subject_type="user", subject_id="victim", display_name="V"
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client, user.id
+
+
+@pytest.mark.asyncio
+async def test_purge_endpoint_admin_gets_summary(app_client: tuple[AsyncClient, UUID]) -> None:
+    client, user_id = app_client
+    jwt = make_test_jwt(tenant_id=_ENDPOINT_TENANT, subject=str(uuid4()), roles=("admin",))
+    resp = await client.post(
+        f"/v1/users/{user_id}:purge", headers={"Authorization": f"Bearer {jwt}"}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["user_id"] == str(user_id)
+    assert data["deactivated"] is True
+    # The purged user drops out of the roster.
+    listed = await client.get("/v1/users", headers={"Authorization": f"Bearer {jwt}"})
+    ids = {row["user_id"] for row in listed.json()["data"]["items"]}
+    assert str(user_id) not in ids
+
+
+@pytest.mark.asyncio
+async def test_purge_endpoint_viewer_forbidden(app_client: tuple[AsyncClient, UUID]) -> None:
+    client, user_id = app_client
+    jwt = make_test_jwt(tenant_id=_ENDPOINT_TENANT, subject=str(uuid4()), roles=("viewer",))
+    resp = await client.post(
+        f"/v1/users/{user_id}:purge", headers={"Authorization": f"Bearer {jwt}"}
+    )
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+async def test_purge_endpoint_unknown_user_404(app_client: tuple[AsyncClient, UUID]) -> None:
+    client, _ = app_client
+    jwt = make_test_jwt(tenant_id=_ENDPOINT_TENANT, subject=str(uuid4()), roles=("admin",))
+    resp = await client.post(
+        f"/v1/users/{uuid4()}:purge", headers={"Authorization": f"Bearer {jwt}"}
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.asyncio
+async def test_purge_endpoint_refuses_employee_member() -> None:
+    """An employee (tenant_user linked to a console member) is not purgeable here.
+
+    This data-only entry would leave their membership + role bindings + Keycloak
+    account intact; employees are purged from the members page instead. The guard
+    returns 409 and the tenant_user row stays active.
+    """
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    user = await app.state.tenant_user_repo.resolve(
+        tenant_id=_ENDPOINT_TENANT, subject_type="user", subject_id="employee", display_name="E"
+    )
+    members = app.state.tenant_member_repo
+    member = await members.create(
+        tenant_id=_ENDPOINT_TENANT, email="e@corp.test", role="operator", invited_by="admin"
+    )
+    # Back-fill subject_id == the employee's tenant_user.id (W3 first-login link).
+    assert await members.transition(
+        member_id=member.id,
+        tenant_id=_ENDPOINT_TENANT,
+        to="active",
+        now=datetime.now(UTC),
+        subject_id=user.id,
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        jwt = make_test_jwt(tenant_id=_ENDPOINT_TENANT, subject=str(uuid4()), roles=("admin",))
+        resp = await client.post(
+            f"/v1/users/{user.id}:purge", headers={"Authorization": f"Bearer {jwt}"}
+        )
+    assert resp.status_code == 409, resp.text
+    # The employee's tenant_user is untouched — not deactivated.
+    still = await app.state.tenant_user_repo.get(user.id, tenant_id=_ENDPOINT_TENANT)
+    assert still is not None and still.deleted_at is None

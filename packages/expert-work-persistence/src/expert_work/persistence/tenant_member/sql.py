@@ -90,6 +90,15 @@ class SqlTenantMemberStore(TenantMemberStore):
             row = (await session.execute(stmt)).scalar_one_or_none()
             return _row_to_member(row) if row is not None else None
 
+    async def get_by_subject_id(self, *, tenant_id: UUID, subject_id: UUID) -> TenantMember | None:
+        stmt = select(TenantMemberRow).where(
+            TenantMemberRow.tenant_id == tenant_id,
+            TenantMemberRow.subject_id == subject_id,
+        )
+        async with self._sf() as session:
+            row = (await session.execute(stmt)).scalar_one_or_none()
+            return _row_to_member(row) if row is not None else None
+
     async def list_for_tenant(
         self,
         *,

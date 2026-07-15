@@ -661,6 +661,41 @@ class InMemorySkillStore(SkillStore):
                 return True
         return False
 
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        touched = 0
+        # skill.created_by_user_id — only tenant-owned rows (NULL-tenant
+        # platform skills never equal the concrete tenant_id).
+        for skill_id, row in list(self._skills.items()):
+            if row.tenant_id == tenant_id and row.created_by_user_id == user_id:
+                self._skills[skill_id] = row.model_copy(update={"created_by_user_id": None})
+                touched += 1
+        # skill_promote_request.{requested_by_user_id, decided_by_user_id}.
+        for req_id, req in list(self._promote_requests.items()):
+            if req.tenant_id != tenant_id:
+                continue
+            update: dict[str, object | None] = {}
+            if req.requested_by_user_id == user_id:
+                update["requested_by_user_id"] = None
+            if req.decided_by_user_id == user_id:
+                update["decided_by_user_id"] = None
+            if update:
+                self._promote_requests[req_id] = req.model_copy(update=update)
+                touched += 1
+        # skill_evolution_kill_switch.{engaged_by_user_id, released_by_user_id}
+        # — only tenant-scope rows (global rows carry NULL tenant_id).
+        for i, sw in enumerate(self._kill_switches):
+            if sw.tenant_id != tenant_id:
+                continue
+            sw_update: dict[str, object | None] = {}
+            if sw.engaged_by_user_id == user_id:
+                sw_update["engaged_by_user_id"] = None
+            if sw.released_by_user_id == user_id:
+                sw_update["released_by_user_id"] = None
+            if sw_update:
+                self._kill_switches[i] = sw.model_copy(update=sw_update)
+                touched += 1
+        return touched
+
     # ------------------------------------------------------------ platform (Stream X)
     #
     # Platform rows have ``tenant_id is None``. Mirrors the SQL store's

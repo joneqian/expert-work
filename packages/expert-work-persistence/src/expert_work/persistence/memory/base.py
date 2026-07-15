@@ -148,6 +148,17 @@ class MemoryStore(abc.ABC):
         Idempotent: returns ``True`` even when already deleted. Returns
         ``False`` for unknown id / wrong tenant / wrong user."""
 
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — soft-delete EVERY live memory for a user.
+
+        Bulk ``soft_delete``: stamps ``deleted_at`` on all of the user's
+        not-yet-deleted rows and returns the count newly deleted (a re-purge
+        returns 0 — already-deleted rows are skipped). Tenant- AND user-scoped:
+        the ``(tenant_id, user_id)`` predicate never touches another tenant's
+        or user's memories. The rows are KEPT (recoverable within the retention
+        window); a later retention sweep hard-deletes them."""
+
     # ------------------------------------------------------------------
     # Capability Uplift Sprint #7 — MemoryConsolidator interface.
     # Mini-ADRs U-33 / U-34 / U-37 / U-40. The control-plane

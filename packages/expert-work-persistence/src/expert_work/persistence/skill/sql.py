@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -940,6 +940,66 @@ class SqlSkillStore(SkillStore):
             )
             hit = (await session.execute(stmt)).scalar_one_or_none()
         return hit is not None
+
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        # KEEP the rows (skills are tenant assets); null only the actor columns.
+        # Every predicate carries a concrete ``tenant_id``, so NULL-tenant
+        # platform skills and global kill-switch rows are NEVER matched.
+        skill_stmt = (
+            update(SkillRow)
+            .where(
+                SkillRow.tenant_id == tenant_id,
+                SkillRow.created_by_user_id == user_id,
+            )
+            .values(created_by_user_id=None)
+        )
+        promote_stmt = (
+            update(SkillPromoteRequestRow)
+            .where(
+                SkillPromoteRequestRow.tenant_id == tenant_id,
+                or_(
+                    SkillPromoteRequestRow.requested_by_user_id == user_id,
+                    SkillPromoteRequestRow.decided_by_user_id == user_id,
+                ),
+            )
+            .values(
+                requested_by_user_id=case(
+                    (SkillPromoteRequestRow.requested_by_user_id == user_id, None),
+                    else_=SkillPromoteRequestRow.requested_by_user_id,
+                ),
+                decided_by_user_id=case(
+                    (SkillPromoteRequestRow.decided_by_user_id == user_id, None),
+                    else_=SkillPromoteRequestRow.decided_by_user_id,
+                ),
+            )
+        )
+        kill_switch_stmt = (
+            update(SkillEvolutionKillSwitchRow)
+            .where(
+                SkillEvolutionKillSwitchRow.tenant_id == tenant_id,
+                or_(
+                    SkillEvolutionKillSwitchRow.engaged_by_user_id == user_id,
+                    SkillEvolutionKillSwitchRow.released_by_user_id == user_id,
+                ),
+            )
+            .values(
+                engaged_by_user_id=case(
+                    (SkillEvolutionKillSwitchRow.engaged_by_user_id == user_id, None),
+                    else_=SkillEvolutionKillSwitchRow.engaged_by_user_id,
+                ),
+                released_by_user_id=case(
+                    (SkillEvolutionKillSwitchRow.released_by_user_id == user_id, None),
+                    else_=SkillEvolutionKillSwitchRow.released_by_user_id,
+                ),
+            )
+        )
+        touched = 0
+        async with self._sf() as session:
+            for stmt in (skill_stmt, promote_stmt, kill_switch_stmt):
+                result = await session.execute(stmt)
+                touched += int(getattr(result, "rowcount", 0) or 0)
+            await session.commit()
+        return touched
 
     # ------------------------------------------------------------ platform (Stream X)
     #

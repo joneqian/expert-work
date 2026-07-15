@@ -33,6 +33,7 @@ from fastapi.responses import JSONResponse
 from control_plane.api._authz import require
 from control_plane.api._user_scope import get_user_repo, resolve_target_user_id
 from control_plane.audit import emit
+from control_plane.purge import PurgeUserDeps, purge_user
 from control_plane.tenant_scope import (
     CrossTenant,
     SingleTenant,
@@ -282,6 +283,39 @@ def build_agent_users_router() -> APIRouter:
     return router
 
 
+def _build_purge_deps(request: Request) -> PurgeUserDeps:
+    """Assemble the ``purge_user`` deps from ``request.app.state`` (Phase 3a).
+
+    The supervisor client + the supervisor-owned volume-backup DLQ are optional
+    (a deployment may not wire them); every other store is a hard dependency of
+    the cascade purge."""
+    state = request.app.state
+    return PurgeUserDeps(
+        threads=state.thread_meta_repo,
+        runtime=state.agent_runtime,
+        memory=state.memory_repo,
+        memory_dlq=state.memory_writeback_dlq,
+        artifacts=state.artifact_store,
+        mcp_oauth=state.mcp_oauth_connection_store,
+        agent_instances=state.agent_instance_store,
+        approvals=state.approval_store,
+        triggers=state.trigger_store,
+        trigger_runs=state.trigger_run_store,
+        webhook_endpoints=state.webhook_endpoint_store,
+        webhook_deliveries=state.webhook_delivery_store,
+        image_uploads=state.image_upload_store,
+        volume_backup_dlq=getattr(state, "volume_backup_dlq", None),
+        token_usage=state.token_usage_store,
+        runs=state.run_store,
+        skills=state.skill_store,
+        eval_datasets=state.eval_dataset_store,
+        curation_candidates=state.curation_candidate_store,
+        tenant_users=state.tenant_user_repo,
+        audit=state.audit_logger,
+        supervisor=getattr(state, "supervisor_client", None),
+    )
+
+
 def build_tenant_users_router() -> APIRouter:
     """Mount ``GET /v1/users/{user_id}`` — one registry row.
 
@@ -450,5 +484,85 @@ def build_tenant_users_router() -> APIRouter:
                 "error": None,
             }
         )
+
+    @router.post("/{user_id}:purge", response_model=None)
+    async def purge_tenant_user(
+        user_id: UUID,
+        request: Request,
+        # Admin-only: ``user:write`` is ADMIN-exclusive (same gate the members
+        # page revoke uses). A viewer / operator gets a 403 here.
+        principal: Annotated[Principal, Depends(require("user", "write"))],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        members: Annotated[TenantMemberStore | None, Depends(_get_member_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        # A user belongs to one tenant — a concrete id lets a system_admin drill
+        # in; the "*" cross-tenant scope is rejected (a purge is per-tenant).
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        """Phase 3a — irreversibly cascade-purge a user's data + assets.
+
+        HARD-DELETE the user's high-PII rows (threads / memory / artifacts /
+        agent-instances / MCP OAuth / triggers / webhooks / approvals / image
+        uploads / DLQs / sandboxes), ANONYMIZE the tenant-owned billing /
+        analytics / asset rows (token_usage / agent_run / skill / eval /
+        curation — the row is KEPT, the user link nulled), soft-delete the
+        workspace volume (the reaper archives it), and soft-deactivate the
+        ``tenant_user`` row. Best-effort per step + idempotent — the returned
+        summary carries per-store counts and any step that failed; re-running is
+        a safe no-op that retries the failures.
+        """
+        trace_id = current_trace_id_hex()
+        scope = await ensure_tenant_scope(
+            principal,
+            tenant_id,
+            audit,
+            trace_id=trace_id,
+            endpoint="POST /v1/users/{user_id}:purge",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
+        )
+        if isinstance(scope, CrossTenant):
+            raise HTTPException(
+                status_code=422,
+                detail="a user belongs to one tenant; pass a concrete tenant_id",
+            )
+        target = scope.tenant_id
+
+        async with applied_scope(SingleTenant(tenant_id=target)):
+            # 404 (hides cross-tenant existence) when the user is unknown. A
+            # re-purge still finds the row — 3a only soft-deactivates it, never
+            # hard-deletes — so the purge stays idempotent.
+            user = await users.get(user_id, tenant_id=target)
+            if user is None:
+                raise HTTPException(status_code=404, detail="user not found")
+
+            # Refuse to purge an employee here. An employee's tenant_user is
+            # linked to a tenant_member (back-filled subject_id); this data-only
+            # entry would leave their console membership, role bindings and
+            # Keycloak account intact — a returning employee would come back with
+            # full access. Employees are purged from the members page, which
+            # revokes those too. (The members-page flow calls purge_user directly,
+            # past this endpoint-level guard.)
+            if members is not None:
+                member = await members.get_by_subject_id(tenant_id=target, subject_id=user_id)
+                if member is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "this user is a console member (employee); purge "
+                            "employees from the members page, which also revokes "
+                            "their roles and Keycloak account"
+                        ),
+                    )
+
+            summary = await purge_user(
+                tenant_id=target,
+                user_id=user_id,
+                subject_id=user.subject_id,
+                deps=_build_purge_deps(request),
+                actor_id=request.state.actor_id,
+                trace_id=trace_id,
+            )
+
+        return JSONResponse(content={"success": True, "data": summary.as_dict(), "error": None})
 
     return router

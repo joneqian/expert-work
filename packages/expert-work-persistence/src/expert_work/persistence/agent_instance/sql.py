@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -83,6 +83,16 @@ class SqlAgentInstanceStore(AgentInstanceStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_record(r) for r in rows]
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        stmt = delete(AgentInstanceRow).where(
+            AgentInstanceRow.tenant_id == tenant_id,
+            AgentInstanceRow.user_id == user_id,
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def list_by_user(
         self, *, tenant_id: UUID, user_id: UUID, limit: int = 100, offset: int = 0

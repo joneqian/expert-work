@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -104,6 +105,16 @@ class InMemoryTriggerStore(TriggerStore):
         del self._rows[trigger_id]
         return True
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> list[UUID]:
+        victims = [
+            tid
+            for tid, r in self._rows.items()
+            if r.tenant_id == tenant_id and r.user_id == user_id
+        ]
+        for tid in victims:
+            del self._rows[tid]
+        return victims
+
     async def get_for_webhook(self, *, trigger_id: UUID) -> TriggerRecord | None:
         return self._rows.get(trigger_id)
 
@@ -157,6 +168,19 @@ class InMemoryTriggerRunStore(TriggerRunStore):
         ]
         rows.sort(key=lambda r: r.triggered_at, reverse=True)
         return rows
+
+    async def delete_for_triggers(self, *, trigger_ids: Sequence[UUID], tenant_id: UUID) -> int:
+        wanted = set(trigger_ids)
+        if not wanted:
+            return 0
+        victims = [
+            rid
+            for rid, r in self._rows.items()
+            if r.trigger_id in wanted and r.tenant_id == tenant_id
+        ]
+        for rid in victims:
+            del self._rows[rid]
+        return len(victims)
 
     async def list_fired(self, *, limit: int = 1000) -> list[TriggerRunRecord]:
         rows = [r for r in self._rows.values() if r.status is TriggerRunStatus.FIRED]

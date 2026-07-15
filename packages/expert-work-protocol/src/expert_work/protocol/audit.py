@@ -88,6 +88,13 @@ class AuditAction(StrEnum):
     # emitted when caller≠target, so there is a "who looked at whom" trail
     # (reads are otherwise unaudited). resource_type = "user".
     USER_DATA_VIEW = "user:data_view"
+    # user-dimension governance (Phase 3a) — a tenant admin irreversibly
+    # purges a user's data + assets (cascade delete of high-PII rows,
+    # anonymize of billing/tenant-asset rows, workspace soft-delete, and
+    # soft-deactivation of the tenant_user row). Best-effort per step: the
+    # summary details carry per-store counts + any step that failed.
+    # resource_type = "user".
+    USER_PURGE = "user:purge"
     # tenant credentials — Stream O Mini-ADR O-8.
     # PROVIDER_CREDENTIALS_UPDATED / TOOL_CREDENTIALS_UPDATED are emitted
     # whenever the corresponding dict is mutated via PUT; RESOLVE_FAILED is

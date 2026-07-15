@@ -174,3 +174,28 @@ async def test_set_keycloak_user_id_is_tenant_scoped(sql_store: SqlStoreFixture)
         assert got is not None and got.keycloak_user_id == "kc-ok"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_by_subject_id_is_tenant_scoped(sql_store: SqlStoreFixture) -> None:
+    """``get_by_subject_id`` backs the Phase 3a purge employee-guard: it finds the
+    member an employee's ``tenant_user`` links to, tenant-scoped, and returns
+    ``None`` for an external end-user (no member)."""
+    store, engine = sql_store
+    try:
+        tenant, other = uuid4(), uuid4()
+        subject = uuid4()  # the employee's tenant_user.id
+        m = await store.create(tenant_id=tenant, email="e@co.com", role="operator", invited_by="a")
+        # Not linked yet → no hit.
+        assert await store.get_by_subject_id(tenant_id=tenant, subject_id=subject) is None
+        # Back-fill subject_id via the first-login transition.
+        assert await store.transition(
+            member_id=m.id, tenant_id=tenant, to="active", now=datetime.now(UTC), subject_id=subject
+        )
+        found = await store.get_by_subject_id(tenant_id=tenant, subject_id=subject)
+        assert found is not None and found.id == m.id
+        # Wrong tenant / unknown subject → None.
+        assert await store.get_by_subject_id(tenant_id=other, subject_id=subject) is None
+        assert await store.get_by_subject_id(tenant_id=tenant, subject_id=uuid4()) is None
+    finally:
+        await engine.dispose()

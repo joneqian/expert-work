@@ -25,7 +25,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from expert_work.persistence.models.token_usage import TokenUsageRow
@@ -151,6 +151,17 @@ class TokenUsageStore(abc.ABC):
         from the result; the caller treats a missing id as zero.
         """
 
+    @abc.abstractmethod
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — null the ``user_id`` on a user's rows, KEEP them.
+
+        Sets ``user_id = NULL`` on every ``token_usage`` row for ``(tenant_id,
+        user_id)`` and returns the count updated (0 when none / re-purge). The
+        rows are NOT deleted — token usage is billing / analytics data owned by
+        the tenant; only the per-user PII link is severed. Tenant- AND
+        user-scoped — the predicate never touches another tenant's or user's
+        rows, and rows already NULL are left as-is."""
+
 
 class InMemoryTokenUsageStore(TokenUsageStore):
     """In-memory :class:`TokenUsageStore` — dev / unit tests."""
@@ -256,6 +267,14 @@ class InMemoryTokenUsageStore(TokenUsageStore):
             )
             for uid, rows in grouped.items()
         }
+
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        updated = 0
+        for idx, r in enumerate(self._rows):
+            if r.tenant_id == tenant_id and r.user_id == user_id:
+                self._rows[idx] = replace(r, user_id=None)
+                updated += 1
+        return updated
 
 
 class DbTokenUsageStore(TokenUsageStore):
@@ -440,6 +459,23 @@ class DbTokenUsageStore(TokenUsageStore):
             for row in rows
             if row[0] is not None
         }
+
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        # Explicit tenant_id predicate (never rely on RLS alone for a mutation —
+        # the app connects as a BYPASSRLS superuser). user_id is nulled, the
+        # billing row is KEPT.
+        stmt = (
+            update(TokenUsageRow)
+            .where(
+                TokenUsageRow.tenant_id == tenant_id,
+                TokenUsageRow.user_id == user_id,
+            )
+            .values(user_id=None)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
 
 
 def _row_to_record(row: TokenUsageRow) -> TokenUsageRecord:

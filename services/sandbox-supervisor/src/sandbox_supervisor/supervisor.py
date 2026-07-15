@@ -463,6 +463,11 @@ class SandboxSupervisor:
         sandbox_id = self._sessions.get(session_key)
         if sandbox_id is not None:
             await self.destroy(sandbox_id, reason=DESTROY_REASON_WORKSPACE_SOFT_DELETE)
+        # Phase 3a (purge_user) — the warm session (if any) is now destroyed;
+        # hard-delete the user's ``sandbox_instance`` lifecycle rows so no PII
+        # (the surrogate user_id) lingers. Best-effort within the idempotency
+        # guard: a second mark_workspace_deleted already returned above.
+        await self._store.delete_all_for_user(tenant_id=tenant_id, user_id=user_id)
         await self._emit_audit(
             tenant_id=tenant_id,
             action=AuditAction.WORKSPACE_SOFT_DELETE,

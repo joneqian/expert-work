@@ -40,6 +40,14 @@ class TenantUserRow(Base):
         nullable=False,
         server_default=func.now(),
     )
+    # Phase 3a (purge_user) — soft-deactivation stamp. NULL = active.
+    # NON-NULL means the user was purged: ``list_by_tenant`` filters these
+    # rows out so a purged user never reappears in the roster. ``get`` still
+    # returns them (re-purge stays idempotent + the detail view shows a purged
+    # user); ``resolve`` CLEARS the stamp, so a returning identity reactivates
+    # cleanly — visible + active again, never invisible-but-producing-data.
+    # Migration ``0122_tenant_user_deleted_at``.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
