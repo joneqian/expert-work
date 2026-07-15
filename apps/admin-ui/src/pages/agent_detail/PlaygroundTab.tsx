@@ -59,13 +59,7 @@ import { getRun, listThreadRuns, streamRunEvents } from "../../api/runs";
 import { getRunTrace, type RunTrace } from "../../api/trace_facade";
 import {
   createSession,
-  deleteSessionArtifact,
-  deleteSessionWorkspaceFile,
-  downloadSessionArtifact,
-  downloadSessionWorkspaceFile,
   getSessionMessages,
-  getSessionWorkspace,
-  getSessionWorkspaceFiles,
   streamRun,
   submitSessionFeedback,
   type HistoryMessage,
@@ -75,6 +69,13 @@ import {
   type ThreadMeta,
   type WorkspaceFile,
 } from "../../api/sessions";
+import {
+  deleteUserWorkspaceFile,
+  downloadUserWorkspaceFile,
+  getUserWorkspace,
+  getUserWorkspaceFiles,
+} from "../../api/workspace";
+import { deleteArtifact, downloadArtifact } from "../../api/artifacts";
 import {
   artifactsFromTools,
   parseCompactionEvents,
@@ -774,12 +775,15 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     [thread],
   );
 
-  const loadWorkspace = useCallback(async (threadId: string) => {
+  // The workspace is keyed on the current user (not a thread), so it loads
+  // once and survives session deletion — the whole point of the user-scoped
+  // ``/v1/workspace`` route.
+  const loadWorkspace = useCallback(async () => {
     setWorkspaceLoading(true);
     try {
       const [ws, fs] = await Promise.all([
-        getSessionWorkspace(threadId),
-        getSessionWorkspaceFiles(threadId).catch(() => [] as WorkspaceFile[]),
+        getUserWorkspace(),
+        getUserWorkspaceFiles().catch(() => [] as WorkspaceFile[]),
       ]);
       setWorkspace(ws);
       setWorkspaceFiles(fs);
@@ -791,41 +795,35 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     }
   }, []);
 
-  const handleDownloadFile = useCallback(
-    async (threadId: string, path: string) => {
-      setDownloadingPath(path);
-      try {
-        await downloadSessionWorkspaceFile(threadId, path);
-      } catch {
-        // Swallow — the file may have been removed between list + click; the
-        // refresh button re-syncs. A toast here would need the App message API.
-      } finally {
-        setDownloadingPath(null);
-      }
-    },
-    [],
-  );
+  const handleDownloadFile = useCallback(async (path: string) => {
+    setDownloadingPath(path);
+    try {
+      await downloadUserWorkspaceFile(path);
+    } catch {
+      // Swallow — the file may have been removed between list + click; the
+      // refresh button re-syncs. A toast here would need the App message API.
+    } finally {
+      setDownloadingPath(null);
+    }
+  }, []);
 
-  const handleDownloadArtifact = useCallback(
-    async (threadId: string, name: string) => {
-      setBusyWorkspaceKey(`artifact:${name}`);
-      try {
-        await downloadSessionArtifact(threadId, name);
-      } catch {
-        // Swallow — same rationale as the file download.
-      } finally {
-        setBusyWorkspaceKey(null);
-      }
-    },
-    [],
-  );
+  const handleDownloadArtifact = useCallback(async (name: string) => {
+    setBusyWorkspaceKey(`artifact:${name}`);
+    try {
+      await downloadArtifact(name);
+    } catch {
+      // Swallow — same rationale as the file download.
+    } finally {
+      setBusyWorkspaceKey(null);
+    }
+  }, []);
 
   const handleDeleteFile = useCallback(
-    async (threadId: string, path: string) => {
+    async (path: string) => {
       setBusyWorkspaceKey(path);
       try {
-        await deleteSessionWorkspaceFile(threadId, path);
-        await loadWorkspace(threadId);
+        await deleteUserWorkspaceFile(path);
+        await loadWorkspace();
       } catch {
         // Swallow — refresh re-syncs the listing on the next manual refresh.
       } finally {
@@ -836,11 +834,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   );
 
   const handleDeleteArtifact = useCallback(
-    async (threadId: string, name: string) => {
+    async (name: string) => {
       setBusyWorkspaceKey(`artifact:${name}`);
       try {
-        await deleteSessionArtifact(threadId, name);
-        await loadWorkspace(threadId);
+        await deleteArtifact(name);
+        await loadWorkspace();
       } catch {
         // Swallow — refresh re-syncs.
       } finally {
@@ -850,11 +848,12 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     [loadWorkspace],
   );
 
-  // Refresh the workspace view when the thread (re)binds and after each run —
-  // a run that wrote files makes the volume appear / its size grow.
+  // Load the current user's workspace on mount and refresh after each run — a
+  // run that wrote files makes the volume appear / its size grow. Not tied to a
+  // thread, so the panel stays visible after the session is deleted.
   useEffect(() => {
-    if (thread && !running) void loadWorkspace(thread.thread_id);
-  }, [thread, running, loadWorkspace]);
+    if (!running) void loadWorkspace();
+  }, [running, loadWorkspace]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -1114,8 +1113,10 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           )}
         </Space>
 
-        {/* Playground-Uplift D4 — workspace inspector. */}
-        {thread && (
+        {/* Playground-Uplift D4 — workspace inspector. Keyed on the current
+            user, not the bound thread, so it stays visible after the session
+            is deleted (loads once ``workspace`` is fetched). */}
+        {workspace && (
           <div
             data-testid="playground-workspace"
             style={{
@@ -1141,7 +1142,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                 type="text"
                 icon={<RefreshCw size={11} strokeWidth={1.75} />}
                 loading={workspaceLoading}
-                onClick={() => void loadWorkspace(thread.thread_id)}
+                onClick={() => void loadWorkspace()}
                 aria-label={t("playground.workspace_refresh")}
                 data-testid="playground-workspace-refresh"
                 style={{ marginLeft: "auto" }}
@@ -1220,11 +1221,8 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                         type="text"
                         icon={<Download size={11} strokeWidth={1.75} />}
                         loading={busyWorkspaceKey === `artifact:${a.name}`}
-                        disabled={!thread || busyWorkspaceKey !== null}
-                        onClick={() =>
-                          thread &&
-                          void handleDownloadArtifact(thread.thread_id, a.name)
-                        }
+                        disabled={busyWorkspaceKey !== null}
+                        onClick={() => void handleDownloadArtifact(a.name)}
                         aria-label={t("playground.artifact_download", {
                           name: a.name,
                         })}
@@ -1235,17 +1233,14 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                         okText={t("playground.delete_ok")}
                         cancelText={t("playground.delete_cancel")}
                         okButtonProps={{ danger: true }}
-                        onConfirm={() =>
-                          thread &&
-                          void handleDeleteArtifact(thread.thread_id, a.name)
-                        }
+                        onConfirm={() => void handleDeleteArtifact(a.name)}
                       >
                         <Button
                           size="small"
                           type="text"
                           danger
                           icon={<Trash2 size={11} strokeWidth={1.75} />}
-                          disabled={!thread || busyWorkspaceKey !== null}
+                          disabled={busyWorkspaceKey !== null}
                           aria-label={t("playground.artifact_delete", {
                             name: a.name,
                           })}
@@ -1309,14 +1304,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                           icon={<Download size={11} strokeWidth={1.75} />}
                           loading={downloadingPath === f.path}
                           disabled={
-                            !thread ||
-                            downloadingPath !== null ||
-                            busyWorkspaceKey !== null
+                            downloadingPath !== null || busyWorkspaceKey !== null
                           }
-                          onClick={() =>
-                            thread &&
-                            void handleDownloadFile(thread.thread_id, f.path)
-                          }
+                          onClick={() => void handleDownloadFile(f.path)}
                           aria-label={t("playground.workspace_file_download", {
                             name: f.path,
                           })}
@@ -1327,10 +1317,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                           okText={t("playground.delete_ok")}
                           cancelText={t("playground.delete_cancel")}
                           okButtonProps={{ danger: true }}
-                          onConfirm={() =>
-                            thread &&
-                            void handleDeleteFile(thread.thread_id, f.path)
-                          }
+                          onConfirm={() => void handleDeleteFile(f.path)}
                         >
                           <Button
                             size="small"
@@ -1338,7 +1325,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                             danger
                             icon={<Trash2 size={11} strokeWidth={1.75} />}
                             loading={busyWorkspaceKey === f.path}
-                            disabled={!thread || busyWorkspaceKey !== null}
+                            disabled={busyWorkspaceKey !== null}
                             aria-label={t("playground.file_delete", {
                               name: f.path,
                             })}
@@ -1848,7 +1835,7 @@ function TurnCard({
   initialEventView: "timeline" | "raw" | "exact";
   onViewChange: (view: "timeline" | "raw" | "exact") => void;
   threadId: string | null;
-  onDownloadArtifact: (threadId: string, name: string) => Promise<void>;
+  onDownloadArtifact: (name: string) => Promise<void>;
   rate: RateCardRecord | null;
   onDecide: (
     turnId: string,
@@ -1910,7 +1897,7 @@ function TurnCard({
     (agentState.signals.noProgressStreak ?? 0) > 0 ||
     agentState.signals.escalateNext === true;
   // A+B — artifacts the agent registered this turn (``save_artifact``). The
-  // agent can't emit a download link itself (the endpoint is thread-scoped +
+  // agent can't emit a download link itself (the endpoint is user-scoped +
   // auth'd), so surface them as an inline download row — deer-flow's pattern.
   const turnArtifacts = useMemo(
     () => artifactsFromTools(turn.events),
@@ -1921,15 +1908,14 @@ function TurnCard({
   );
   const downloadArtifact = useCallback(
     async (name: string) => {
-      if (threadId === null) return;
       setDownloadingArtifact(name);
       try {
-        await onDownloadArtifact(threadId, name);
+        await onDownloadArtifact(name);
       } finally {
         setDownloadingArtifact(null);
       }
     },
-    [threadId, onDownloadArtifact],
+    [onDownloadArtifact],
   );
   const answer =
     summary.finalText ??
@@ -2159,7 +2145,7 @@ function TurnCard({
         )}
 
         {/* A+B — inline download row for artifacts this turn registered. */}
-        {turnArtifacts.length > 0 && threadId && (
+        {turnArtifacts.length > 0 && (
           <div
             style={{
               marginTop: 8,

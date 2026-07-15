@@ -90,6 +90,7 @@ from control_plane.api import (
     build_usage_router,
     build_webhook_endpoints_router,
     build_webhooks_router,
+    build_workspace_router,
 )
 from control_plane.api.model_catalog import PlatformConfiguredProviders
 from control_plane.approval_metrics import ApprovalGaugeWorker
@@ -2078,6 +2079,7 @@ def create_app(
     app.include_router(build_approvals_router())
     app.include_router(build_feedback_router())
     app.include_router(build_artifacts_router())
+    app.include_router(build_workspace_router())
     app.include_router(build_knowledge_router())
     app.include_router(build_me_router())
     app.include_router(build_memory_router())

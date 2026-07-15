@@ -60,6 +60,7 @@ from control_plane.api.triggers import build_triggers_router, build_webhooks_rou
 from control_plane.api.uploads import build_uploads_router
 from control_plane.api.usage import build_usage_router
 from control_plane.api.webhook_endpoints import build_webhook_endpoints_router
+from control_plane.api.workspace import build_workspace_router
 
 __all__ = [
     "build_agent_schema_router",
@@ -116,4 +117,5 @@ __all__ = [
     "build_usage_router",
     "build_webhook_endpoints_router",
     "build_webhooks_router",
+    "build_workspace_router",
 ]
