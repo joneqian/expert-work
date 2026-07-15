@@ -881,7 +881,7 @@ const zhCN: TranslationKeys = {
     empty: "暂无事件。",
     view_timeline: "工具调用",
     view_raw: "原始事件",
-    view_exact: "精确",
+    view_exact: "执行轨迹",
     compaction_label: "上下文压缩",
     compaction_passes: "{{n}} 次",
     compaction_reduction: "{{before}} → {{after}} tokens(−{{pct}}%)",
