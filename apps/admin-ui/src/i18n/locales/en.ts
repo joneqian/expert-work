@@ -3264,7 +3264,7 @@ const en: TranslationKeys = {
     empty: "No events yet.",
     view_timeline: "Tool calls",
     view_raw: "Raw events",
-    view_exact: "Exact",
+    view_exact: "Execution trace",
     compaction_label: "Context compacted",
     compaction_passes: "{{n}} pass(es)",
     compaction_reduction: "{{before}} → {{after}} tokens (−{{pct}}%)",

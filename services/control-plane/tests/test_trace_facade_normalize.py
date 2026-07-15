@@ -465,3 +465,25 @@ def test_render_io_none() -> None:
     from control_plane.api.trace_facade import _render_io
 
     assert _render_io(None) is None
+
+
+def test_normalize_tool_span_detail_from_attributes_tool() -> None:
+    # Langfuse stores a span's OTel attributes under metadata["attributes"];
+    # the tool_call span sets attributes={"tool": <name>} (builder.py). The
+    # facade must surface that as the span's detail so the console shows WHICH
+    # tool ran, not a bare "工具调用".
+    obs = [
+        _obs("sess", "SPAN", "expert_work.session.run", None, 1.0, 0),
+        _obs(
+            "t",
+            "SPAN",
+            "expert_work.orchestrator.tool_call",
+            "sess",
+            0.5,
+            0,
+            metadata={"attributes": {"tool": "mcp:amap-maps.maps_weather"}},
+        ),
+    ]
+    spans = normalize_trace(_trace(obs))["spans"]
+    tool = next(s for s in spans if s["kind"] == "tool")
+    assert tool["detail"] == "mcp:amap-maps.maps_weather"

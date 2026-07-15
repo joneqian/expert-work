@@ -2088,6 +2088,14 @@ function TurnCard({
     }, TRACE_NOT_READY_RETRY_MS);
     return () => clearTimeout(timer);
   }, [trace]);
+  // A finished run's trace only lands in Langfuse after the run closes, so the
+  // lazy fetch above may have run (and burned its not-ready retry budget) while
+  // the run was still in flight. Re-arm one fresh fetch the moment this turn
+  // completes, so the exact view auto-refreshes instead of needing a manual
+  // click — setTrace(null) re-triggers the fetch effect when the view is exact.
+  useEffect(() => {
+    if (turn.status === "done") setTrace(null);
+  }, [turn.status]);
   // A' purpose labelling (spec §3.2) — see trace_purpose.ts.
   const labeledTrace = useMemo(
     () =>
@@ -2407,12 +2415,12 @@ function TurnCard({
                     value={eventView}
                     onChange={handleViewChange}
                     options={[
+                      { value: "exact", label: t("event_stream.view_exact") },
                       {
                         value: "timeline",
                         label: t("event_stream.view_timeline"),
                       },
                       { value: "raw", label: t("event_stream.view_raw") },
-                      { value: "exact", label: t("event_stream.view_exact") },
                     ]}
                     data-testid="playground-event-view-toggle"
                   />
