@@ -94,3 +94,26 @@ class SqlTenantUserStore(TenantUserStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return {row.id: _row_to_user(row) for row in rows}
+
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        subject_type: SubjectType | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[TenantUser]:
+        stmt = select(TenantUserRow).where(TenantUserRow.tenant_id == tenant_id)
+        if subject_type is not None:
+            stmt = stmt.where(TenantUserRow.subject_type == subject_type)
+        stmt = (
+            stmt.order_by(
+                TenantUserRow.last_active_at.desc(),
+                TenantUserRow.created_at.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_user(row) for row in rows]

@@ -83,6 +83,11 @@ class AuditAction(StrEnum):
     MEMBER_PASSWORD_RESET = "member:password_reset"
     KEYCLOAK_USER_CREATE = "keycloak_user:create"
     KEYCLOAK_USER_CREATE_FAILED = "keycloak_user:create_failed"
+    # user-dimension governance (Phase 2) — a tenant admin READS another
+    # user's per-user content (memory / workspace) via ``?user_id=``. Only
+    # emitted when caller≠target, so there is a "who looked at whom" trail
+    # (reads are otherwise unaudited). resource_type = "user".
+    USER_DATA_VIEW = "user:data_view"
     # tenant credentials — Stream O Mini-ADR O-8.
     # PROVIDER_CREDENTIALS_UPDATED / TOOL_CREDENTIALS_UPDATED are emitted
     # whenever the corresponding dict is mutated via PUT; RESOLVE_FAILED is
@@ -106,6 +111,10 @@ class AuditAction(StrEnum):
     WORKSPACE_ARCHIVE = "workspace:archive"
     # workspace (Stream J.15-补强-2 — Mini-ADR J-29 第 2 项 backup pipeline)
     WORKSPACE_BACKUP = "workspace:backup"
+    # workspace single-file delete via the inspector / user-detail tab
+    # (Phase 1 shipped the delete with no audit; Phase 2 backfills it — the
+    # governance surface lets an admin delete another user's file).
+    WORKSPACE_FILE_DELETE = "workspace:file_delete"
     # workspace state projection (Stream CM-0 — Mini-ADR CM-A6); DB→file
     # projection of agent state (PLAN.md / TODO.md / MEMORY.md). resource_type
     # reuses ``user_workspace``.

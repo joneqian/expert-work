@@ -122,3 +122,29 @@ async def test_resolve_distinguishes_identity_axes(sql_store: SqlStoreFixture) -
         assert len({u1.id, u2.id, u3.id, u4.id}) == 4
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_by_tenant_filters_orders_paginates(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        owner, other = uuid4(), uuid4()
+        u1 = await store.resolve(tenant_id=owner, subject_type="user", subject_id="u1")
+        await store.resolve(tenant_id=owner, subject_type="user", subject_id="u2")
+        await store.resolve(tenant_id=owner, subject_type="service_account", subject_id="svc")
+        await store.resolve(tenant_id=other, subject_type="user", subject_id="foreign")
+        # Bump u1 to most-recently-active.
+        u1 = await store.resolve(tenant_id=owner, subject_type="user", subject_id="u1")
+
+        rows = await store.list_by_tenant(owner, subject_type="user")
+        # subject_type filter excludes the service account + the other tenant.
+        assert {r.subject_id for r in rows} == {"u1", "u2"}
+        # Ordered by last_active_at desc — u1 (just bumped) is first.
+        assert rows[0].id == u1.id
+        # No filter → includes the service account (3 rows this tenant).
+        assert len(await store.list_by_tenant(owner)) == 3
+        # Pagination.
+        page = await store.list_by_tenant(owner, subject_type="user", limit=1, offset=1)
+        assert len(page) == 1
+    finally:
+        await engine.dispose()

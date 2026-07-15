@@ -171,6 +171,32 @@ async def _require_caller_user(request: Request, users: TenantUserStore) -> tupl
     return principal.tenant_id, user_id
 
 
+async def _resolve_target_user(
+    request: Request, users: TenantUserStore, *, requested: UUID | None
+) -> tuple[UUID, UUID, bool]:
+    """Resolve ``(tenant_id, target_user_id, is_cross_user)`` for a mutating call.
+
+    Phase 2 — the user-detail Memory tab lets a tenant admin edit / forget
+    another member's memory. Machine principal → 403 (memory is per-user);
+    ``requested`` None or the caller's own id → the caller; a tenant admin may
+    target another member; anyone else asking for someone else is 403.
+    ``is_cross_user`` is True when an admin acts on a different user — it drives
+    the audit ``target_user_id`` so the governance action is attributable.
+    """
+    tenant_id, caller_user_id = await _require_caller_user(request, users)
+    if requested is None or requested == caller_user_id:
+        return tenant_id, caller_user_id, False
+    if not is_admin(request.state.principal):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "USER_SCOPE_FORBIDDEN",
+                "message": "only tenant admins may act on another user's memories",
+            },
+        )
+    return tenant_id, requested, True
+
+
 def build_memory_router() -> APIRouter:
     router = APIRouter(prefix="/v1/memory", tags=["memory"])
 
@@ -204,24 +230,27 @@ def build_memory_router() -> APIRouter:
                 # dropped (system_admin sees the whole picture).
                 items = await store.list_all_tenants(kind=kind, limit=limit)
             else:
-                # Single-tenant: keep the per-user enforcement.
-                _, caller_user_id = await _require_caller_user(request, users)
-                target_user_id = caller_user_id
-                if user_id is not None and user_id != caller_user_id:
-                    # Same admin semantics as ``caller_owns_thread`` — a
-                    # tenant admin reads any member, a plain user does not.
-                    if not is_admin(principal):
-                        raise HTTPException(
-                            status_code=403,
-                            detail={
-                                "code": "USER_SCOPE_FORBIDDEN",
-                                "message": "only tenant admins may read another user's memories",
-                            },
-                        )
-                    target_user_id = user_id
+                # Single-tenant: keep the per-user enforcement. A tenant admin
+                # may read another member's memory (the user-detail Memory tab);
+                # anyone else asking for someone else is a 403.
+                _, target_user_id, cross_user = await _resolve_target_user(
+                    request, users, requested=user_id
+                )
                 items = await store.list_for_user(
                     tenant_id=scope.tenant_id, user_id=target_user_id, kind=kind, limit=limit
                 )
+                if cross_user:
+                    # Read auditing — "who looked at whom" (Phase 2 governance).
+                    await emit(
+                        audit,
+                        tenant_id=scope.tenant_id,
+                        actor_id=principal.subject_id,
+                        action=AuditAction.USER_DATA_VIEW,
+                        resource_type="user",
+                        resource_id=str(target_user_id),
+                        trace_id=current_trace_id_hex(),
+                        details={"view": "memory", "count": len(items)},
+                    )
         return {
             "success": True,
             "data": {
@@ -241,8 +270,13 @@ def build_memory_router() -> APIRouter:
         store: Annotated[MemoryStore, Depends(_get_memory_repo)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        # Phase 2 — a tenant admin edits another member's memory (user-detail
+        # Memory tab). Omitted / own id → the caller; non-admin → 403.
+        user_id: Annotated[UUID | None, Query()] = None,
     ) -> dict[str, Any]:
-        tenant_id, user_id = await _require_caller_user(request, users)
+        tenant_id, target_user_id, cross_user = await _resolve_target_user(
+            request, users, requested=user_id
+        )
         # Capability Uplift Sprint #2 — strict scan BEFORE embedder so
         # poisoned content doesn't cost an OpenAI call.
         await _scan_memory_strict(
@@ -276,7 +310,7 @@ def build_memory_router() -> APIRouter:
 
         updated = await store.update_content(
             tenant_id=tenant_id,
-            user_id=user_id,
+            user_id=target_user_id,
             memory_id=memory_id,
             content=payload.content,
             embedding=vectors[0],
@@ -284,6 +318,9 @@ def build_memory_router() -> APIRouter:
         )
         if updated is None:
             raise HTTPException(status_code=404, detail="memory not found")
+        details: dict[str, Any] = {"kind": updated.kind, "content_len": len(payload.content)}
+        if cross_user:
+            details["target_user_id"] = str(target_user_id)
         await emit(
             audit,
             tenant_id=tenant_id,
@@ -292,7 +329,7 @@ def build_memory_router() -> APIRouter:
             resource_type="memory_item",
             resource_id=str(memory_id),
             trace_id=current_trace_id_hex(),
-            details={"kind": updated.kind, "content_len": len(payload.content)},
+            details=details,
         )
         return {"success": True, "data": _serialise(updated), "error": None}
 
@@ -304,9 +341,16 @@ def build_memory_router() -> APIRouter:
         store: Annotated[MemoryStore, Depends(_get_memory_repo)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        # Phase 2 — a tenant admin forgets another member's memory (user-detail
+        # Memory tab). Omitted / own id → the caller; non-admin → 403.
+        user_id: Annotated[UUID | None, Query()] = None,
     ) -> None:
-        tenant_id, user_id = await _require_caller_user(request, users)
-        ok = await store.soft_delete(tenant_id=tenant_id, user_id=user_id, memory_id=memory_id)
+        tenant_id, target_user_id, cross_user = await _resolve_target_user(
+            request, users, requested=user_id
+        )
+        ok = await store.soft_delete(
+            tenant_id=tenant_id, user_id=target_user_id, memory_id=memory_id
+        )
         if not ok:
             raise HTTPException(status_code=404, detail="memory not found")
         await emit(
@@ -317,6 +361,7 @@ def build_memory_router() -> APIRouter:
             resource_type="memory_item",
             resource_id=str(memory_id),
             trace_id=current_trace_id_hex(),
+            details={"target_user_id": str(target_user_id)} if cross_user else None,
         )
 
     @router.post("/{memory_id}/correct")

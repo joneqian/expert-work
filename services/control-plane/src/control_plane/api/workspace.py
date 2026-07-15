@@ -24,11 +24,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from control_plane.api._artifact_mime import content_disposition_header, infer_content_type
-from control_plane.api._user_scope import get_user_repo, resolve_target_user_id
+from control_plane.api._user_scope import (
+    get_user_repo,
+    resolve_caller_user_id,
+    resolve_target_user_id,
+)
+from control_plane.audit import emit
+from expert_work.common.observability import current_trace_id_hex
 from expert_work.persistence.artifact import ArtifactStore
 from expert_work.persistence.rls import current_user_id_var
 from expert_work.persistence.tenant_user import TenantUserStore
 from expert_work.persistence.workspace import UserWorkspaceStore
+from expert_work.protocol import AuditAction
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator.tools import SandboxSupervisorError, SupervisorClient
 
 logger = logging.getLogger("expert_work.control_plane.workspace")
@@ -44,6 +52,10 @@ def _get_artifact_store(request: Request) -> ArtifactStore:
 
 def _get_supervisor_client(request: Request) -> SupervisorClient | None:
     return request.app.state.supervisor_client  # type: ignore[no-any-return]
+
+
+def _get_audit(request: Request) -> AuditLogger:
+    return request.app.state.audit_logger  # type: ignore[no-any-return]
 
 
 def _safe_workspace_relpath(path: str) -> str | None:
@@ -70,6 +82,7 @@ def build_workspace_router() -> APIRouter:
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         workspaces: Annotated[UserWorkspaceStore, Depends(_get_workspace_store)],
         artifacts: Annotated[ArtifactStore, Depends(_get_artifact_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
         # Tenant-admin governance target (the user-detail Workspace tab); a
         # non-admin asking for someone else is a 403. Omitted → the caller.
         user_id: Annotated[UUID | None, Query()] = None,
@@ -80,6 +93,7 @@ def build_workspace_router() -> APIRouter:
         workspace truthfully means "no VM has ever started for this user".
         """
         tenant_id: UUID = request.state.tenant_id
+        caller_user_id = await resolve_caller_user_id(request, users)
         target_user_id = await resolve_target_user_id(request, users, requested=user_id)
         if target_user_id is None:
             # Machine principal — owns no per-user workspace.
@@ -90,6 +104,19 @@ def build_workspace_router() -> APIRouter:
         current_user_id_var.set(target_user_id)
         workspace = await workspaces.get(tenant_id=tenant_id, user_id=target_user_id)
         arts = await artifacts.list_for_user(tenant_id=tenant_id, user_id=target_user_id)
+        if target_user_id != caller_user_id:
+            # Read auditing — an admin opened another user's workspace
+            # ("who looked at whom", Phase 2 governance).
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=getattr(request.state, "actor_id", "anonymous"),
+                action=AuditAction.USER_DATA_VIEW,
+                resource_type="user",
+                resource_id=str(target_user_id),
+                trace_id=current_trace_id_hex(),
+                details={"view": "workspace"},
+            )
         return JSONResponse(
             {
                 "success": True,
@@ -170,6 +197,7 @@ def build_workspace_router() -> APIRouter:
         request: Request,
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
         path: Annotated[str, Query()],
         user_id: Annotated[UUID | None, Query()] = None,
     ) -> JSONResponse:
@@ -177,9 +205,11 @@ def build_workspace_router() -> APIRouter:
 
         Same scope gate as browse/download; the supervisor refuses reserved
         prefixes (seeded machinery). 404 hides cross-user / no-supervisor; a
-        missing file is an idempotent no-op.
+        missing file is an idempotent no-op. Audited (a governance surface —
+        an admin can delete another user's file).
         """
         tenant_id: UUID = request.state.tenant_id
+        caller_user_id = await resolve_caller_user_id(request, users)
         target_user_id = await resolve_target_user_id(request, users, requested=user_id)
         safe_path = _safe_workspace_relpath(path)
         if safe_path is None:
@@ -193,6 +223,19 @@ def build_workspace_router() -> APIRouter:
         except SandboxSupervisorError as exc:
             logger.warning("workspace.delete_failed", exc_info=True)
             raise HTTPException(status_code=404, detail="file not found") from exc
+        details: dict[str, object] = {"path": safe_path}
+        if target_user_id != caller_user_id:
+            details["target_user_id"] = str(target_user_id)
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=getattr(request.state, "actor_id", "anonymous"),
+            action=AuditAction.WORKSPACE_FILE_DELETE,
+            resource_type="user_workspace",
+            resource_id=str(target_user_id),
+            trace_id=current_trace_id_hex(),
+            details=details,
+        )
         return JSONResponse({"success": True, "data": {"deleted": safe_path}})
 
     return router
