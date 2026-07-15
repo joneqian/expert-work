@@ -136,14 +136,8 @@ def caller_owns_thread(
     return caller_user_id == meta.user_id
 
 
-def thread_list_filter(*, caller_user_id: UUID | None, principal: Principal) -> UUID | None:
-    """The ``user_id`` filter for thread *list* endpoints.
-
-    A plain user sees only their own threads; tenant admins and machine
-    principals see every thread in the tenant (``None`` = no filter).
-    """
-    if caller_user_id is None:  # machine principal
-        return None
-    if is_admin(principal):
-        return None
+def thread_list_filter(*, caller_user_id: UUID | None) -> UUID | None:
+    """The ``user_id`` filter for thread *list* endpoints: every caller — plain
+    user or admin — sees only their own threads. ``None`` only for a machine
+    principal (no owning user); the debug console has no cross-user history."""
     return caller_user_id

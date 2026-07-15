@@ -370,14 +370,6 @@ export function SessionHistoryDrawer({
                       <span style={{ color: "var(--ew-text-tertiary)" }}>
                         {relativeTime(s.updated_at, t)}
                       </span>
-                      {s.user_id && (
-                        <span
-                          className="mono"
-                          style={{ color: "var(--ew-text-tertiary)" }}
-                        >
-                          {s.user_id.slice(0, 8)}
-                        </span>
-                      )}
                     </Space>
                   }
                 />

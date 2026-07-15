@@ -41,7 +41,6 @@ from control_plane.api._user_scope import (
     thread_list_filter,
 )
 from control_plane.audit import emit
-from control_plane.auth.rbac import is_admin
 from control_plane.quota.base import QuotaService
 from control_plane.runtime import AgentRuntime
 from control_plane.tenant_scope import (
@@ -90,13 +89,6 @@ class CreateSessionPayload(BaseModel):
     # ACTIVE version of the resolved agent.
     agent_name: str | None = Field(default=None, min_length=1)
     agent_version: str | None = Field(default=None, min_length=1)
-    # Playground impersonation (Stream Playground-Uplift D1) — run the session
-    # as a specific user_id instead of the caller. Lets an admin verify a target
-    # user's per-user workspace / long-term memory / episodic isolation. The
-    # value may be a real tenant user (picker) or an arbitrary UUID (sandbox
-    # namespace) — same path, the thread's ``user_id`` becomes it. Gated to
-    # admins + audited (a plain user may only set their own id).
-    run_as_user_id: UUID | None = Field(default=None)
 
 
 class TransitionPayload(BaseModel):
@@ -335,33 +327,11 @@ def build_sessions_router() -> APIRouter:
 
         # Stream J.14 — stamp the owning user. None for machine
         # principals (service / service_account) → an unowned thread.
-        caller_user_id = await resolve_caller_user_id(request, users)
-        # Playground-Uplift D1 — optional impersonation. An admin may run the
-        # session as another user_id (real user or arbitrary sandbox id); a
-        # non-admin may only target their own id. The thread's user_id then
-        # keys the workspace volume + memory/episodic for that user.
-        user_id = caller_user_id
-        impersonating = False
-        if payload.run_as_user_id is not None and payload.run_as_user_id != caller_user_id:
-            if not is_admin(request.state.principal):
-                await emit(
-                    audit,
-                    tenant_id=tenant_id,
-                    actor_id=actor_id,
-                    action=AuditAction.SESSION_WRITE,
-                    resource_type="session",
-                    resource_id=str(payload.run_as_user_id),
-                    result=AuditResult.DENIED,
-                    reason="impersonation_forbidden",
-                    trace_id=trace_id,
-                )
-                return _envelope_error(
-                    "FORBIDDEN",
-                    "only an admin may run a session as another user",
-                    403,
-                )
-            user_id = payload.run_as_user_id
-            impersonating = True
+        # Stream J.14 — stamp the owning user (the caller's own tenant_user.id).
+        # None for machine principals (service / service_account) → an unowned
+        # thread. The playground always runs as the logged-in user; there is no
+        # impersonation.
+        user_id = await resolve_caller_user_id(request, users)
         thread_id = uuid4()
         meta = await threads.create(
             thread_id=thread_id,
@@ -379,10 +349,7 @@ def build_sessions_router() -> APIRouter:
             resource_type="session",
             resource_id=str(thread_id),
             trace_id=trace_id,
-            details={
-                "agent": f"{agent_name}/{agent_version}",
-                **({"impersonated": True, "run_as_user_id": str(user_id)} if impersonating else {}),
-            },
+            details={"agent": f"{agent_name}/{agent_version}"},
         )
         return JSONResponse(
             status_code=201,
@@ -717,12 +684,10 @@ def build_sessions_router() -> APIRouter:
                     offset=offset,
                 )
             else:
-                # Stream J.14 — a plain user lists only their own threads;
-                # admins / machine principals list the whole tenant.
+                # Every caller — plain user or admin — lists only their own
+                # threads; the debug console has no cross-user history view.
                 caller_user_id = await resolve_caller_user_id(request, users)
-                user_filter = thread_list_filter(
-                    caller_user_id=caller_user_id, principal=request.state.principal
-                )
+                user_filter = thread_list_filter(caller_user_id=caller_user_id)
                 items = await threads.list_by_tenant(
                     scope.tenant_id,
                     status=status,

@@ -664,10 +664,6 @@ export interface TranslationKeys {
     remove_attachment: string;
     upload_failed: string;
     uploading: string;
-    run_as_label: string;
-    run_as_placeholder: string;
-    running_as: string;
-    user_self: string;
     transcript_label: string;
     turn_count: string;
     turn_running: string;
@@ -3092,10 +3088,6 @@ const en: TranslationKeys = {
     remove_attachment: "Remove attachment",
     upload_failed: "Image upload failed",
     uploading: "Uploading…",
-    run_as_label: "Run as user",
-    run_as_placeholder: "Pick a user or paste a user_id (blank = yourself)",
-    running_as: "Running as: {{user}}",
-    user_self: "yourself",
     transcript_label: "Conversation",
     turn_count: "{{n}} turns",
     turn_running: "Running…",
