@@ -325,8 +325,6 @@ def build_sessions_router() -> APIRouter:
                 422,
             )
 
-        # Stream J.14 — stamp the owning user. None for machine
-        # principals (service / service_account) → an unowned thread.
         # Stream J.14 — stamp the owning user (the caller's own tenant_user.id).
         # None for machine principals (service / service_account) → an unowned
         # thread. The playground always runs as the logged-in user; there is no
@@ -399,8 +397,8 @@ def build_sessions_router() -> APIRouter:
 
         Read-only: ``workspaces.get`` never provisions a row, so a ``null``
         workspace truthfully means "no VM has ever started for this user". Keyed
-        on the thread's ``user_id`` (the impersonated user when an admin ran as
-        another user), gated by the same thread-ownership check as GET.
+        on the thread's ``user_id`` (its owning user), gated by the same
+        thread-ownership check as GET.
         """
         tenant_id: UUID = request.state.tenant_id
         meta = await threads.get(thread_id, tenant_id=tenant_id)
@@ -437,9 +435,9 @@ def build_sessions_router() -> APIRouter:
         """Workspace browse — the files in the thread user's persistent volume.
 
         Read-only inventory for the playground inspector. Same ownership gate
-        as the workspace endpoint; keyed on the thread's ``user_id`` (the
-        impersonated user when an admin ran as another). A machine/unowned
-        thread, an absent supervisor, or an empty volume all return ``[]``.
+        as the workspace endpoint; keyed on the thread's ``user_id`` (its
+        owning user). A machine/unowned thread, an absent supervisor, or an
+        empty volume all return ``[]``.
         """
         tenant_id: UUID = request.state.tenant_id
         meta = await threads.get(thread_id, tenant_id=tenant_id)
@@ -559,7 +557,7 @@ def build_sessions_router() -> APIRouter:
     ) -> Response:
         """Download the thread user's artifact by logical name (latest version).
 
-        Thread-scoped (the impersonated user), unlike the caller-scoped
+        Thread-scoped (the thread's owning user), unlike the caller-scoped
         ``/v1/artifacts/download``. Resolves the latest version's workspace
         path + proxies the bytes via the supervisor. 404 hides cross-user /
         missing / no-supervisor.
@@ -610,7 +608,7 @@ def build_sessions_router() -> APIRouter:
     ) -> JSONResponse:
         """Soft-delete the thread user's artifact by name (playground cleanup).
 
-        Thread-scoped (the impersonated user), unlike caller-scoped
+        Thread-scoped (the thread's owning user), unlike caller-scoped
         ``DELETE /v1/artifacts/{name}``. Metadata only — the workspace bytes
         remain (deletable separately as a file). 404 hides cross-user /
         already-deleted / unknown.
