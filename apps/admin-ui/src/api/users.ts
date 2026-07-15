@@ -7,7 +7,7 @@
  * and token totals — the top of the user → conversation → run
  * drill-down. Standard ``{success,data}`` envelope.
  */
-import { getJson, withTenantScope, type TenantScope } from "./client";
+import { getJson, postJson, withTenantScope, type TenantScope } from "./client";
 import type { RunTokens } from "./runs";
 
 /** One row from the users rollup. */
@@ -117,4 +117,31 @@ export async function listUsers(
   const { tenantScope, limit, offset } = params;
   const query = withTenantScope({ limit, offset }, tenantScope);
   return getJson<TenantUserRoster>("/v1/users", { params: query });
+}
+
+/** The per-store rollup ``POST /v1/users/{id}:purge`` returns (Phase 3a).
+ *  ``deleted`` / ``anonymized`` map a store name → row count; ``failures``
+ *  maps a step name → error string (best-effort — a re-run retries them). */
+export interface PurgeSummary {
+  tenant_id: string;
+  user_id: string;
+  subject_id: string;
+  threads_purged: number;
+  runs_deleted: number;
+  threads_capped: boolean;
+  deleted: Record<string, number>;
+  anonymized: Record<string, number>;
+  workspace_marked_deleted: boolean;
+  deactivated: boolean;
+  failures: Record<string, string>;
+  ok: boolean;
+}
+
+/** POST /v1/users/{id}:purge — irreversibly cascade-purge an external end-user's
+ *  data + assets (admin-only, server-gated). Caller-home-tenant-scoped like the
+ *  rest of the /users feature. The backend rejects a console member (employee)
+ *  with 409 — those are purged from the members page. Best-effort + idempotent;
+ *  the returned summary carries per-store counts and any step that failed. */
+export async function purgeUser(userId: string): Promise<PurgeSummary> {
+  return postJson<PurgeSummary>(`/v1/users/${encodeURIComponent(userId)}:purge`, {});
 }

@@ -322,6 +322,20 @@ export interface TranslationKeys {
     delete_confirm: string;
     deleted: string;
     failed_to_load: string;
+    purge_action: string;
+    purge_employee_hint: string;
+    purge_title: string;
+    purge_warning: string;
+    purge_deletes: string;
+    purge_anonymizes: string;
+    purge_archive_note: string;
+    purge_type_to_confirm: string;
+    purge_confirm_btn: string;
+    purge_done: string;
+    purge_partial: string;
+    purge_employee_title: string;
+    purge_employee_body: string;
+    purge_failed_title: string;
   };
   conversations_page: {
     page_title: string;
@@ -2749,6 +2763,23 @@ const en: TranslationKeys = {
     delete_confirm: "Delete {{name}}?",
     deleted: "Deleted {{name}}",
     failed_to_load: "Failed to load",
+    purge_action: "Purge this user's data",
+    purge_employee_hint: "Employees are removed from the Members page",
+    purge_title: "Purge user data · irreversible",
+    purge_warning: "This permanently purges everything for {{who}}:",
+    purge_deletes:
+      "Conversations · memory · workspace · uploads · triggers · webhooks — all deleted.",
+    purge_anonymizes:
+      "Billing & analytics records are kept but anonymized (the user link is nulled).",
+    purge_archive_note: "The workspace is archived, then hard-deleted after 90 days.",
+    purge_type_to_confirm: "Type the subject_id to confirm:",
+    purge_confirm_btn: "Purge data",
+    purge_done: "User data purged",
+    purge_partial: "Some steps failed — you can retry (purge again).",
+    purge_employee_title: "This user is an employee",
+    purge_employee_body:
+      "Purge employees from the Members page (which also revokes their role and Keycloak account).",
+    purge_failed_title: "Purge failed",
   },
   conversations_page: {
     page_title: "Conversations",

@@ -17,8 +17,10 @@ import * as usersSdk from "../../api/users";
 import * as agentsSdk from "../../api/agents";
 import * as convoSdk from "../../api/conversations";
 import * as memorySdk from "../../api/memory";
+import { ApiError } from "../../api/client";
 import { UserProfile } from "../UserProfile";
 import type { MemoryItem } from "../../api/memory";
+import type { PurgeSummary } from "../../api/users";
 
 vi.mock("../../auth/AuthContext", () => ({
   useAuth: () => ({
@@ -79,12 +81,29 @@ function stubCommon() {
   });
 }
 
+const OK_SUMMARY: PurgeSummary = {
+  tenant_id: "t",
+  user_id: USER_ID,
+  subject_id: "ext-alice",
+  threads_purged: 1,
+  runs_deleted: 0,
+  threads_capped: false,
+  deleted: {},
+  anonymized: {},
+  workspace_marked_deleted: true,
+  deactivated: true,
+  failures: {},
+  ok: true,
+};
+
 function renderPage() {
   return render(
     <App>
       <MemoryRouter initialEntries={[`/users/${USER_ID}`]}>
         <Routes>
           <Route path="/users/:userId" element={<UserProfile />} />
+          {/* Purge navigates back here on success. */}
+          <Route path="/users" element={<div data-testid="users-roster-sentinel" />} />
         </Routes>
       </MemoryRouter>
     </App>,
@@ -158,5 +177,68 @@ describe("UserProfile", () => {
     await waitFor(() =>
       expect(memorySdk.deleteMemory).toHaveBeenCalledWith(LOW.id, USER_ID),
     );
+  });
+
+  it("purges an external user only after typing the subject_id to confirm", async () => {
+    stubCommon();
+    const purgeSpy = vi.spyOn(usersSdk, "purgeUser").mockResolvedValue(OK_SUMMARY);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Alice");
+
+    await user.click(screen.getByTestId("user-purge-btn"));
+    const ok = await screen.findByTestId("purge-confirm-ok");
+    expect(ok).toBeDisabled(); // armed only on an exact subject_id match
+
+    const input = screen.getByTestId("purge-confirm-input");
+    await user.type(input, "wrong");
+    expect(ok).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, "ext-alice");
+    expect(ok).toBeEnabled();
+
+    await user.click(ok);
+    await waitFor(() => expect(purgeSpy).toHaveBeenCalledWith(USER_ID));
+    // Success navigates back to the roster.
+    expect(await screen.findByTestId("users-roster-sentinel")).toBeInTheDocument();
+  });
+
+  it("keeps the modal open on a partial purge so retry stays actionable", async () => {
+    stubCommon();
+    vi.spyOn(usersSdk, "purgeUser").mockResolvedValue({
+      ...OK_SUMMARY,
+      ok: false,
+      failures: { workspace: "no supervisor client wired" },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Alice");
+
+    await user.click(screen.getByTestId("user-purge-btn"));
+    await user.type(await screen.findByTestId("purge-confirm-input"), "ext-alice");
+    await user.click(screen.getByTestId("purge-confirm-ok"));
+
+    await waitFor(() => expect(usersSdk.purgeUser).toHaveBeenCalledWith(USER_ID));
+    // Partial failure does not navigate away — the modal stays open to retry.
+    expect(screen.queryByTestId("users-roster-sentinel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("purge-confirm-input")).toBeInTheDocument();
+  });
+
+  it("blocks purging an employee and points to the members page (409)", async () => {
+    stubCommon();
+    vi.spyOn(usersSdk, "purgeUser").mockRejectedValue(
+      new ApiError("member", "CONFLICT", 409),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Alice");
+
+    await user.click(screen.getByTestId("user-purge-btn"));
+    await user.type(await screen.findByTestId("purge-confirm-input"), "ext-alice");
+    await user.click(screen.getByTestId("purge-confirm-ok"));
+
+    // A warning modal directs the admin to the members page; no navigation.
+    expect(await screen.findByText(/members page/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("users-roster-sentinel")).not.toBeInTheDocument();
   });
 });
