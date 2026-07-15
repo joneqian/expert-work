@@ -335,7 +335,10 @@ _ENDPOINTS: list[tuple[str, str, int, int]] = [
     ("service_accounts", "/v1/service_accounts", 1, 2),
     # role_bindings star sees 2 tenant rows + 1 platform-scope (system admin) = 3
     ("role_bindings", "/v1/role_bindings", 1, 3),
-    ("sessions", "/v1/sessions", 1, 2),
+    # sessions are per-user now (impersonation removed) — a tenant_admin resolves
+    # to a fresh tenant_user that doesn't own the seeded row → home_count=0, like
+    # memory/artifacts. Cross-tenant (system_admin *) still aggregates → 2.
+    ("sessions", "/v1/sessions", 0, 2),
     ("runs", "/v1/runs", 1, 2),  # Stream H.3 PR 1 — Mini-ADR H-6
     ("conversations", "/v1/conversations", 1, 2),  # conversation-centric IA
     ("memory", "/v1/memory", 0, 2),
