@@ -436,14 +436,21 @@ def _model(o: Any) -> str | None:
 
 
 def _tool_detail(o: Any) -> str | None:
-    direct = getattr(o, "tool_name", None) or getattr(o, "toolName", None)
-    if direct:
-        return str(direct)
     metadata = getattr(o, "metadata", None)
     if isinstance(metadata, dict):
+        # Langfuse stores a span's OTel attributes under metadata["attributes"];
+        # the tool_call span sets attributes={"tool": <name>} (builder.py), so
+        # the tool name lives at metadata["attributes"]["tool"].
+        attrs = metadata.get("attributes")
+        if isinstance(attrs, dict) and attrs.get("tool"):
+            return str(attrs["tool"])
+        # Defensive fallbacks for older / flattened shapes.
         value = metadata.get("tool_name") or metadata.get("toolName")
         if value:
             return str(value)
+    direct = getattr(o, "tool_name", None) or getattr(o, "toolName", None)
+    if direct:
+        return str(direct)
     return None
 
 
