@@ -461,6 +461,9 @@ async def test_trigger_delete_all_for_user_and_child_runs() -> None:
     assert await runs.delete_for_triggers(trigger_ids=deleted_ids, tenant_id=tenant) == 1
     # b's trigger + its run survive.
     assert len(await runs.list_by_trigger(trigger_id=tr_b.id, tenant_id=tenant)) == 1
-    assert await triggers.delete(trigger_id=tr_b.id, tenant_id=tenant) is True
+    # Call kept out of the assert — an assert with a side effect vanishes under
+    # `python -O` (CodeQL py/side-effect-in-assert).
+    b_trigger_deleted = await triggers.delete(trigger_id=tr_b.id, tenant_id=tenant)
+    assert b_trigger_deleted is True
     # Idempotent — nothing left for a.
     assert await triggers.delete_all_for_user(tenant_id=tenant, user_id=a) == []
