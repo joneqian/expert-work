@@ -133,8 +133,8 @@ async def test_list_by_tenant_filters_orders_paginates(sql_store: SqlStoreFixtur
         await store.resolve(tenant_id=owner, subject_type="user", subject_id="u2")
         await store.resolve(tenant_id=owner, subject_type="service_account", subject_id="svc")
         await store.resolve(tenant_id=other, subject_type="user", subject_id="foreign")
-        # Bump u1 to most-recently-active.
-        u1 = await store.resolve(tenant_id=owner, subject_type="user", subject_id="u1")
+        # Bump u1 to most-recently-active (same identity → same row, id unchanged).
+        await store.resolve(tenant_id=owner, subject_type="user", subject_id="u1")
 
         rows = await store.list_by_tenant(owner, subject_type="user")
         # subject_type filter excludes the service account + the other tenant.
