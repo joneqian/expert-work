@@ -31,6 +31,8 @@ from typing import Any
 
 from langfuse.api import NotFoundError
 
+from expert_work.common.observability import LLM_SPAN_PURPOSES
+
 __all__ = ["TraceSpan", "fetch_and_normalize", "fetch_span_raw", "normalize_trace"]
 
 _NAME_PREFIX = "expert_work."
@@ -58,6 +60,9 @@ class TraceSpan:
     output: dict[str, Any] | None
     level: str
     status_message: str | None
+    #: LLM-call intent for the console's visual marker: "" for non-LLM spans
+    #: and unwrapped generations, else "main"/"memory"/"planner"/…
+    purpose: str
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,7 @@ class _ParsedObs:
     output: dict[str, Any] | None
     level: str
     status_message: str | None
+    purpose: str
 
 
 def normalize_trace(trace: object) -> dict[str, object]:
@@ -119,7 +125,9 @@ def normalize_trace(trace: object) -> dict[str, object]:
         parsed_by_id[parsed.id] = parsed
         children_by_parent.setdefault(parsed.parent_id, []).append(parsed.id)
 
-    omitted, latency_override = _resolve_omissions(parsed_by_id, children_by_parent)
+    omitted, latency_override, label_override, purpose_override = _resolve_omissions(
+        parsed_by_id, children_by_parent
+    )
 
     def resolve_parent(raw_parent_id: str | None) -> str | None:
         current = raw_parent_id
@@ -138,7 +146,7 @@ def normalize_trace(trace: object) -> dict[str, object]:
             id=parsed.id,
             parent_id=resolve_parent(parsed.parent_id),
             kind=parsed.kind,
-            label=parsed.label,
+            label=label_override.get(parsed.id, parsed.label),
             detail=parsed.detail,
             start_ms=parsed.start_ms,
             latency_ms=latency_override.get(parsed.id, parsed.latency_ms),
@@ -150,6 +158,7 @@ def normalize_trace(trace: object) -> dict[str, object]:
             output=parsed.output,
             level=parsed.level,
             status_message=parsed.status_message,
+            purpose=purpose_override.get(parsed.id, parsed.purpose),
         )
         for parsed in parsed_by_id.values()
         if parsed.id not in omitted
@@ -295,33 +304,79 @@ def _parse_observation(o: Any, *, trace_start: Any) -> _ParsedObs:
         output=_render_io(getattr(o, "output", None)),
         level=_level(o),
         status_message=_clean_str(getattr(o, "status_message", None)),
+        purpose="",
     )
+
+
+#: Human labels for each purpose-wrapped LLM span, keyed by the full span name.
+#: The machine ``purpose`` is the single source of truth in common's
+#: :data:`LLM_SPAN_PURPOSES`; the UI label is this module's presentation
+#: concern. Keys are kept in parity with ``LLM_SPAN_PURPOSES`` by the facade
+#: tests, so a purpose added in common without a label here fails CI rather than
+#: silently rendering the raw span name. Every orchestrator LLM call is a bare
+#: ``llm_call`` GENERATION in Langfuse (the router never names them
+#: per-purpose), so the wrapper span name is the only surviving intent signal.
+_LLM_LABELS: dict[str, str] = {
+    "expert_work.orchestrator.llm_call": "LLM 调用",
+    "expert_work.memory.extract": "记忆抽取",
+    "expert_work.memory.verify": "记忆校验",
+    "expert_work.memory.reconcile": "记忆整合",
+    "expert_work.orchestrator.planner": "规划",
+    "expert_work.orchestrator.reflect": "反思",
+    "expert_work.orchestrator.compress": "上下文压缩",
+    "expert_work.orchestrator.judge": "输出评审",
+    "expert_work.orchestrator.judge_action": "行动评审",
+    "expert_work.orchestrator.vision": "视觉理解",
+    "expert_work.orchestrator.rerank": "文档重排",
+}
+
+
+def _llm_wrapper_purpose(name: str) -> tuple[str, str] | None:
+    """Return ``(label, purpose)`` if ``name`` is a known LLM wrapper span,
+    else ``None``. ``purpose`` comes from common's single-source
+    ``LLM_SPAN_PURPOSES``; ``label`` is this module's UI text (keys kept in
+    parity by the facade tests)."""
+    purpose = LLM_SPAN_PURPOSES.get(name)
+    if purpose is None:
+        return None
+    return _LLM_LABELS.get(name, name), purpose
 
 
 def _resolve_omissions(
     parsed_by_id: dict[str, _ParsedObs],
     children_by_parent: dict[str | None, list[str]],
-) -> tuple[dict[str, str | None], dict[str, int]]:
+) -> tuple[dict[str, str | None], dict[str, int], dict[str, str], dict[str, str]]:
     """Find nodes to drop from the output tree + their reparent target.
 
     Two independent omission rules (spec §2.3 步骤 3-4):
 
-    * A ``*.orchestrator.llm_call`` SPAN with exactly one GENERATION child
-      is an orchestrator wrapper — omit the SPAN, and let the GENERATION
-      inherit the SPAN's (more complete) latency.
+    * A known LLM wrapper SPAN (``LLM_SPAN_PURPOSES`` — the main
+      ``orchestrator.llm_call`` plus each auxiliary ``memory.extract`` /
+      ``orchestrator.planner`` / … purpose span) with exactly one GENERATION
+      child is a wrapper — omit the SPAN, let the GENERATION inherit the SPAN's
+      (more complete) latency, and stamp the wrapper's human label + purpose
+      onto the GENERATION so an auxiliary call is no longer an anonymous
+      "LLM 调用".
     * The ROOT ``*.http_request`` observation (the FastAPI entry span, i.e.
       ``parent_id is None``) is omitted; its children re-parent past it. A
       non-root span whose name merely contains ``.http_request`` is kept.
 
-    Returns ``(omitted, latency_override)`` where ``omitted`` maps an
-    omitted node's id to the raw parent id its children should redirect
-    through (chained by the caller until a surviving ancestor or ``None``).
+    Returns ``(omitted, latency_override, label_override, purpose_override)``
+    where ``omitted`` maps an omitted node's id to the raw parent id its
+    children should redirect through (chained by the caller until a surviving
+    ancestor or ``None``); the override maps carry the merged GENERATION's new
+    label / purpose keyed by child id.
     """
     omitted: dict[str, str | None] = {}
     latency_override: dict[str, int] = {}
+    label_override: dict[str, str] = {}
+    purpose_override: dict[str, str] = {}
 
     for parsed in parsed_by_id.values():
-        if parsed.obs_type != "SPAN" or not parsed.name.endswith(".orchestrator.llm_call"):
+        if parsed.obs_type != "SPAN":
+            continue
+        purpose = _llm_wrapper_purpose(parsed.name)
+        if purpose is None:
             continue
         child_ids = children_by_parent.get(parsed.id, [])
         if len(child_ids) != 1:
@@ -331,6 +386,8 @@ def _resolve_omissions(
             continue
         omitted[parsed.id] = parsed.parent_id
         latency_override[child.id] = parsed.latency_ms
+        label_override[child.id] = purpose[0]
+        purpose_override[child.id] = purpose[1]
 
     for parsed in parsed_by_id.values():
         # Root-only: elide the FastAPI entry span (parent_id is None), NOT any
@@ -338,7 +395,7 @@ def _resolve_omissions(
         if parsed.parent_id is None and ".http_request" in parsed.name:
             omitted[parsed.id] = parsed.parent_id
 
-    return omitted, latency_override
+    return omitted, latency_override, label_override, purpose_override
 
 
 def _classify(obs_type: str, name: str) -> tuple[str, str]:
@@ -498,4 +555,5 @@ def _span_as_dict(span: TraceSpan) -> dict[str, object]:
         "output": span.output,
         "level": span.level,
         "statusMessage": span.status_message,
+        "purpose": span.purpose,
     }

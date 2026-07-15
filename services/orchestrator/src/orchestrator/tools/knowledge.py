@@ -28,6 +28,7 @@ from uuid import UUID
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from expert_work.common.observability import ExpertWorkComponent, expert_work_span
 from expert_work.common.search.rrf import rrf_fuse_scored
 from expert_work.persistence import KnowledgeStore
 from expert_work.protocol import KnowledgeBase, KnowledgeChunk, RetrievalMethod
@@ -119,7 +120,8 @@ class LLMReranker:
             HumanMessage(content=f"Query: {query}\n\nDocuments:\n{listing}"),
         ]
         try:
-            response = await self.llm_caller(messages=prompt, tools=[])
+            with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "rerank"):
+                response = await self.llm_caller(messages=prompt, tools=[])
             order = _parse_rerank_order(_message_text(response), len(documents))
         except Exception:
             logger.warning("knowledge.rerank_failed — using fused order", exc_info=True)

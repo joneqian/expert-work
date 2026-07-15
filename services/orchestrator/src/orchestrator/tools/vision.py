@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from expert_work.common.observability import ExpertWorkComponent, expert_work_span
 from expert_work.protocol.multimodal import parse_image_ref
 from orchestrator.multimodal import ImageResolver, image_ref_block
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
@@ -110,7 +111,8 @@ class AskImageTool:
                 ]
             ),
         ]
-        response = await self.vl_caller(messages=messages, tools=[])
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "vision"):
+            response = await self.vl_caller(messages=messages, tools=[])
         answer = _stringify(response.content) or "[VL model returned no text]"
         # Surface VL provenance in the ToolMessage artifact (event stream /
         # audit): the image ref plus the VL call's token usage — otherwise the

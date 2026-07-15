@@ -40,6 +40,10 @@ export interface TraceSpan {
   output: RunTraceIo | null;
   level: "default" | "warning" | "error";
   statusMessage: string | null;
+  /** LLM-call intent for the visual marker: "" for non-LLM spans and the
+   *  unwrapped/main agent turn, else "memory"/"planner"/"reflect"/… — an
+   *  auxiliary LLM call the console flags apart from the main conversation. */
+  purpose: string;
 }
 
 export interface RunTrace {

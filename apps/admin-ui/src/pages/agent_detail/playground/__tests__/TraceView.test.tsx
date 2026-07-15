@@ -33,6 +33,7 @@ function makeSpan(
     level: "default",
     statusMessage: null,
     ...over,
+    purpose: over.purpose ?? "",
   };
 }
 
@@ -237,6 +238,22 @@ describe("TraceView", () => {
     expect(screen.getAllByTestId("trace-model-chip")).toHaveLength(1);
     expect(screen.getByTestId("trace-model-chip")).toHaveTextContent("glm-4.6");
     expect(screen.getAllByTestId("trace-cost-chip")).toHaveLength(1);
+  });
+
+  it("flags an auxiliary LLM span (purpose != main) with the aux marker, leaving the main conversation LLM unmarked", () => {
+    const root = makeSpan({ id: "r0", parentId: null, kind: "session", label: "会话运行" });
+    const mainLlm = makeSpan({ id: "r1", parentId: "r0", kind: "llm", label: "LLM 调用", purpose: "main" });
+    const auxLlm = makeSpan({ id: "r2", parentId: "r0", kind: "llm", label: "记忆抽取", purpose: "memory" });
+    const trace: RunTrace = {
+      status: "ok",
+      trace: { name: "t", latencyMs: 100, totalCostUsd: null, spanCount: 3 },
+      spans: [root, mainLlm, auxLlm],
+    };
+    render(<TraceView trace={trace} />);
+    expect(screen.getByText("记忆抽取")).toBeInTheDocument();
+    // Exactly one span is auxiliary → one marker in the timeline (detail panel
+    // is closed until a row is selected, so no second marker there).
+    expect(screen.getAllByTestId("trace-aux-marker")).toHaveLength(1);
   });
 
   it("selecting a row opens the detail panel with that span's input/output (collapsible, empty segments not rendered); the close button clears it", () => {

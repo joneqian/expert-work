@@ -60,6 +60,9 @@ from expert_work.common.observability.propagation import (
     inject_context as inject_context,
 )
 from expert_work.common.observability.tracing import (
+    LLM_SPAN_PURPOSES as LLM_SPAN_PURPOSES,
+)
+from expert_work.common.observability.tracing import (
     ExpertWorkComponent as ExpertWorkComponent,
 )
 from expert_work.common.observability.tracing import (
@@ -74,6 +77,7 @@ from expert_work.common.observability.tracing import (
 
 __all__ = [
     "BANNED_LABEL_NAMES",
+    "LLM_SPAN_PURPOSES",
     "TRACEPARENT_HEADER",
     "TRACESTATE_HEADER",
     "ExpertWorkComponent",

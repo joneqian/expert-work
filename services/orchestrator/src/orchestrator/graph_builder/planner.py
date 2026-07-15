@@ -33,6 +33,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from expert_work.common.observability import ExpertWorkComponent, expert_work_span
 from expert_work.protocol import Plan, PlanStep
 from orchestrator.graph_builder._config import cancellation_token
 from orchestrator.llm import LLMCaller
@@ -149,7 +150,8 @@ def make_planner_node(llm_caller: LLMCaller) -> PlannerNode:
             SystemMessage(content=_PLANNER_SYSTEM),
             HumanMessage(content=_PLANNER_USER.format(task=task)),
         ]
-        response = await token.run_cancellable(llm_caller(messages=plan_messages, tools=[]))
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "planner"):
+            response = await token.run_cancellable(llm_caller(messages=plan_messages, tools=[]))
         plan = parse_plan(_message_text(response), fallback_goal=task)
         logger.info("planner.plan_built steps=%d", len(plan.steps))
         return {"plan": plan}

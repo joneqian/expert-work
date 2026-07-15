@@ -32,6 +32,7 @@ from uuid import UUID, uuid4
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from expert_work.common.observability import ExpertWorkComponent, expert_work_span
 from expert_work.common.search import mmr_select
 from expert_work.common.threat_patterns import scan_for_threats
 from expert_work.common.uplift_metrics import (
@@ -101,6 +102,12 @@ def _last_human_text(messages: list[BaseMessage]) -> str:
 def _render_trajectory(messages: list[BaseMessage]) -> str:
     lines: list[str] = []
     for message in messages:
+        # Skip the agent's own system prompt — it is an instruction to the
+        # agent, not signal for memory extraction, and it otherwise dominated
+        # the extraction input (the confusing ``[system] ...`` line surfaced in
+        # the debug console).
+        if isinstance(message, SystemMessage):
+            continue
         text = _message_text(message).strip()
         if len(text) > _TRAJECTORY_CHAR_CAP:
             text = text[:_TRAJECTORY_CHAR_CAP] + "...[truncated]"
@@ -379,7 +386,8 @@ async def _verify_memories(
         HumanMessage(content=f"CURRENT REQUEST:\n{query}\n\nCANDIDATE MEMORIES:\n{numbered}"),
     ]
     try:
-        response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
+        with expert_work_span(ExpertWorkComponent.MEMORY, "verify"):
+            response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
         kept = parse_verify_kept(_message_text(response), len(candidates))
     except RunCancelledError:
         raise
@@ -625,15 +633,16 @@ async def _reconcile_and_apply(
     }
     ops: dict[int, tuple[str, str | None]] = {}
     try:
-        reply = await token.run_cancellable(
-            llm_caller(
-                messages=[
-                    SystemMessage(content=_RECONCILE_SYSTEM),
-                    HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-                ],
-                tools=[],
+        with expert_work_span(ExpertWorkComponent.MEMORY, "reconcile"):
+            reply = await token.run_cancellable(
+                llm_caller(
+                    messages=[
+                        SystemMessage(content=_RECONCILE_SYSTEM),
+                        HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+                    ],
+                    tools=[],
+                )
             )
-        )
         ops = parse_reconcile_ops(_message_text(reply))
     except RunCancelledError:
         raise
@@ -751,7 +760,8 @@ async def flush_messages_to_memory(
     ]
     extracted: list[ExtractedMemory] = []
     try:
-        response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
+        with expert_work_span(ExpertWorkComponent.MEMORY, "extract"):
+            response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
         extracted = parse_extracted_memories(_message_text(response))
         # Stream Memory-Enhance (M-2) — write-filter: drop low-value memories
         # before embedding (saves embed cost on dropped items). Applied here,

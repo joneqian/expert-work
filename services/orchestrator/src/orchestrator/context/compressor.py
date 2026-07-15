@@ -70,7 +70,11 @@ from dataclasses import dataclass, field
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from expert_work.common.observability import expert_work_counter
+from expert_work.common.observability import (
+    ExpertWorkComponent,
+    expert_work_counter,
+    expert_work_span,
+)
 from expert_work.runtime.cancellation import RunCancelledError
 from expert_work.runtime.tokens import TokenEstimator, estimate_messages, flatten_message
 from orchestrator.context.skill_reference import skill_view_reference
@@ -738,7 +742,8 @@ class ContextCompressor:
             SystemMessage(content=_SUMMARISER_SYSTEM_PROMPT),
             HumanMessage(content=transcript),
         ]
-        response = await self.llm_caller(messages=prompt, tools=[])
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "compress"):
+            response = await self.llm_caller(messages=prompt, tools=[])
         return _message_to_text(response).strip() or "(no summary produced)"
 
     async def _summarise_update(self, prior: str, transcript: str) -> str:
@@ -747,5 +752,6 @@ class ContextCompressor:
             SystemMessage(content=_SUMMARY_UPDATER_SYSTEM_PROMPT),
             HumanMessage(content=f"PREVIOUS SUMMARY:\n{prior}\n\nNEW EVENTS:\n{transcript}"),
         ]
-        response = await self.llm_caller(messages=prompt, tools=[])
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "compress"):
+            response = await self.llm_caller(messages=prompt, tools=[])
         return _message_to_text(response).strip() or "(no summary produced)"
