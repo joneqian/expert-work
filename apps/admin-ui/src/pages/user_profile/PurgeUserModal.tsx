@@ -56,11 +56,14 @@ export function PurgeUserModal({
     try {
       const summary = await purgeUser(userId);
       // Best-effort: the endpoint returns 200 even when some steps failed.
-      if (summary.ok) {
-        message.success(t("user_profile.purge_done"));
-      } else {
+      if (!summary.ok) {
+        // Partial purge — stay on the page so the "retry" hint is actionable
+        // (re-purge is idempotent). Keep the input armed for a one-click retry.
         message.warning(t("user_profile.purge_partial"));
+        setBusy(false);
+        return;
       }
+      message.success(t("user_profile.purge_done"));
       setConfirmText("");
       onPurged();
       // Intentionally leave `busy` set: the parent unmounts this modal on

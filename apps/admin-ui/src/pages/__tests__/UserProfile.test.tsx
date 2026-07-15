@@ -203,6 +203,27 @@ describe("UserProfile", () => {
     expect(await screen.findByTestId("users-roster-sentinel")).toBeInTheDocument();
   });
 
+  it("keeps the modal open on a partial purge so retry stays actionable", async () => {
+    stubCommon();
+    vi.spyOn(usersSdk, "purgeUser").mockResolvedValue({
+      ...OK_SUMMARY,
+      ok: false,
+      failures: { workspace: "no supervisor client wired" },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Alice");
+
+    await user.click(screen.getByTestId("user-purge-btn"));
+    await user.type(await screen.findByTestId("purge-confirm-input"), "ext-alice");
+    await user.click(screen.getByTestId("purge-confirm-ok"));
+
+    await waitFor(() => expect(usersSdk.purgeUser).toHaveBeenCalledWith(USER_ID));
+    // Partial failure does not navigate away — the modal stays open to retry.
+    expect(screen.queryByTestId("users-roster-sentinel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("purge-confirm-input")).toBeInTheDocument();
+  });
+
   it("blocks purging an employee and points to the members page (409)", async () => {
     stubCommon();
     vi.spyOn(usersSdk, "purgeUser").mockRejectedValue(
