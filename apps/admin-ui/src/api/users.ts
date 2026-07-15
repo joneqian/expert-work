@@ -54,6 +54,9 @@ export async function listAgentUsers(
 /** One ``tenant_user`` registry row — the user-detail header. */
 export interface TenantUser {
   user_id: string;
+  /** The passed-in ``user_id`` / OIDC ``sub`` — the human-recognizable
+   *  identifier (distinct from the surrogate ``user_id`` UUID). */
+  subject_id: string;
   display_name: string | null;
   subject_type: string;
   created_at: string | null;
@@ -67,4 +70,51 @@ export async function getTenantUser(
 ): Promise<TenantUser> {
   const query = withTenantScope({}, tenantScope);
   return getJson<TenantUser>(`/v1/users/${encodeURIComponent(userId)}`, { params: query });
+}
+
+/** One row from ``GET /v1/users`` — the tenant-wide user roster
+ *  (``tenant_user`` registry × conversation/run rollup). The
+ *  human-recognizable identifier is ``subject_id`` (the passed-in
+ *  ``user_id`` / OIDC ``sub``); ``user_id`` is the internal surrogate. */
+export interface TenantUserRosterItem {
+  user_id: string;
+  subject_id: string;
+  subject_type: string;
+  display_name: string | null;
+  /** ``true`` when the user maps to a tenant member (a logged-in employee)
+   *  rather than an external caller. */
+  is_member: boolean;
+  member_email: string | null;
+  member_role: string | null;
+  conversation_count: number;
+  run_count: number;
+  error_count: number;
+  pending_count: number;
+  last_active_at: string | null;
+  last_run_at: string | null;
+}
+
+export interface TenantUserRoster {
+  items: TenantUserRosterItem[];
+  total: number;
+  cross_tenant: boolean;
+}
+
+export interface ListUsersParams {
+  tenantScope?: TenantScope;
+  limit?: number;
+  offset?: number;
+}
+
+/** GET /v1/users — the tenant-wide user roster (admin-only, server-gated;
+ *  ``tenant_id=*`` yields the system_admin cross-tenant aggregate). Sorted
+ *  by ``last_active_at`` desc server-side. May return a ``X-Limit-Capped``
+ *  header the caller can't read through the unwrapped envelope; the list
+ *  page surfaces truncation from ``total`` vs ``items.length`` instead. */
+export async function listUsers(
+  params: ListUsersParams = {},
+): Promise<TenantUserRoster> {
+  const { tenantScope, limit, offset } = params;
+  const query = withTenantScope({ limit, offset }, tenantScope);
+  return getJson<TenantUserRoster>("/v1/users", { params: query });
 }

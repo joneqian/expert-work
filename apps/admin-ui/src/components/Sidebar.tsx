@@ -50,6 +50,7 @@ import {
 const ICONS: Record<string, React.ReactNode> = {
   agents: <Bot size={16} strokeWidth={1.5} />,
   conversations: <MessagesSquare size={16} strokeWidth={1.5} />,
+  users: <Users size={16} strokeWidth={1.5} />,
   approvals: <ListChecks size={16} strokeWidth={1.5} />,
   curation: <CheckSquare size={16} strokeWidth={1.5} />,
   eval: <FlaskConical size={16} strokeWidth={1.5} />,
@@ -100,8 +101,13 @@ export function Sidebar() {
   const { scope } = useTenantScope();
 
   const isSystemAdmin = identity?.isSystemAdmin ?? false;
+  // Tenant admin (or system_admin) gate for ``adminOnly`` nav entries — nav
+  // noise reduction; the page + backend remain the real gate.
+  const isAdmin = isSystemAdmin || (identity?.roles?.includes("admin") ?? false);
+  const entriesFor = (g: NavGroup): readonly NavEntry[] =>
+    GROUP_ITEMS[g].filter((e) => !e.adminOnly || isAdmin);
   const groups = visibleGroups(scope, isSystemAdmin);
-  const shownEntries = groups.flatMap((g) => GROUP_ITEMS[g]);
+  const shownEntries = groups.flatMap((g) => entriesFor(g));
 
   const selectedKey = (() => {
     const path = location.pathname;
@@ -117,7 +123,7 @@ export function Sidebar() {
     );
 
   const menuItems = groups.flatMap((g, gi) => {
-    const groupItems = GROUP_ITEMS[g].map((entry) => ({
+    const groupItems = entriesFor(g).map((entry) => ({
       key: entry.key,
       label: labelFor(entry),
       icon: ICONS[entry.key],

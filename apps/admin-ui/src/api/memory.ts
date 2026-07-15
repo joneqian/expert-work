@@ -65,19 +65,27 @@ export interface UpdateMemoryBody {
   kind?: MemoryKind;
 }
 
+/** ``userId`` is the tenant-admin governance target (M2 user detail —
+ *  editing another user's memory via ``?user_id=``); omit for the
+ *  caller's own memory. */
 export async function updateMemory(
   memoryId: string,
   body: UpdateMemoryBody,
+  userId?: string,
 ): Promise<MemoryItem> {
   return patchJson<MemoryItem>(
     `/v1/memory/${encodeURIComponent(memoryId)}`,
     body,
+    userId ? { params: { user_id: userId } } : undefined,
   );
 }
 
-/** DELETE returns 204 No Content — no body. */
-export async function deleteMemory(memoryId: string): Promise<void> {
-  await apiClient.delete(`/v1/memory/${encodeURIComponent(memoryId)}`);
+/** DELETE returns 204 No Content — no body. ``userId`` is the tenant-admin
+ *  governance target (forgetting another user's memory). */
+export async function deleteMemory(memoryId: string, userId?: string): Promise<void> {
+  await apiClient.delete(`/v1/memory/${encodeURIComponent(memoryId)}`, {
+    params: { user_id: userId },
+  });
 }
 
 /** Stream Memory-Enhance (M-4) — an end-user's authoritative self-correction:

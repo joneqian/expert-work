@@ -31,6 +31,10 @@ export interface NavEntry {
   group: NavGroup;
   /** Wrap the label in the pending-approval badge (Runs/Approvals). */
   badge?: boolean;
+  /** Hide from the sidebar for non-admin tenant members (tenant ``admin``
+   *  role or system_admin). Nav-level noise reduction only — the page and
+   *  the backend remain the real gate (defense in depth). */
+  adminOnly?: boolean;
 }
 
 /** A. Workspace — the tenant's agent operations. */
@@ -46,6 +50,13 @@ export const WORKSPACE_ITEMS: readonly NavEntry[] = [
     labelKey: "nav.conversations",
     path: "/conversations",
     group: "workspace",
+  },
+  {
+    key: "users",
+    labelKey: "nav.users",
+    path: "/users",
+    group: "workspace",
+    adminOnly: true,
   },
   {
     key: "approvals",
