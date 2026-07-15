@@ -11,9 +11,9 @@
  * ``user_id``), not the surrogate.
  */
 import { useEffect, useState } from "react";
-import { Alert, Empty, Space, Tabs, Tag, Typography } from "antd";
-import { UserRound } from "lucide-react";
-import { useLocation, useParams } from "react-router-dom";
+import { Alert, Button, Empty, Space, Tabs, Tag, Tooltip, Typography } from "antd";
+import { Trash2, UserRound } from "lucide-react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getTenantUser } from "../api/users";
@@ -21,6 +21,7 @@ import { useAuth } from "../auth/AuthContext";
 import { PageHeader } from "../components/PageHeader";
 import { ConversationsPane } from "./user_profile/ConversationsPane";
 import { MemoryPane } from "./user_profile/MemoryPane";
+import { PurgeUserModal } from "./user_profile/PurgeUserModal";
 import { UsagePane } from "./user_profile/UsagePane";
 import { WorkspacePane } from "./user_profile/WorkspacePane";
 
@@ -37,7 +38,9 @@ export function UserProfile() {
   const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const { identity } = useAuth();
+  const [purgeOpen, setPurgeOpen] = useState(false);
 
   const isAdmin =
     (identity?.isSystemAdmin ?? false) || (identity?.roles.includes("admin") ?? false);
@@ -99,6 +102,28 @@ export function UserProfile() {
         icon={<UserRound size={18} strokeWidth={1.5} />}
         title={displayName ?? subjectId ?? `${userId.slice(0, 12)}…`}
         backTo={{ label: t("user_profile.back_label"), to: "/users" }}
+        actions={
+          subjectId ? (
+            isMember === true ? (
+              // Employees are purged from the members page (which also revokes
+              // their role + Keycloak account); the /users purge endpoint 409s.
+              <Tooltip title={t("user_profile.purge_employee_hint")}>
+                <Button danger disabled icon={<Trash2 size={15} strokeWidth={1.75} />}>
+                  {t("user_profile.purge_action")}
+                </Button>
+              </Tooltip>
+            ) : (
+              <Button
+                danger
+                icon={<Trash2 size={15} strokeWidth={1.75} />}
+                onClick={() => setPurgeOpen(true)}
+                data-testid="user-purge-btn"
+              >
+                {t("user_profile.purge_action")}
+              </Button>
+            )
+          ) : undefined
+        }
         subtitle={
           <Space size={8} wrap>
             {isMember !== undefined && (
@@ -163,6 +188,19 @@ export function UserProfile() {
           },
         ]}
       />
+      {subjectId && (
+        <PurgeUserModal
+          open={purgeOpen}
+          onClose={() => setPurgeOpen(false)}
+          userId={userId}
+          subjectId={subjectId}
+          displayName={displayName}
+          onPurged={() => {
+            setPurgeOpen(false);
+            navigate("/users");
+          }}
+        />
+      )}
     </div>
   );
 }
