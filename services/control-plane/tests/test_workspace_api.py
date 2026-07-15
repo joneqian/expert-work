@@ -18,6 +18,7 @@ from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from expert_work.persistence import InMemoryArtifactStore, InMemoryTenantUserStore
 from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditAction, AuditQuery
 from orchestrator.tools import RecordingSupervisorClient, WorkspaceFileEntry
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -331,3 +332,60 @@ async def test_delete_traversal_path_is_400(
     client, _, _ = setup
     resp = await client.delete("/v1/workspace/file", params={"path": "/abs/path"})
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — governance auditing (Phase 1 delete had none)
+# ---------------------------------------------------------------------------
+
+
+async def _app_with_audit() -> tuple[AsyncClient, InMemoryAuditLogStore, UUID]:
+    """Fresh app whose audit store is accessible (the ``setup`` fixture hides it)."""
+    users, artifacts, user_id = await _seed()
+    audit_store = InMemoryAuditLogStore()
+    app = create_app(
+        settings=_settings(),
+        tenant_user_repo=users,
+        artifact_repo=artifacts,
+        audit_logger=build_default_audit_logger(audit_store),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    app.state.supervisor_client = RecordingSupervisorClient(workspace_file=_CONTENT)
+    transport = ASGITransport(app=app)
+    client = AsyncClient(transport=transport, base_url="http://cp.test", headers=_headers())
+    return client, audit_store, user_id
+
+
+@pytest.mark.asyncio
+async def test_delete_file_emits_audit() -> None:
+    client, audit_store, _ = await _app_with_audit()
+    async with client:
+        resp = await client.delete("/v1/workspace/file", params={"path": "out.txt"})
+        assert resp.status_code == 200, resp.text
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    dels = [r for r in page.entries if r.action is AuditAction.WORKSPACE_FILE_DELETE]
+    assert dels and dels[-1].details.get("path") == "out.txt"
+
+
+@pytest.mark.asyncio
+async def test_admin_view_another_users_workspace_emits_view_audit() -> None:
+    client, audit_store, user_id = await _app_with_audit()
+    async with client:
+        # user-b (admin) opens user-a's workspace via the governance target.
+        resp = await client.get(f"/v1/workspace?user_id={user_id}", headers=_headers("user-b"))
+        assert resp.status_code == 200, resp.text
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    views = [r for r in page.entries if r.action is AuditAction.USER_DATA_VIEW]
+    assert views and views[-1].resource_id == str(user_id)
+    assert views[-1].details.get("view") == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_self_workspace_view_does_not_emit_view_audit() -> None:
+    client, audit_store, _ = await _app_with_audit()
+    async with client:
+        # The owner reading her own workspace leaves no cross-user trail.
+        resp = await client.get("/v1/workspace")
+        assert resp.status_code == 200
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    assert not any(r.action is AuditAction.USER_DATA_VIEW for r in page.entries)

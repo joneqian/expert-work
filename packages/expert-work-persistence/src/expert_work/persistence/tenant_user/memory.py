@@ -66,3 +66,26 @@ class InMemoryTenantUserStore(TenantUserStore):
             for uid, row in self._rows.items()
             if uid in wanted and row.tenant_id == tenant_id
         }
+
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        subject_type: SubjectType | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[TenantUser]:
+        rows = [
+            row
+            for row in self._rows.values()
+            if row.tenant_id == tenant_id
+            and (subject_type is None or row.subject_type == subject_type)
+        ]
+        rows.sort(
+            key=lambda r: (
+                r.last_active_at or datetime.min.replace(tzinfo=UTC),
+                r.created_at or datetime.min.replace(tzinfo=UTC),
+            ),
+            reverse=True,
+        )
+        return rows[offset : offset + limit]

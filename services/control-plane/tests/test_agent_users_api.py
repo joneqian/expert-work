@@ -267,3 +267,96 @@ async def test_get_user_non_admin_for_someone_else_is_403(
     )
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_get_user_exposes_subject_id(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    """The passed-in ``user_id`` (subject_id) is what the calling app knows."""
+    client, alice_id, _ = client_and_users
+    resp = await client.get(f"/v1/users/{alice_id}")
+    assert resp.json()["data"]["subject_id"] == "alice"
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/users — tenant-wide user-dimension roster (Phase 2, admin-only)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_users_lists_registry_with_tenant_wide_stats(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    client, alice_id, _ = client_and_users
+    resp = await client.get("/v1/users")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    # Registry-keyed: only registered users appear. ``alice`` is registered;
+    # ``bob`` is a bare thread-owner uuid with no tenant_user row, so he is
+    # absent (in production every thread-owner has a registry row).
+    assert data["total"] == 1
+    alice = data["items"][0]
+    assert alice["user_id"] == str(alice_id)
+    assert alice["subject_id"] == "alice"
+    assert alice["subject_type"] == "user"
+    assert alice["is_member"] is False  # no linked tenant_member
+    assert alice["member_email"] is None
+    # Tenant-wide fold — NO agent filter: alpha (t_a1, t_a2) + beta (t_beta)
+    # = 3 conversations, 4 runs (2+1+1), 1 error.
+    assert alice["conversation_count"] == 3
+    assert alice["run_count"] == 4
+    assert alice["error_count"] == 1
+    assert alice["last_active_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_users_tags_linked_member(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    """A member whose subject_id back-fills to the tenant_user.id → is_member."""
+    client, alice_id, _ = client_and_users
+    member_repo = client._transport.app.state.tenant_member_repo  # type: ignore[attr-defined,union-attr]
+    m = await member_repo.create(
+        tenant_id=_TENANT, email="alice@corp.com", role="operator", invited_by="admin"
+    )
+    await member_repo.transition(
+        member_id=m.id, tenant_id=_TENANT, to="active", now=_NOW, subject_id=alice_id
+    )
+    resp = await client.get("/v1/users")
+    alice = next(i for i in resp.json()["data"]["items"] if i["user_id"] == str(alice_id))
+    assert alice["is_member"] is True
+    assert alice["member_email"] == "alice@corp.com"
+    assert alice["member_role"] == "operator"
+
+
+@pytest.mark.asyncio
+async def test_users_excludes_service_accounts(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    client, alice_id, _ = client_and_users
+    users = client._transport.app.state.tenant_user_repo  # type: ignore[attr-defined,union-attr]
+    await users.resolve(tenant_id=_TENANT, subject_type="service_account", subject_id="svc-1")
+    data = (await client.get("/v1/users")).json()["data"]
+    # The service account owns a registry row but is not a "person using the
+    # agent" — subject_type="user" filter keeps the roster to humans.
+    assert {i["user_id"] for i in data["items"]} == {str(alice_id)}
+
+
+@pytest.mark.asyncio
+async def test_users_is_admin_only(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    client, _, _ = client_and_users
+    viewer_jwt = make_test_jwt(tenant_id=_TENANT, subject="viewer-1", roles=("viewer",))
+    resp = await client.get("/v1/users", headers={"Authorization": f"Bearer {viewer_jwt}"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_users_cross_tenant_scope_is_rejected(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    client, _, _ = client_and_users
+    resp = await client.get("/v1/users", params={"tenant_id": "*"})
+    assert resp.status_code == 422

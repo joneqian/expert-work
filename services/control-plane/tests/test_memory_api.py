@@ -532,3 +532,79 @@ async def test_delete_other_users_memory_returns_404(
     )
     resp = await client.delete(f"/v1/memory/{bob_mem_id}")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — admin cross-user governance (?user_id=) + view auditing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_admin_edits_another_users_memory_and_audits_target(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    """The user-detail Memory tab: a different admin edits alice's memory."""
+    client, store, user_id, mem_id, audit_store = setup
+    resp = await client.patch(
+        f"/v1/memory/{mem_id}?user_id={user_id}",
+        json={"content": "Prefers tea now"},
+        headers=_headers("admin-b"),
+    )
+    assert resp.status_code == 200, resp.text
+    items = await store.list_for_user(tenant_id=_TENANT, user_id=user_id)
+    assert any(i.content == "Prefers tea now" for i in items)
+    # The governance edit records the target so it's attributable.
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    updates = [r for r in page.entries if r.action is AuditAction.MEMORY_UPDATE]
+    assert updates and updates[-1].details.get("target_user_id") == str(user_id)
+
+
+@pytest.mark.asyncio
+async def test_admin_forgets_another_users_memory(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    client, store, user_id, mem_id, _ = setup
+    resp = await client.delete(
+        f"/v1/memory/{mem_id}?user_id={user_id}", headers=_headers("admin-b")
+    )
+    assert resp.status_code == 204
+    items = await store.list_for_user(tenant_id=_TENANT, user_id=user_id)
+    assert all(i.id != mem_id for i in items)
+
+
+@pytest.mark.asyncio
+async def test_non_admin_edit_another_user_is_403(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    client, _, user_id, mem_id, _ = setup
+    resp = await client.patch(
+        f"/v1/memory/{mem_id}?user_id={user_id}",
+        json={"content": "x"},
+        headers=_headers("operator-b", roles=("operator",)),
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_admin_list_another_user_emits_view_audit(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    client, _, user_id, _, audit_store = setup
+    resp = await client.get(f"/v1/memory?user_id={user_id}", headers=_headers("admin-b"))
+    assert resp.status_code == 200
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    views = [r for r in page.entries if r.action is AuditAction.USER_DATA_VIEW]
+    assert views and views[-1].resource_id == str(user_id)
+    assert views[-1].details.get("view") == "memory"
+
+
+@pytest.mark.asyncio
+async def test_self_list_does_not_emit_view_audit(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    """The owner reading her own memory leaves no cross-user view trail."""
+    client, _, _, _, audit_store = setup
+    await client.get("/v1/memory")  # default client == alice (the owner)
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    assert not any(r.action is AuditAction.USER_DATA_VIEW for r in page.entries)

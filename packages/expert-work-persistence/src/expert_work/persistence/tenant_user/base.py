@@ -57,3 +57,22 @@ class TenantUserStore(abc.ABC):
         belong to a different tenant are simply absent (same non-disclosure
         semantics as :meth:`get`). An empty ``user_ids`` returns ``{}``.
         """
+
+    @abc.abstractmethod
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        subject_type: SubjectType | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[TenantUser]:
+        """List a tenant's registry rows, most-recently-active first.
+
+        The user-dimension observability view (Phase 2) enumerates every
+        principal that has acted in the tenant. ``subject_type`` narrows to
+        one kind — the view passes ``"user"`` to list the people who used an
+        agent (both API-supplied end-users and logged-in employees) and
+        exclude service accounts. Ordered by ``last_active_at`` desc, then
+        ``created_at`` desc for a stable tiebreak.
+        """

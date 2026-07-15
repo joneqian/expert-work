@@ -95,3 +95,47 @@ async def test_get_many_batches_and_filters_by_tenant() -> None:
     assert got[a.id].subject_id == "a"
 
     assert await store.get_many([], tenant_id=owner) == {}
+
+
+@pytest.mark.asyncio
+async def test_list_by_tenant_filters_type_and_tenant() -> None:
+    store = InMemoryTenantUserStore()
+    owner, other = uuid4(), uuid4()
+    u1 = await store.resolve(tenant_id=owner, subject_type="user", subject_id="u1")
+    u2 = await store.resolve(tenant_id=owner, subject_type="user", subject_id="u2")
+    await store.resolve(tenant_id=owner, subject_type="service_account", subject_id="svc")
+    await store.resolve(tenant_id=other, subject_type="user", subject_id="foreign")
+
+    # subject_type="user" excludes the service account; the other tenant's
+    # user is never returned.
+    rows = await store.list_by_tenant(owner, subject_type="user")
+    assert {r.id for r in rows} == {u1.id, u2.id}
+
+    # No subject_type filter → both principal kinds in this tenant (3 rows).
+    assert len(await store.list_by_tenant(owner)) == 3
+
+
+@pytest.mark.asyncio
+async def test_list_by_tenant_orders_by_last_active_desc() -> None:
+    store = InMemoryTenantUserStore()
+    tenant = uuid4()
+    first = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="first")
+    await store.resolve(tenant_id=tenant, subject_type="user", subject_id="second")
+    # Re-resolving ``first`` bumps its last_active_at to newest.
+    await store.resolve(tenant_id=tenant, subject_type="user", subject_id="first")
+
+    rows = await store.list_by_tenant(tenant, subject_type="user")
+    assert rows[0].id == first.id  # most-recently-active first
+
+
+@pytest.mark.asyncio
+async def test_list_by_tenant_paginates() -> None:
+    store = InMemoryTenantUserStore()
+    tenant = uuid4()
+    for i in range(5):
+        await store.resolve(tenant_id=tenant, subject_type="user", subject_id=f"u{i}")
+
+    page = await store.list_by_tenant(tenant, subject_type="user", limit=2, offset=2)
+    assert len(page) == 2
+    full = await store.list_by_tenant(tenant, subject_type="user")
+    assert [r.id for r in page] == [r.id for r in full[2:4]]
