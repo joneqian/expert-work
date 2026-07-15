@@ -14,7 +14,6 @@ import i18n from "../../i18n";
 
 import * as approvalsSdk from "../../api/approvals";
 import { ApiError, setStoredToken } from "../../api/client";
-import * as membersSdk from "../../api/members";
 import * as rateCardSdk from "../../api/rate_card";
 import * as runsSdk from "../../api/runs";
 import * as sessionsSdk from "../../api/sessions";
@@ -59,7 +58,6 @@ const createSessionMock = vi.spyOn(sessionsSdk, "createSession");
 const streamRunMock = vi.spyOn(sessionsSdk, "streamRun");
 const uploadImageMock = vi.spyOn(uploadsSdk, "uploadImage");
 const uploadDocumentMock = vi.spyOn(uploadsSdk, "uploadDocument");
-const listMembersMock = vi.spyOn(membersSdk, "listMembers");
 const getWorkspaceMock = vi.spyOn(sessionsSdk, "getSessionWorkspace");
 const getWorkspaceFilesMock = vi.spyOn(sessionsSdk, "getSessionWorkspaceFiles");
 const downloadFileMock = vi.spyOn(sessionsSdk, "downloadSessionWorkspaceFile");
@@ -107,8 +105,6 @@ beforeEach(() => {
   streamRunMock.mockReset();
   uploadImageMock.mockReset();
   uploadDocumentMock.mockReset();
-  listMembersMock.mockReset();
-  listMembersMock.mockResolvedValue({ items: [], total: 0 });
   getWorkspaceMock.mockReset();
   getWorkspaceMock.mockResolvedValue({ workspace: null, artifacts: [] });
   getWorkspaceFilesMock.mockReset();
@@ -468,38 +464,6 @@ describe("PlaygroundTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("auto-fills run-as user on resume without spawning a fresh thread", async () => {
-    const user = userEvent.setup();
-    createSessionMock.mockResolvedValue(sampleThread);
-    getMessagesMock.mockResolvedValue([]);
-    const pastThread: ThreadMeta = {
-      ...sampleThread,
-      thread_id: "44444444-4444-4444-4444-444444444444",
-      user_id: "u1",
-    };
-    listSessionsMock.mockResolvedValue([pastThread]);
-    renderPg();
-    await screen.findByTestId("playground-input");
-    // Lazy creation — mount does not POST a session.
-    expect(createSessionMock).not.toHaveBeenCalled();
-
-    // Open the session-history drawer and pick the past thread.
-    await user.click(screen.getByTestId("playground-history-open"));
-    await user.click(
-      await screen.findByTestId(`session-history-item-${pastThread.thread_id}`),
-    );
-
-    // Run-as field auto-filled with the resumed thread's owner.
-    const runAs = within(screen.getByTestId("playground-user")).getByRole(
-      "combobox",
-    );
-    await waitFor(() => expect(runAs).toHaveValue("u1"));
-    // Resume switches to the existing thread — no new session created, and the
-    // run-as change did not trip the rebind effect into a fresh thread.
-    expect(createSessionMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("playground-resumed-notice")).toBeInTheDocument();
-  });
-
   it("shows a stream-failure alert when streamRun throws", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);
@@ -684,33 +648,6 @@ describe("PlaygroundTab", () => {
     expect(
       screen.queryByTestId("playground-attachment"),
     ).not.toBeInTheDocument();
-  });
-
-  it("runs as another user when a user_id is entered (impersonation)", async () => {
-    const user = userEvent.setup();
-    createSessionMock.mockResolvedValue(sampleThread);
-    streamRunMock.mockReturnValue(
-      makeStream([
-        { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
-      ]),
-    );
-    renderPg();
-    await screen.findByTestId("playground-input");
-
-    const target = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-    // The AutoComplete wraps a real input; type the target user_id into it.
-    const userField = screen.getByLabelText(i18n.t("playground.run_as_label"));
-    await user.type(userField, target);
-    // Lazy — the run-as id is carried into the session the first send creates.
-    await user.type(screen.getByTestId("playground-input"), "hi");
-    await user.click(screen.getByTestId("playground-run"));
-    await waitFor(() =>
-      expect(createSessionMock).toHaveBeenCalledWith({
-        agent_name: "demo-agent",
-        agent_version: "1.0.0",
-        run_as_user_id: target,
-      }),
-    );
   });
 
   it("accumulates turns across runs and parses per-turn token usage", async () => {

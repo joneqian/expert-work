@@ -37,10 +37,6 @@ export interface ThreadMeta {
 export interface CreateSessionRequest {
   agent_name: string;
   agent_version: string;
-  /** Playground impersonation — run the session as this user_id (a real
-   *  tenant user's id or an arbitrary sandbox UUID) instead of the caller.
-   *  Admin-gated + audited backend-side. Omitted → run as self. */
-  run_as_user_id?: string;
 }
 
 export async function createSession(

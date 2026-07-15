@@ -3,10 +3,6 @@
  * ``/v1/sessions/{thread_id}/runs`` SSE.
  *
  * Playground-Uplift:
- *   - **user_id (D1)**: an admin may run the session as another user_id (real
- *     tenant user picker OR free-form sandbox UUID) → verify that user's
- *     per-user workspace / memory / episodic. Sent as ``run_as_user_id`` to
- *     createSession; the active identity shows in the header.
  *   - **multi-turn (D2)**: the conversation accumulates as a transcript of
  *     turns (the thread is reused, so the backend already continues context);
  *     each turn keeps its own event stream.
@@ -19,7 +15,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  AutoComplete,
   Button,
   Collapse,
   Empty,
@@ -49,7 +44,6 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trash2,
-  User,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -60,7 +54,6 @@ import {
   type ApprovalItem,
 } from "../../api/approvals";
 import { ApiError } from "../../api/client";
-import { listMembers } from "../../api/members";
 import { listRateCards, type RateCardRecord } from "../../api/rate_card";
 import { getRun, listThreadRuns, streamRunEvents } from "../../api/runs";
 import { getRunTrace, type RunTrace } from "../../api/trace_facade";
@@ -168,11 +161,6 @@ interface PlaygroundTabProps {
   detail: AgentDetailResponse;
 }
 
-interface UserOption {
-  value: string;
-  label: string;
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -227,9 +215,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [varValues, setVarValues] = useState<Record<string, string>>({});
-  // Playground-Uplift D1 — impersonation. Empty = run as self.
-  const [runAsUser, setRunAsUser] = useState("");
-  const [userOptions, setUserOptions] = useState<UserOption[]>([]);
   // Playground-Uplift D4 — workspace inspector (verify the VM started + persists).
   const [workspace, setWorkspace] = useState<SessionWorkspace | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
@@ -253,10 +238,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   );
 
   const abortRef = useRef<AbortController | null>(null);
-  // Resume sets ``runAsUser`` to the thread's owner; that change would otherwise
-  // trip the "user changed → fresh thread" effect and clobber the resume. This
-  // flag tells that effect to skip exactly the one rebind resume triggers.
-  const skipRebindRef = useRef(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
@@ -275,26 +256,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   // unlike state) makes ``replayHistoryRun`` a true one-shot regardless of how
   // many times its trigger fires.
   const startedHistoryRunsRef = useRef<Set<string>>(new Set());
-
-  // Load active tenant users for the impersonation picker (subject_id == the
-  // tenant_user.id that keys the workspace/memory; only active members have one).
-  useEffect(() => {
-    let cancelled = false;
-    void listMembers({ status: "active", limit: 200 })
-      .then((page) => {
-        if (cancelled) return;
-        const opts = page.items
-          .filter((m) => m.subject_id)
-          .map((m) => ({ value: m.subject_id as string, label: m.email }));
-        setUserOptions(opts);
-      })
-      .catch(() => {
-        // Picker is a convenience — free-form entry still works on failure.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // #4 cost — fetch the agent model's rate once (per-(provider,model), no tier).
   useEffect(() => {
@@ -347,7 +308,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       const created = await createSession({
         agent_name: r.name,
         agent_version: r.version,
-        ...(runAsUser.trim() ? { run_as_user_id: runAsUser.trim() } : {}),
       });
       setThread(created);
       return created;
@@ -364,7 +324,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     } finally {
       setCreatingThread(false);
     }
-  }, [thread, r.name, r.version, runAsUser]);
+  }, [thread, r.name, r.version]);
 
   // #6 — resume an existing thread: switch to it + continue chatting (the
   // backend keeps the context). Past turns aren't replayed in the transcript;
@@ -378,15 +338,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setResumed(true);
       setHistory([]);
       setThread(picked);
-      // Continue as the thread's own user so per-user workspace / memory /
-      // episodic stay consistent — auto-fill the run-as field. Guard the
-      // user-change rebind effect so this doesn't spawn a fresh thread (only
-      // when the value actually changes, else no rebind fires anyway).
-      const nextRunAs = picked.user_id ?? "";
-      if (nextRunAs !== runAsUser) {
-        skipRebindRef.current = true;
-        setRunAsUser(nextRunAs);
-      }
       // 历史重建:并行拉文本轮 + runs,按序配对成懒重建描述符;
       // 计数守卫失败或任一失败 → 落回扁平文本(setHistory 保留原行为)。
       setHistoryTurns(null);
@@ -433,22 +384,16 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           setHistoryTurns(null);
         });
     },
-    [runAsUser],
+    [],
   );
 
-  // Re-bind a fresh thread when the agent or the impersonated user changes —
-  // except the run-as change a resume makes (``skipRebindRef``), which must
-  // keep the resumed thread.
+  // Re-bind a fresh thread when the agent changes.
   useEffect(() => {
-    if (skipRebindRef.current) {
-      skipRebindRef.current = false;
-    } else {
-      resetDraft();
-    }
+    resetDraft();
     return () => {
       abortRef.current?.abort();
     };
-  }, [r.name, r.version, runAsUser, resetDraft]);
+  }, [r.name, r.version, resetDraft]);
 
   // 历史懒重建 — replay one historical run's persisted event stream so its
   // TurnCard can render the full debug panels (rather than just the flat
@@ -915,11 +860,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     abortRef.current?.abort();
   }, []);
 
-  const activeUserLabel = runAsUser.trim()
-    ? (userOptions.find((o) => o.value === runAsUser.trim())?.label ??
-      runAsUser.trim())
-    : t("playground.user_self");
-
   return (
     <div
       data-testid="playground-tab"
@@ -990,44 +930,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             style={{ padding: "4px 8px" }}
           />
         )}
-
-        {/* Playground-Uplift D1 — run-as user (real user picker + free-form id). */}
-        <div data-testid="playground-user">
-          <Text
-            type="secondary"
-            style={{ fontSize: 12, display: "block", marginBottom: 4 }}
-          >
-            {t("playground.run_as_label")}
-          </Text>
-          <AutoComplete
-            options={userOptions}
-            value={runAsUser}
-            onChange={setRunAsUser}
-            allowClear
-            disabled={running || creatingThread}
-            filterOption={(inputValue, option) =>
-              (option?.label ?? "")
-                .toString()
-                .toLowerCase()
-                .includes(inputValue.toLowerCase())
-            }
-            style={{ width: "100%" }}
-            placeholder={t("playground.run_as_placeholder")}
-            data-testid="playground-user-select"
-          >
-            <Input
-              aria-label={t("playground.run_as_label")}
-              prefix={<User size={12} strokeWidth={1.75} />}
-            />
-          </AutoComplete>
-          <Text
-            type="secondary"
-            style={{ fontSize: 11, display: "block", marginTop: 2 }}
-            data-testid="playground-active-user"
-          >
-            {t("playground.running_as", { user: activeUserLabel })}
-          </Text>
-        </div>
 
         {threadError !== null ? (
           <Alert
