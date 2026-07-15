@@ -17,6 +17,8 @@ import { ApiError, setStoredToken } from "../../api/client";
 import * as rateCardSdk from "../../api/rate_card";
 import * as runsSdk from "../../api/runs";
 import * as sessionsSdk from "../../api/sessions";
+import * as workspaceSdk from "../../api/workspace";
+import * as artifactsSdk from "../../api/artifacts";
 import * as traceFacadeSdk from "../../api/trace_facade";
 import * as uploadsSdk from "../../api/uploads";
 import { PlaygroundTab } from "../agent_detail/PlaygroundTab";
@@ -58,10 +60,10 @@ const createSessionMock = vi.spyOn(sessionsSdk, "createSession");
 const streamRunMock = vi.spyOn(sessionsSdk, "streamRun");
 const uploadImageMock = vi.spyOn(uploadsSdk, "uploadImage");
 const uploadDocumentMock = vi.spyOn(uploadsSdk, "uploadDocument");
-const getWorkspaceMock = vi.spyOn(sessionsSdk, "getSessionWorkspace");
-const getWorkspaceFilesMock = vi.spyOn(sessionsSdk, "getSessionWorkspaceFiles");
-const downloadFileMock = vi.spyOn(sessionsSdk, "downloadSessionWorkspaceFile");
-const downloadArtifactMock = vi.spyOn(sessionsSdk, "downloadSessionArtifact");
+const getWorkspaceMock = vi.spyOn(workspaceSdk, "getUserWorkspace");
+const getWorkspaceFilesMock = vi.spyOn(workspaceSdk, "getUserWorkspaceFiles");
+const downloadFileMock = vi.spyOn(workspaceSdk, "downloadUserWorkspaceFile");
+const downloadArtifactMock = vi.spyOn(artifactsSdk, "downloadArtifact");
 const listSessionsMock = vi.spyOn(sessionsSdk, "listSessions");
 const getMessagesMock = vi.spyOn(sessionsSdk, "getSessionMessages");
 const listRateCardsMock = vi.spyOn(rateCardSdk, "listRateCards");
@@ -112,7 +114,7 @@ beforeEach(() => {
   downloadFileMock.mockReset();
   downloadFileMock.mockResolvedValue(undefined);
   downloadArtifactMock.mockReset();
-  downloadArtifactMock.mockResolvedValue(undefined);
+  downloadArtifactMock.mockResolvedValue("report.md");
   listSessionsMock.mockReset();
   listSessionsMock.mockResolvedValue([]);
   getMessagesMock.mockReset();
@@ -197,8 +199,9 @@ function renderPg(
 }
 
 // Lazy thread creation — no backend session exists until the first action.
-// Tests that assert thread-scoped UI (the workspace panel) establish one by
-// sending a throwaway message, then the thread id appears in the header.
+// Tests that need a live thread (a run in the transcript, the session header
+// id) establish one by sending a throwaway message. The workspace panel is
+// user-scoped, so it loads on mount without a thread (see its own test).
 async function establishThread(user: ReturnType<typeof userEvent.setup>) {
   streamRunMock.mockReturnValue(
     makeStream([
@@ -344,10 +347,7 @@ describe("PlaygroundTab", () => {
     const btn = await screen.findByTestId("playground-turn-artifact-download");
     expect(btn).toHaveTextContent("report.pdf");
     await user.click(btn);
-    expect(downloadArtifactMock).toHaveBeenCalledWith(
-      sampleThread.thread_id,
-      "report.pdf",
-    );
+    expect(downloadArtifactMock).toHaveBeenCalledWith("report.pdf");
   });
 
   it("exports the turn's authoritative event stream as JSON", async () => {
@@ -873,11 +873,36 @@ describe("PlaygroundTab", () => {
       await screen.findByTestId("playground-workspace-file-download"),
     );
     await waitFor(() =>
-      expect(downloadFileMock).toHaveBeenCalledWith(
-        sampleThread.thread_id,
-        "report.pdf",
-      ),
+      expect(downloadFileMock).toHaveBeenCalledWith("report.pdf"),
     );
+  });
+
+  it("loads the workspace inspector without a thread (user-scoped)", async () => {
+    // The whole point of the user-scoped route: the panel shows the current
+    // user's workspace on mount, before (and after) any session exists — so it
+    // survives session deletion. No establishThread() here.
+    getWorkspaceMock.mockResolvedValue({
+      workspace: {
+        id: "w1",
+        tenant_id: "t1",
+        user_id: "u1",
+        volume_name: "expert-work-ws-t-u",
+        size_bytes: 2048,
+        size_limit_bytes: 1_048_576,
+        created_at: null,
+        last_accessed_at: null,
+        deleted_at: null,
+        archived_object_key: null,
+      },
+      artifacts: [],
+    });
+    getWorkspaceFilesMock.mockResolvedValue([{ path: "out.txt", size: 11 }]);
+    renderPg();
+    const panel = await screen.findByTestId("playground-workspace");
+    expect(panel).toHaveTextContent("expert-work-ws-t-u");
+    expect(panel).toHaveTextContent("out.txt");
+    // ...and the load was keyed on the caller, not a thread id.
+    expect(getWorkspaceMock).toHaveBeenCalledWith();
   });
 
   it("surfaces an approval gate, approves, and streams the continuation", async () => {

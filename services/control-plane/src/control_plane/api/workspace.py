@@ -1,0 +1,198 @@
+"""``/v1/workspace`` — user-scoped persistent workspace browse / download / delete.
+
+The playground workspace inspector (and the M2 user-detail Workspace tab) read a
+user's persistent volume directly, independent of any thread. The thread-scoped
+``/v1/sessions/{id}/workspace*`` routes 404 once the thread is archived / purged
+— even though the ``(tenant, user)``-keyed volume lives on — so a user could no
+longer see their own files. These endpoints key on the *user* instead, so the
+workspace stays reachable across (and after) every session.
+
+Scope mirrors ``/v1/artifacts`` (Mini-ADR H.8-F1): :func:`resolve_target_user_id`
+resolves the caller's own ``tenant_user.id``, or — for a tenant admin — the
+``?user_id=`` target; anyone else asking for someone else gets a 403. A machine
+principal owns no per-user workspace.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import PurePosixPath
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response
+
+from control_plane.api._artifact_mime import content_disposition_header, infer_content_type
+from control_plane.api._user_scope import get_user_repo, resolve_target_user_id
+from expert_work.persistence.artifact import ArtifactStore
+from expert_work.persistence.rls import current_user_id_var
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.persistence.workspace import UserWorkspaceStore
+from orchestrator.tools import SandboxSupervisorError, SupervisorClient
+
+logger = logging.getLogger("expert_work.control_plane.workspace")
+
+
+def _get_workspace_store(request: Request) -> UserWorkspaceStore:
+    return request.app.state.user_workspace_store  # type: ignore[no-any-return]
+
+
+def _get_artifact_store(request: Request) -> ArtifactStore:
+    return request.app.state.artifact_store  # type: ignore[no-any-return]
+
+
+def _get_supervisor_client(request: Request) -> SupervisorClient | None:
+    return request.app.state.supervisor_client  # type: ignore[no-any-return]
+
+
+def _safe_workspace_relpath(path: str) -> str | None:
+    """Return the cleaned relative path, or ``None`` if it escapes the workspace.
+
+    The ``path`` query param round-trips through the client untrusted, so the
+    download / delete endpoints re-check it here (the supervisor re-validates at
+    its own boundary — defence in depth). Rejects absolute paths and any ``..``
+    segment that would climb out of ``/workspace``. Mirrors the identical guard
+    on the thread-scoped routes in :mod:`control_plane.api.sessions`.
+    """
+    cleaned = path.strip()
+    if not cleaned or cleaned.startswith("/") or ".." in PurePosixPath(cleaned).parts:
+        return None
+    return cleaned
+
+
+def build_workspace_router() -> APIRouter:
+    router = APIRouter(prefix="/v1/workspace", tags=["workspace"])
+
+    @router.get("")
+    async def get_workspace(
+        request: Request,
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        workspaces: Annotated[UserWorkspaceStore, Depends(_get_workspace_store)],
+        artifacts: Annotated[ArtifactStore, Depends(_get_artifact_store)],
+        # Tenant-admin governance target (the user-detail Workspace tab); a
+        # non-admin asking for someone else is a 403. Omitted → the caller.
+        user_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        """The target user's persistent workspace + artifacts.
+
+        Read-only: ``workspaces.get`` never provisions a row, so a ``null``
+        workspace truthfully means "no VM has ever started for this user".
+        """
+        tenant_id: UUID = request.state.tenant_id
+        target_user_id = await resolve_target_user_id(request, users, requested=user_id)
+        if target_user_id is None:
+            # Machine principal — owns no per-user workspace.
+            return JSONResponse({"success": True, "data": {"workspace": None, "artifacts": []}})
+        # Defence-in-depth for the artifact read — the store already filters by
+        # explicit (tenant_id, user_id), but set the RLS GUC too, mirroring
+        # ``/v1/artifacts``, so a future user-level policy stays enforced.
+        current_user_id_var.set(target_user_id)
+        workspace = await workspaces.get(tenant_id=tenant_id, user_id=target_user_id)
+        arts = await artifacts.list_for_user(tenant_id=tenant_id, user_id=target_user_id)
+        return JSONResponse(
+            {
+                "success": True,
+                "data": {
+                    "workspace": workspace.model_dump(mode="json") if workspace else None,
+                    "artifacts": [a.model_dump(mode="json") for a in arts],
+                },
+            }
+        )
+
+    @router.get("/files")
+    async def list_workspace_files(
+        request: Request,
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
+        user_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        """Browse the files in the target user's persistent volume.
+
+        Read-only inventory for the inspector. A machine principal, an absent
+        supervisor, or an empty volume all return ``[]``.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        target_user_id = await resolve_target_user_id(request, users, requested=user_id)
+        if target_user_id is None or supervisor is None:
+            return JSONResponse({"success": True, "data": {"files": []}})
+        try:
+            entries = await supervisor.list_workspace_files(
+                tenant_id=tenant_id, user_id=target_user_id
+            )
+        except SandboxSupervisorError:
+            logger.warning("workspace.list_failed", exc_info=True)
+            return JSONResponse({"success": True, "data": {"files": []}})
+        files = [{"path": e.path, "size": e.size} for e in entries]
+        return JSONResponse({"success": True, "data": {"files": files}})
+
+    @router.get("/file", response_model=None)
+    async def download_workspace_file(
+        request: Request,
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
+        path: Annotated[str, Query()],
+        user_id: Annotated[UUID | None, Query()] = None,
+    ) -> Response:
+        """Download one file from the target user's persistent workspace volume.
+
+        MIME-aware + XSS-safe (active content always ``attachment`` +
+        ``nosniff``). ``path`` is validated here and again at the supervisor
+        boundary. 404 hides cross-user / missing-file / no-supervisor behind one
+        opaque response.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        target_user_id = await resolve_target_user_id(request, users, requested=user_id)
+        safe_path = _safe_workspace_relpath(path)
+        if safe_path is None:
+            raise HTTPException(status_code=400, detail="invalid workspace path")
+        if target_user_id is None or supervisor is None:
+            raise HTTPException(status_code=404, detail="file not found")
+        try:
+            data = await supervisor.read_workspace_file(
+                tenant_id=tenant_id, user_id=target_user_id, path=safe_path
+            )
+        except SandboxSupervisorError as exc:
+            logger.warning("workspace.read_failed", exc_info=True)
+            raise HTTPException(status_code=404, detail="file not found") from exc
+        filename = PurePosixPath(safe_path).name or "download"
+        inferred = infer_content_type(kind="other", path=safe_path)
+        headers = {
+            "Content-Disposition": content_disposition_header(
+                filename, disposition=inferred.disposition
+            ),
+            "X-Content-Type-Options": "nosniff",
+        }
+        return Response(content=data, media_type=inferred.content_type, headers=headers)
+
+    @router.delete("/file", response_model=None)
+    async def delete_workspace_file(
+        request: Request,
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
+        path: Annotated[str, Query()],
+        user_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        """Delete one file from the target user's persistent workspace volume.
+
+        Same scope gate as browse/download; the supervisor refuses reserved
+        prefixes (seeded machinery). 404 hides cross-user / no-supervisor; a
+        missing file is an idempotent no-op.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        target_user_id = await resolve_target_user_id(request, users, requested=user_id)
+        safe_path = _safe_workspace_relpath(path)
+        if safe_path is None:
+            raise HTTPException(status_code=400, detail="invalid workspace path")
+        if target_user_id is None or supervisor is None:
+            raise HTTPException(status_code=404, detail="file not found")
+        try:
+            await supervisor.delete_workspace_file(
+                tenant_id=tenant_id, user_id=target_user_id, path=safe_path
+            )
+        except SandboxSupervisorError as exc:
+            logger.warning("workspace.delete_failed", exc_info=True)
+            raise HTTPException(status_code=404, detail="file not found") from exc
+        return JSONResponse({"success": True, "data": {"deleted": safe_path}})
+
+    return router
