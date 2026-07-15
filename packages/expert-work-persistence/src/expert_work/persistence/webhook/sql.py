@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 from uuid import UUID
@@ -157,6 +158,20 @@ class SqlWebhookEndpointStore(WebhookEndpointStore):
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> list[UUID]:
+        stmt = (
+            sa_delete(WebhookEndpointRow)
+            .where(
+                WebhookEndpointRow.tenant_id == tenant_id,
+                WebhookEndpointRow.user_id == user_id,
+            )
+            .returning(WebhookEndpointRow.id)
+        )
+        async with self._sf() as session:
+            deleted = (await session.execute(stmt)).scalars().all()
+            await session.commit()
+        return list(deleted)
+
     async def count_by_tenant(self, *, tenant_id: UUID) -> int:
         async with self._sf() as session:
             result = await session.execute(
@@ -280,6 +295,19 @@ class SqlWebhookDeliveryStore(WebhookDeliveryStore):
                 .all()
             )
         return [_delivery_row_to_dto(r) for r in rows]
+
+    async def delete_for_endpoints(self, *, endpoint_ids: Sequence[UUID], tenant_id: UUID) -> int:
+        ids = list(endpoint_ids)
+        if not ids:
+            return 0
+        stmt = sa_delete(WebhookDeliveryRow).where(
+            WebhookDeliveryRow.tenant_id == tenant_id,
+            WebhookDeliveryRow.endpoint_id.in_(ids),
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def list_ready(
         self, *, before: datetime, limit: int = 1000

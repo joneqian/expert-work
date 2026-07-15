@@ -39,3 +39,12 @@ class AgentInstanceStore(abc.ABC):
         self, *, tenant_id: UUID, user_id: UUID, limit: int = 100, offset: int = 0
     ) -> list[AgentInstanceRecord]:
         """Agents one end-user uses, most-recently-active first."""
+
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — hard-delete EVERY instance binding for a user.
+
+        Removes all of the user's ``agent_instance`` rows and returns the count
+        deleted (0 when none / re-purge). Tenant- AND user-scoped — the
+        ``(tenant_id, user_id)`` predicate never touches another tenant's or
+        user's bindings."""

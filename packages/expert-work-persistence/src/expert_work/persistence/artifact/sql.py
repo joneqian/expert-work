@@ -308,3 +308,23 @@ class SqlArtifactStore(ArtifactStore):
             result = await session.execute(delete(ArtifactRow).where(ArtifactRow.id.in_(ids)))
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0)
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        async with self._sf() as session:
+            # Versions first — no FK cascade (``artifact_id`` is a bare UUID
+            # column, FORCE-RLS footgun J-1a). Both tables denormalise
+            # ``tenant_id`` / ``user_id``, so each delete is scoped directly.
+            await session.execute(
+                delete(ArtifactVersionRow).where(
+                    ArtifactVersionRow.tenant_id == tenant_id,
+                    ArtifactVersionRow.user_id == user_id,
+                )
+            )
+            result = await session.execute(
+                delete(ArtifactRow).where(
+                    ArtifactRow.tenant_id == tenant_id,
+                    ArtifactRow.user_id == user_id,
+                )
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)

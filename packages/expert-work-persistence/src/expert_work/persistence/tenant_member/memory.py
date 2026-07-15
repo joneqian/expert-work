@@ -62,6 +62,12 @@ class InMemoryTenantMemberStore(TenantMemberStore):
                 return row
         return None
 
+    async def get_by_subject_id(self, *, tenant_id: UUID, subject_id: UUID) -> TenantMember | None:
+        for row in self._rows.values():
+            if row.tenant_id == tenant_id and row.subject_id == subject_id:
+                return row
+        return None
+
     async def list_for_tenant(
         self,
         *,

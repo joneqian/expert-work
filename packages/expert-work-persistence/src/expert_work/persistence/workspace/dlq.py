@@ -103,6 +103,16 @@ class VolumeBackupDLQ(abc.ABC):
     async def count(self) -> int:
         """Total queue depth — used by the worker for a metric."""
 
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — drop every pending backup/archive for a user.
+
+        Removes all of the user's queued rows and returns the count deleted
+        (0 when none / re-purge). Tenant- AND user-scoped — the ``(tenant_id,
+        user_id)`` predicate never touches another tenant's or user's rows.
+        The user's live workspace volume is soft-deleted separately (the
+        reaper archives it); these are just its stuck retry rows."""
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation — unit tests
@@ -174,6 +184,16 @@ class InMemoryVolumeBackupDLQ(VolumeBackupDLQ):
 
     async def count(self) -> int:
         return len(self._rows)
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        victims = [
+            rid
+            for rid, r in self._rows.items()
+            if r.tenant_id == tenant_id and r.user_id == user_id
+        ]
+        for rid in victims:
+            del self._rows[rid]
+        return len(victims)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +272,16 @@ class SqlVolumeBackupDLQ(VolumeBackupDLQ):
         async with self._sf() as session:
             result = await session.execute(select(VolumeBackupDLQRow.id).limit(10_000))
             return len(result.all())
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        stmt = delete(VolumeBackupDLQRow).where(
+            VolumeBackupDLQRow.tenant_id == tenant_id,
+            VolumeBackupDLQRow.user_id == user_id,
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
 
 
 __all__ = [

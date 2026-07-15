@@ -87,3 +87,13 @@ class InMemoryImageUploadStore(ImageUploadStore):
                 del self._rows[image_id]
                 removed += 1
         return removed
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        victims = [
+            image_id
+            for image_id, r in self._rows.items()
+            if r.tenant_id == tenant_id and r.user_id == user_id
+        ]
+        for image_id in victims:
+            del self._rows[image_id]
+        return len(victims)

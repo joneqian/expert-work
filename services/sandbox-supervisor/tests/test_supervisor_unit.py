@@ -264,6 +264,14 @@ class InMemorySandboxStore:
         self.rows[record.id] = record
         return True
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        victims = [
+            sid for sid, r in self.rows.items() if r.tenant_id == tenant_id and r.user_id == user_id
+        ]
+        for sid in victims:
+            del self.rows[sid]
+        return len(victims)
+
     def seed_active(self, tenant_id: UUID) -> SandboxRecord:
         """Insert an IN_USE row directly — for quota / reaper setup."""
         record = _running_record(tenant_id, acquired_at=datetime.now(UTC))
@@ -891,6 +899,26 @@ async def test_mark_workspace_deleted_is_idempotent() -> None:
     await h.supervisor.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
     # Second call adds no new audit entries.
     assert len(h.audit.entries) == audits_after_first
+
+
+@pytest.mark.asyncio
+async def test_mark_workspace_deleted_hard_deletes_only_that_users_sandbox_rows() -> None:
+    """Phase 3a — mark_workspace_deleted drops the user's sandbox_instance rows.
+
+    The warm session is force-destroyed first, THEN the user's rows are
+    hard-deleted (no PII left). Another user's rows in the same tenant survive."""
+    h = _harness(quota_enabled=True)
+    tenant_id, user_id, other_user = uuid4(), uuid4(), uuid4()
+    await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+    # A second user's row in the same tenant (seeded directly) must survive.
+    other = _running_record(tenant_id, acquired_at=datetime.now(UTC))
+    other = replace(other, user_id=other_user)
+    await h.store.insert(other)
+
+    await h.supervisor.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
+
+    assert all(r.user_id != user_id for r in h.store.rows.values())  # purged user's rows gone
+    assert any(r.user_id == other_user for r in h.store.rows.values())  # other user untouched
 
 
 # ---------------------------------------------------------------------------

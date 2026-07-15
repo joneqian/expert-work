@@ -117,6 +117,16 @@ class MemoryWritebackDLQ(abc.ABC):
     async def count(self) -> int:
         """Total queue depth — used by the worker for a metric."""
 
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — drop every pending writeback for a user.
+
+        Removes all of the user's queued rows and returns the count deleted
+        (0 when none / re-purge). Tenant- AND user-scoped — the ``(tenant_id,
+        user_id)`` predicate never touches another tenant's or user's rows.
+        The queued payload holds extracted memory content (PII), so it is
+        hard-deleted with the rest of the user's memory."""
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation — unit tests
@@ -188,6 +198,16 @@ class InMemoryMemoryWritebackDLQ(MemoryWritebackDLQ):
 
     async def count(self) -> int:
         return len(self._rows)
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        victims = [
+            rid
+            for rid, r in self._rows.items()
+            if r.tenant_id == tenant_id and r.user_id == user_id
+        ]
+        for rid in victims:
+            del self._rows[rid]
+        return len(victims)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +286,16 @@ class SqlMemoryWritebackDLQ(MemoryWritebackDLQ):
         async with self._sf() as session:
             result = await session.execute(select(MemoryWritebackDLQRow.id).limit(10_000))
             return len(result.all())
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        stmt = delete(MemoryWritebackDLQRow).where(
+            MemoryWritebackDLQRow.tenant_id == tenant_id,
+            MemoryWritebackDLQRow.user_id == user_id,
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
 
 
 __all__ = [

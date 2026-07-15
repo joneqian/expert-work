@@ -421,6 +421,22 @@ class SqlMemoryStore(MemoryStore):
             ).first()
         return exists is not None
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        now = datetime.now(UTC)
+        stmt = (
+            update(MemoryItemRow)
+            .where(
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.deleted_at.is_(None),
+            )
+            .values(deleted_at=now)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
+
     # ------------------------------------------------------------------
     # Capability Uplift Sprint #7 — MemoryConsolidator interface
     # ------------------------------------------------------------------

@@ -92,3 +92,14 @@ class McpOAuthConnectionStore(abc.ABC):
     async def delete(self, *, connection_id: UUID, tenant_id: UUID, user_id: str) -> None:
         """Delete the connection. Raises
         :class:`McpOAuthConnectionNotFoundError` if absent."""
+
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: str) -> int:
+        """Phase 3a (purge_user) — hard-delete EVERY OAuth connection for a user.
+
+        Removes all of the user's rows and returns the count deleted (0 when
+        none / re-purge). Tenant- AND user-scoped — the ``(tenant_id,
+        user_id)`` predicate never touches another tenant's or user's
+        connections. ``user_id`` is the app-layer string scope on this table
+        (Text column). The encrypted token *values* referenced by
+        ``secret://`` refs are reaped separately by the secret store's TTL."""

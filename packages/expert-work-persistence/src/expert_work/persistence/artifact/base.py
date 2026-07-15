@@ -188,3 +188,14 @@ class ArtifactStore(abc.ABC):
         Returns the count of ``artifact`` rows actually deleted.
         Cascades deletion of the corresponding ``artifact_version`` rows.
         """
+
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — hard-delete EVERY artifact for a user.
+
+        Removes all of the user's ``artifact`` rows (active AND soft-deleted)
+        and their ``artifact_version`` rows in one shot; returns the count of
+        ``artifact`` rows deleted. Tenant- AND user-scoped — the
+        ``(tenant_id, user_id)`` predicate never touches another tenant's or
+        user's artifacts. Workspace file bytes are removed separately by the
+        workspace soft-delete + archive path."""

@@ -232,3 +232,16 @@ class InMemoryArtifactStore(ArtifactStore):
                 removed += 1
         self._versions = [v for v in self._versions if v.artifact_id not in ids]
         return removed
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        victim_ids = {
+            aid
+            for aid, a in self._artifacts.items()
+            if a.tenant_id == tenant_id and a.user_id == user_id
+        }
+        for aid in victim_ids:
+            del self._artifacts[aid]
+        self._versions = [
+            v for v in self._versions if not (v.tenant_id == tenant_id and v.user_id == user_id)
+        ]
+        return len(victim_ids)

@@ -6,7 +6,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -24,6 +24,7 @@ def _row_to_user(row: TenantUserRow) -> TenantUser:
         display_name=row.display_name,
         created_at=row.created_at,
         last_active_at=row.last_active_at,
+        deleted_at=row.deleted_at,
     )
 
 
@@ -62,6 +63,10 @@ class SqlTenantUserStore(TenantUserStore):
                     insert_stmt.excluded.display_name,
                     TenantUserRow.display_name,
                 ),
+                # A returning identity reactivates cleanly (Phase 3a): clear any
+                # purge stamp so the user is active + visible in the roster
+                # again, not invisible-but-producing-data.
+                "deleted_at": None,
             },
         ).returning(TenantUserRow.id)
         async with self._sf() as session:
@@ -103,7 +108,10 @@ class SqlTenantUserStore(TenantUserStore):
         limit: int = 100,
         offset: int = 0,
     ) -> list[TenantUser]:
-        stmt = select(TenantUserRow).where(TenantUserRow.tenant_id == tenant_id)
+        stmt = select(TenantUserRow).where(
+            TenantUserRow.tenant_id == tenant_id,
+            TenantUserRow.deleted_at.is_(None),
+        )
         if subject_type is not None:
             stmt = stmt.where(TenantUserRow.subject_type == subject_type)
         stmt = (
@@ -117,3 +125,35 @@ class SqlTenantUserStore(TenantUserStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_user(row) for row in rows]
+
+    async def deactivate(self, user_id: UUID, *, tenant_id: UUID, now: datetime) -> bool:
+        # Idempotent: only stamp a row that is still active, so a re-purge
+        # never rewrites the original deactivation time. Tenant-scoped —
+        # the tenant predicate is the hard isolation boundary.
+        stmt = (
+            update(TenantUserRow)
+            .where(
+                TenantUserRow.id == user_id,
+                TenantUserRow.tenant_id == tenant_id,
+                TenantUserRow.deleted_at.is_(None),
+            )
+            .values(deleted_at=now)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        if int(getattr(result, "rowcount", 0) or 0) > 0:
+            return True
+        # Either truly missing or already deactivated — differentiate with a
+        # cheap existence probe so a re-purge is idempotent-True but an
+        # unknown id is a clean False (matches the memory-store semantics).
+        async with self._sf() as session:
+            exists = (
+                await session.execute(
+                    select(TenantUserRow.id).where(
+                        TenantUserRow.id == user_id,
+                        TenantUserRow.tenant_id == tenant_id,
+                    )
+                )
+            ).first()
+        return exists is not None

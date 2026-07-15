@@ -178,6 +178,15 @@ class SupervisorClient(Protocol):
         Backs the playground workspace cleanup. Only the supervisor can
         mutate a per-user docker volume; the control-plane proxies here."""
 
+    async def mark_workspace_deleted(self, *, tenant_id: UUID, user_id: UUID) -> None:
+        """Soft-delete a user's whole persistent workspace (Phase 3a purge_user).
+
+        The supervisor destroys any warm session, drops the user's
+        sandbox_instance rows, and marks the volume deleted (Mini-ADR J-36 —
+        the reaper archives it, then the 90-day sweep hard-deletes). Idempotent.
+        Only the supervisor can mutate a per-user docker volume; the
+        control-plane proxies here as part of the cascade purge."""
+
     async def reap(self, *, force: bool) -> int:
         """Run the idle-session sweep now; return how many were reaped.
 
@@ -354,6 +363,13 @@ class HTTPSupervisorClient:
             )
             raise SandboxSupervisorError(msg)
 
+    async def mark_workspace_deleted(self, *, tenant_id: UUID, user_id: UUID) -> None:
+        await self._post(
+            f"/v1/workspaces/{tenant_id}/{user_id}:delete",
+            json=None,
+            expect_body=False,
+        )
+
     async def _post(
         self,
         path: str,
@@ -414,6 +430,9 @@ class RecordingSupervisorClient:
     workspace_write_error: Exception | None = None
     workspace_deletes: list[tuple[UUID, UUID, str]] = field(default_factory=list)
     workspace_delete_error: Exception | None = None
+    #: Phase 3a — the ``(tenant_id, user_id)`` of each mark_workspace_deleted call.
+    workspace_deletions: list[tuple[UUID, UUID]] = field(default_factory=list)
+    workspace_deletion_error: Exception | None = None
     reaped: list[bool] = field(default_factory=list)
     reap_count: int = 0
     _next_id: int = 0
@@ -472,6 +491,11 @@ class RecordingSupervisorClient:
         if self.workspace_delete_error is not None:
             raise self.workspace_delete_error
         self.workspace_deletes.append((tenant_id, user_id, path))
+
+    async def mark_workspace_deleted(self, *, tenant_id: UUID, user_id: UUID) -> None:
+        if self.workspace_deletion_error is not None:
+            raise self.workspace_deletion_error
+        self.workspace_deletions.append((tenant_id, user_id))
 
     async def reap(self, *, force: bool) -> int:
         self.reaped.append(force)
@@ -536,6 +560,9 @@ class _EgressBindingClient:
 
     async def delete_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> None:
         await self.inner.delete_workspace_file(tenant_id=tenant_id, user_id=user_id, path=path)
+
+    async def mark_workspace_deleted(self, *, tenant_id: UUID, user_id: UUID) -> None:
+        await self.inner.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
 
     async def reap(self, *, force: bool) -> int:
         return await self.inner.reap(force=force)

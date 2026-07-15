@@ -130,6 +130,19 @@ class RunStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — null the ``user_id`` on a user's runs, KEEP them.
+
+        Sets ``user_id = NULL`` on every ``agent_run`` row for ``(tenant_id,
+        user_id)`` and returns the count updated. The rows are NOT deleted —
+        ``run_event.run_id`` references ``agent_run.id`` with ``ON DELETE
+        RESTRICT``, and the run lifecycle is billing / analytics data; only the
+        per-user PII link is severed. Tenant- AND user-scoped. Rows on the
+        user's own threads are usually already gone (the per-thread purge's
+        ``delete_by_thread`` removed them); this is the catch-all that ensures
+        no surviving ``agent_run`` row retains the purged ``user_id``."""
+
+    @abc.abstractmethod
     async def list_for_tenant(
         self,
         *,
@@ -427,6 +440,14 @@ class InMemoryRunStore(RunStore):
         for rid in victims:
             del self._rows[rid]
         return len(victims)
+
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        updated = 0
+        for rid, r in list(self._rows.items()):
+            if r.tenant_id == tenant_id and r.user_id == user_id:
+                self._rows[rid] = replace(r, user_id=None)
+                updated += 1
+        return updated
 
     async def list_for_tenant(
         self,
@@ -814,6 +835,23 @@ class SqlRunStore(RunStore):
                     AgentRunRow.tenant_id == tenant_id,
                 )
             )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        # Null the PII link, KEEP the row (run_event → agent_run is ON DELETE
+        # RESTRICT; billing/analytics keep the lifecycle row). Explicit
+        # tenant_id predicate — never rely on RLS alone for a mutation.
+        stmt = (
+            update(AgentRunRow)
+            .where(
+                AgentRunRow.tenant_id == tenant_id,
+                AgentRunRow.user_id == user_id,
+            )
+            .values(user_id=None)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0)
 

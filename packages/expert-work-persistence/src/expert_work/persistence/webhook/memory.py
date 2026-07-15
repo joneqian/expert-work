@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -64,6 +65,16 @@ class InMemoryWebhookEndpointStore(WebhookEndpointStore):
         del self._rows[endpoint_id]
         return True
 
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> list[UUID]:
+        victims = [
+            eid
+            for eid, r in self._rows.items()
+            if r.tenant_id == tenant_id and r.user_id == user_id
+        ]
+        for eid in victims:
+            del self._rows[eid]
+        return victims
+
     async def count_by_tenant(self, *, tenant_id: UUID) -> int:
         return sum(1 for r in self._rows.values() if r.tenant_id == tenant_id)
 
@@ -113,6 +124,19 @@ class InMemoryWebhookDeliveryStore(WebhookDeliveryStore):
         ]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows[:limit]
+
+    async def delete_for_endpoints(self, *, endpoint_ids: Sequence[UUID], tenant_id: UUID) -> int:
+        wanted = set(endpoint_ids)
+        if not wanted:
+            return 0
+        victims = [
+            did
+            for did, r in self._rows.items()
+            if r.endpoint_id in wanted and r.tenant_id == tenant_id
+        ]
+        for did in victims:
+            del self._rows[did]
+        return len(victims)
 
     async def list_ready(
         self, *, before: datetime, limit: int = 1000

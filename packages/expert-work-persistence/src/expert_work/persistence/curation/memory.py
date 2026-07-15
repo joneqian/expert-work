@@ -70,6 +70,14 @@ class InMemoryEvalDatasetStore(EvalDatasetStore):
     async def count_by_tenant(self, *, tenant_id: UUID) -> int:
         return sum(1 for r in self._rows.values() if r.tenant_id == tenant_id)
 
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        updated = 0
+        for did, r in list(self._rows.items()):
+            if r.tenant_id == tenant_id and r.source_user_id == user_id:
+                self._rows[did] = r.model_copy(update={"source_user_id": None})
+                updated += 1
+        return updated
+
 
 class InMemoryCurationCandidateStore(CurationCandidateStore):
     """In-memory ``CurationCandidateStore`` — keyed by candidate id."""
@@ -161,3 +169,11 @@ class InMemoryCurationCandidateStore(CurationCandidateStore):
             return False
         self._rows[record.id] = record
         return True
+
+    async def anonymize_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        updated = 0
+        for cid, r in list(self._rows.items()):
+            if r.tenant_id == tenant_id and r.user_id == user_id:
+                self._rows[cid] = r.model_copy(update={"user_id": None})
+                updated += 1
+        return updated

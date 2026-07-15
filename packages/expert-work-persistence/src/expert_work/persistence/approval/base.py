@@ -127,3 +127,13 @@ class ApprovalStore(abc.ABC):
         mint-time digest atomically with the CAS (a ``modify`` re-binds to the
         digest of ``modified_args``); ``None`` leaves the mint digest intact.
         """
+
+    @abc.abstractmethod
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        """Phase 3a (purge_user) — hard-delete EVERY approval row for a user.
+
+        Removes all of the user's ``agent_approval`` rows (pending or decided)
+        and returns the count deleted (0 when none / re-purge). Tenant- AND
+        user-scoped — the ``(tenant_id, user_id)`` predicate never touches
+        another tenant's or user's rows; rows with a NULL ``user_id`` (legacy /
+        machine-triggered) are not this user's and are left untouched."""

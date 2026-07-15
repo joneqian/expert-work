@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from expert_work.persistence.approval.base import ApprovalStore
@@ -212,3 +212,13 @@ class SqlApprovalStore(ApprovalStore):
             )
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
+        stmt = delete(AgentApprovalRow).where(
+            AgentApprovalRow.tenant_id == tenant_id,
+            AgentApprovalRow.user_id == user_id,
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
