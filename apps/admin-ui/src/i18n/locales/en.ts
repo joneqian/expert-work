@@ -39,6 +39,7 @@ export interface TranslationKeys {
     members_all_tenants: string;
     agents: string;
     conversations: string;
+    users: string;
     approvals: string;
     curation: string;
     eval: string;
@@ -259,6 +260,68 @@ export interface TranslationKeys {
     usage_total: string;
     usage_in_out: string;
     usage_by_model: string;
+  };
+  users_page: {
+    page_title: string;
+    subtitle: string;
+    not_admin_title: string;
+    not_admin_body: string;
+    stat_total: string;
+    stat_conversations: string;
+    stat_errors: string;
+    search_placeholder: string;
+    type_all: string;
+    type_external: string;
+    type_member: string;
+    truncated: string;
+    truncated_tip: string;
+    col_user: string;
+    col_type: string;
+    col_conversations: string;
+    col_runs: string;
+    col_errors: string;
+    col_last_active: string;
+    tag_external: string;
+    tag_member: string;
+    unnamed: string;
+    failed_to_load: string;
+    empty: string;
+  };
+  user_profile: {
+    back_label: string;
+    banner: string;
+    tab_conversations: string;
+    tab_memory: string;
+    tab_workspace: string;
+    tab_usage: string;
+    subject_id_label: string;
+    surrogate_label: string;
+    filter_agent: string;
+    filter_agent_all: string;
+    filter_range: string;
+    conversations_empty: string;
+    memory_col_importance: string;
+    memory_col_confidence: string;
+    memory_col_actions: string;
+    memory_edit: string;
+    memory_edit_title: string;
+    memory_edit_content: string;
+    memory_edit_kind: string;
+    memory_forget: string;
+    memory_forget_confirm: string;
+    memory_updated: string;
+    memory_forgotten: string;
+    workspace_scope_note: string;
+    workspace_volume: string;
+    workspace_size: string;
+    workspace_none: string;
+    workspace_files: string;
+    workspace_files_empty: string;
+    download: string;
+    delete: string;
+    delete_confirm: string;
+    deleted: string;
+    failed_to_load: string;
   };
   conversations_page: {
     page_title: string;
@@ -2380,6 +2443,7 @@ const en: TranslationKeys = {
     members_all_tenants: "Members (all tenants)",
     agents: "Agents",
     conversations: "Conversations",
+    users: "Users",
     approvals: "Approvals",
     curation: "Curation+Eval",
     eval: "Eval",
@@ -2620,6 +2684,71 @@ const en: TranslationKeys = {
     usage_total: "Total tokens",
     usage_in_out: "Input / output",
     usage_by_model: "By model",
+  },
+  users_page: {
+    page_title: "Users",
+    subtitle:
+      "Keyed on the user_id passed to the agent — observe interactions, manage data and assets · admin-only.",
+    not_admin_title: "Admin access required",
+    not_admin_body: "This page is visible to tenant admins only.",
+    stat_total: "Total users",
+    stat_conversations: "Total conversations",
+    stat_errors: "Error conversations",
+    search_placeholder: "Search user_id or name…",
+    type_all: "All",
+    type_external: "External",
+    type_member: "Member",
+    truncated: "Partially truncated",
+    truncated_tip: "Showing {{shown}} of {{total}} — refine or paginate to see the rest.",
+    col_user: "User",
+    col_type: "Type",
+    col_conversations: "Conversations",
+    col_runs: "Runs",
+    col_errors: "Errors",
+    col_last_active: "Last active",
+    tag_external: "External",
+    tag_member: "Member",
+    unnamed: "Unnamed",
+    failed_to_load: "Failed to load users",
+    empty: "No users yet.",
+  },
+  user_profile: {
+    back_label: "Users",
+    banner:
+      "Read-only observability — this page does not run as this user; all cross-user views/edits are audited.",
+    tab_conversations: "Conversations",
+    tab_memory: "Memory",
+    tab_workspace: "Workspace",
+    tab_usage: "Usage",
+    subject_id_label: "Passed-in user_id",
+    surrogate_label: "Internal id",
+    filter_agent: "Filter by agent",
+    filter_agent_all: "All agents",
+    filter_range: "Active since",
+    conversations_empty: "No conversations for this user.",
+    memory_col_importance: "Importance",
+    memory_col_confidence: "Confidence",
+    memory_col_actions: "Actions",
+    memory_edit: "Edit",
+    memory_edit_title: "Edit memory",
+    memory_edit_content: "Content",
+    memory_edit_kind: "Kind",
+    memory_forget: "Forget",
+    memory_forget_confirm: "Forget this memory?",
+    memory_updated: "Memory updated",
+    memory_forgotten: "Memory forgotten",
+    workspace_scope_note:
+      "Workspace files and artifacts are the user's persistent assets, shared across agents.",
+    workspace_volume: "Volume",
+    workspace_size: "Size",
+    workspace_none: "No workspace for this user yet.",
+    workspace_files: "Files",
+    workspace_files_empty: "No files.",
+    download: "Download",
+    delete: "Delete",
+    delete_confirm: "Delete {{name}}?",
+    deleted: "Deleted {{name}}",
+    failed_to_load: "Failed to load",
   },
   conversations_page: {
     page_title: "Conversations",

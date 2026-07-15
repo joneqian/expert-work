@@ -33,6 +33,7 @@ function renderPage() {
 function stubAll() {
   vi.spyOn(usersSdk, "getTenantUser").mockResolvedValue({
     user_id: USER_ID,
+    subject_id: "ext-alice",
     display_name: "Alice",
     subject_type: "user",
     created_at: "2026-06-01T00:00:00Z",

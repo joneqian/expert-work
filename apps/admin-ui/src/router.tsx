@@ -41,6 +41,8 @@ import { SettingsKeycloak } from "./pages/SettingsKeycloak";
 import { SettingsQuality } from "./pages/SettingsQuality";
 import { SkillDetail } from "./pages/SkillDetail";
 import { UserDetail } from "./pages/UserDetail";
+import { Users } from "./pages/Users";
+import { UserProfile } from "./pages/UserProfile";
 import { SkillsList } from "./pages/SkillsList";
 import { TriggersList } from "./pages/TriggersList";
 import { WebhooksList } from "./pages/WebhooksList";
@@ -63,6 +65,12 @@ export function AppRouter() {
       <Route path="/runs/:threadId/:runId" element={<RunDetail />} />
       <Route path="/conversations" element={<ConversationsList />} />
       <Route path="/conversations/:threadId" element={<ConversationDetail />} />
+      {/* Top-level user-dimension observability (admin-only; the page
+          self-guards + backend 403s). ``/users/:userId`` is the
+          agent-agnostic user profile (distinct from the agent-scoped
+          ``/agents/:name/:version/users/:userId``). */}
+      <Route path="/users" element={<Users />} />
+      <Route path="/users/:userId" element={<UserProfile />} />
       <Route path="/curation" element={<Curation />} />
       <Route path="/eval-runs" element={<EvalRunsList />} />
       <Route path="/eval-runs/:runId" element={<EvalRunDetail />} />
