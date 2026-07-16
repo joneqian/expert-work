@@ -10,8 +10,11 @@ def _text_chunks() -> list[dict]:
         {"choices": [{"delta": {"role": "assistant"}}]},
         {"choices": [{"delta": {"content": "Hel"}, "finish_reason": None}]},
         {"choices": [{"delta": {"content": "lo"}, "finish_reason": "stop"}]},
-        {"choices": [{"delta": {}}], "model": "glm-5.2",
-         "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}},
+        {
+            "choices": [{"delta": {}}],
+            "model": "glm-5.2",
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+        },
     ]
 
 
@@ -19,9 +22,7 @@ def _text_chunks() -> list[dict]:
 async def test_stream_yields_normalized_deltas() -> None:
     client = RecordingOpenAIClient(stream_chunks=_text_chunks())
     provider = OpenAIProvider(client=client, model="glm-5.2")
-    deltas = [
-        d async for d in provider.stream(messages=[HumanMessage(content="hi")], tools=[])
-    ]
+    deltas = [d async for d in provider.stream(messages=[HumanMessage(content="hi")], tools=[])]
     assert [d.content for d in deltas if d.content] == ["Hel", "lo"]
     assert any(d.usage and d.usage["total_tokens"] == 5 for d in deltas)
     assert client.calls[-1]["stream"] is True  # stream() went through the streaming client method
@@ -33,25 +34,22 @@ async def test_stream_then_assemble_equals_non_streaming_complete() -> None:
     # once as a whole body (complete) and once as chunks (stream+assemble),
     # yields an identical AIMessage.
     whole = {
-        "choices": [{"message": {"role": "assistant", "content": "Hello"},
-                     "finish_reason": "stop"}],
+        "choices": [
+            {"message": {"role": "assistant", "content": "Hello"}, "finish_reason": "stop"}
+        ],
         "model": "glm-5.2",
         "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
     }
     complete_provider = OpenAIProvider(
         client=RecordingOpenAIClient(response=whole), model="glm-5.2"
     )
-    expected = await complete_provider.complete(
-        messages=[HumanMessage(content="hi")], tools=[]
-    )
+    expected = await complete_provider.complete(messages=[HumanMessage(content="hi")], tools=[])
 
     stream_provider = OpenAIProvider(
         client=RecordingOpenAIClient(stream_chunks=_text_chunks()), model="glm-5.2"
     )
     asm = OpenAIStreamAssembler()
-    async for d in stream_provider.stream(
-        messages=[HumanMessage(content="hi")], tools=[]
-    ):
+    async for d in stream_provider.stream(messages=[HumanMessage(content="hi")], tools=[]):
         asm.add(d)
     got = asm.build()
 
@@ -64,35 +62,33 @@ async def test_stream_then_assemble_equals_non_streaming_complete() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_reassembles_tool_call_fragments() -> None:
-    client = RecordingOpenAIClient(stream_chunks=[
-        {
-            "choices": [
-                {
-                    "delta": {
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": "call_1",
-                                "function": {"name": "search", "arguments": '{"q": '},
-                            }
-                        ]
+    client = RecordingOpenAIClient(
+        stream_chunks=[
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {"name": "search", "arguments": '{"q": '},
+                                }
+                            ]
+                        }
                     }
-                }
-            ]
-        },
-        {
-            "choices": [
-                {
-                    "delta": {
-                        "tool_calls": [
-                            {"index": 0, "function": {"arguments": '"hi"}'}}
-                        ]
-                    },
-                    "finish_reason": "tool_calls",
-                }
-            ]
-        },
-    ])
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '"hi"}'}}]},
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            },
+        ]
+    )
     provider = OpenAIProvider(client=client, model="glm-5.2")
     asm = OpenAIStreamAssembler()
     async for d in provider.stream(messages=[HumanMessage(content="hi")], tools=[]):
