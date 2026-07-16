@@ -1,8 +1,14 @@
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
 import pytest
 from langchain_core.messages import HumanMessage
 
+from expert_work.runtime.middleware import LLMClientError
 from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
 from orchestrator.llm.providers.openai import OpenAIProvider, RecordingOpenAIClient
+from orchestrator.tools.registry import ToolSpec
 
 
 def _text_chunks() -> list[dict]:
@@ -101,3 +107,55 @@ async def test_stream_reassembles_tool_call_fragments() -> None:
         "type": "tool_call",
     }
     assert msg.tool_calls == [expected_tool_call]
+
+
+@pytest.mark.asyncio
+async def test_stream_allowed_tools_rejection_falls_back_and_sticks() -> None:
+    """HX-J4 — a 4xx with the allowed_tools constraint re-streams once without
+    it and the provider instance stays on the application tier afterwards."""
+
+    @dataclass
+    class _RejectConstraintStream:
+        calls: list[dict[str, Any]] = field(default_factory=list)
+
+        async def stream_chat_completions(self, **kwargs: Any) -> AsyncIterator[Mapping[str, Any]]:
+            self.calls.append(kwargs)
+            if kwargs.get("tool_choice") is not None:
+                raise LLMClientError("openai 400: unknown tool_choice type")
+            for chunk in [{"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]}]:
+                yield chunk
+
+    client = _RejectConstraintStream()
+    provider = OpenAIProvider(client=client, model="gpt-5.5")
+    deferred_tools = [ToolSpec(name="mcp:gh.issue", description="d", defer_loading=True)]
+
+    out = [
+        d
+        async for d in provider.stream(messages=[HumanMessage(content="hi")], tools=deferred_tools)
+    ]
+    assert "".join(d.content for d in out) == "ok"
+    assert client.calls[0]["tool_choice"] is not None  # constrained first attempt
+    assert client.calls[1]["tool_choice"] is None  # unconstrained retry
+
+    # Sticky fallback: next stream goes straight out unconstrained.
+    out2 = [
+        d
+        async for d in provider.stream(messages=[HumanMessage(content="hi")], tools=deferred_tools)
+    ]
+    assert "".join(d.content for d in out2) == "ok"
+    assert client.calls[2]["tool_choice"] is None
+
+
+@pytest.mark.asyncio
+async def test_stream_plain_client_error_propagates_without_fallback() -> None:
+    client = RecordingOpenAIClient(raise_with=LLMClientError("openai 400: bad request"))
+    provider = OpenAIProvider(client=client, model="gpt-5.5")
+    with pytest.raises(LLMClientError):
+        _ = [
+            d
+            async for d in provider.stream(
+                messages=[HumanMessage(content="hi")],
+                tools=[ToolSpec(name="active_tool", description="x")],
+            )
+        ]
+    assert len(client.calls) == 1  # no retry (use_allowed False → plain error propagates)
