@@ -238,8 +238,8 @@ def _stream(
     """Call ``provider.stream``, forwarding ``output_schema`` only when set
     (mirrors ``_complete`` so pre-streaming doubles stay call-identical)."""
     if output_schema is None:
-        return provider.stream(messages=messages, tools=tools)  # type: ignore[attr-defined]
-    return provider.stream(  # type: ignore[attr-defined]
+        return provider.stream(messages=messages, tools=tools)  # type: ignore[attr-defined, no-any-return]
+    return provider.stream(  # type: ignore[attr-defined, no-any-return]
         messages=messages, tools=tools, output_schema=output_schema
     )
 

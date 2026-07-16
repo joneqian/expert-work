@@ -219,7 +219,7 @@ class OpenAIClient(Protocol):
         ``{"type": "json_schema", ...}`` structured-output constraint;
         ``None`` omits the field entirely."""
 
-    async def stream_chat_completions(
+    def stream_chat_completions(
         self,
         *,
         model: str,

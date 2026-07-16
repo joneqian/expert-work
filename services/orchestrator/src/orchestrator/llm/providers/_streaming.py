@@ -82,7 +82,8 @@ def delta_from_openai_chunk(chunk: Mapping[str, Any]) -> LLMDelta:
         for tc in raw_tcs:
             if not isinstance(tc, Mapping):
                 continue
-            fn = tc.get("function") if isinstance(tc.get("function"), Mapping) else {}
+            fn_raw = tc.get("function")
+            fn: Mapping[str, Any] = fn_raw if isinstance(fn_raw, Mapping) else {}
             idx = tc.get("index")
             tool_calls.append(
                 ToolCallChunk(
