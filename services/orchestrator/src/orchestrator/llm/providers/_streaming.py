@@ -335,8 +335,11 @@ class StreamAssembler(Protocol):
     provider supplies its own (OpenAI-wire vs Anthropic wire assemble
     differently) via ``StreamingLLMProvider.new_stream_assembler``."""
 
-    def add(self, delta: LLMDelta) -> None: ...
-    def build(self, *, interrupted: bool = False) -> AIMessage: ...
+    def add(self, delta: LLMDelta) -> None:
+        """Accumulate one delta into the pending message."""
+
+    def build(self, *, interrupted: bool = False) -> AIMessage:
+        """Finalize the accumulated deltas into an ``AIMessage``."""
 
 
 @runtime_checkable
@@ -356,7 +359,6 @@ class StreamingLLMProvider(Protocol):
 
     def new_stream_assembler(self) -> StreamAssembler:
         """A fresh assembler for one stream drain (provider-specific)."""
-        ...
 
 
 def supports_streaming(provider: object) -> bool:
