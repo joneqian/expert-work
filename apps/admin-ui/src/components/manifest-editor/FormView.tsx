@@ -33,6 +33,7 @@ import {
   readApprovalTools,
   readDescription,
   readDynamicWorkersOn,
+  readFallback,
   readMainSupportsVision,
   readMemoryOn,
   readModel,
@@ -60,6 +61,7 @@ import {
   setApprovalTools,
   setDescription,
   setDynamicWorkersOn,
+  setFallback,
   setMcp,
   setMemoryOn,
   setModel,
@@ -78,6 +80,7 @@ import {
   setWriteBack,
   setWriteMinImportance,
 } from "./form_model";
+import { FallbackChainEditor } from "./widgets/FallbackChainEditor";
 import { McpToolPicker, type McpPickerSource } from "./widgets/McpToolPicker";
 import { PromptTemplateEditor } from "./widgets/PromptTemplateEditor";
 
@@ -228,6 +231,29 @@ export function FormView({
             onChange={(mdl) => onChange(setModel(formData, mdl))}
           />
         </section>
+
+        {/* E.11 provider fallback chain — only meaningful once a primary model
+          is picked. A slow / failing provider falls over to the next instead
+          of killing the run (the failure mode this feature exists to prevent). */}
+        {!!readModel(formData).provider && !!readModel(formData).name && (
+          <section data-testid="af-fallback" style={SECTION}>
+            <Heading>
+              {t("agent_form.section_fallback")}
+              <FieldHelp
+                text={t("agent_form.section_fallback_help")}
+                testId="af-fallback"
+              />
+            </Heading>
+            <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+              {t("agent_form.fallback_hint")}
+            </Text>
+            <FallbackChainEditor
+              value={readFallback(formData)}
+              catalog={catalog}
+              onChange={(chain) => onChange(setFallback(formData, chain))}
+            />
+          </section>
+        )}
 
         <section data-testid="af-reflection-evaluator" style={SECTION}>
           <Heading>

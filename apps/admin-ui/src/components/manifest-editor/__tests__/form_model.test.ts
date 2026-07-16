@@ -55,6 +55,8 @@ import {
   setRunDeadline,
   setToolBudgetOn,
   setTrajectoryRecording,
+  readFallback,
+  setFallback,
 } from "../form_model";
 
 const seed = {
@@ -93,6 +95,51 @@ describe("form_model readers", () => {
       mcpAllowTools: [],
       mcpServers: [],
     });
+  });
+});
+
+describe("model fallback chain (spec.model.fallback)", () => {
+  it("reads an empty chain when no fallback is set", () => {
+    expect(readFallback(seed)).toEqual([]);
+  });
+
+  it("writes a chain, preserves the primary + siblings, reads it back", () => {
+    const chain = [
+      { provider: "glm", name: "glm-4-flash" },
+      { provider: "deepseek", name: "deepseek-chat" },
+    ];
+    const next = setFallback(seed, chain);
+    expect(readFallback(next)).toEqual(chain);
+    // Primary model + its name untouched.
+    expect(next.spec?.model?.provider).toBe("anthropic");
+    expect(next.spec?.model?.name).toBe("claude-sonnet-4-6");
+    // Unrelated spec keys preserved.
+    expect(next.spec?.system_prompt).toEqual(seed.spec.system_prompt);
+  });
+
+  it("setFallback([]) drops the key so a single-provider manifest stays clean", () => {
+    const withChain = setFallback(seed, [{ provider: "glm", name: "glm-4-flash" }]);
+    const cleared = setFallback(withChain, []);
+    expect(readFallback(cleared)).toEqual([]);
+    expect("fallback" in (cleared.spec?.model ?? {})).toBe(false);
+  });
+
+  it("preserves an entry's own nested fallback (YAML power-user round-trip)", () => {
+    const chain = [
+      {
+        provider: "glm",
+        name: "glm-4-flash",
+        fallback: [{ provider: "kimi", name: "kimi-k2" }],
+      },
+    ];
+    const next = setFallback(seed, chain);
+    expect(readFallback(next)[0].fallback).toEqual([{ provider: "kimi", name: "kimi-k2" }]);
+  });
+
+  it("does not mutate the input manifest", () => {
+    const before = JSON.stringify(seed);
+    setFallback(seed, [{ provider: "glm", name: "glm-4-flash" }]);
+    expect(JSON.stringify(seed)).toBe(before);
   });
 });
 

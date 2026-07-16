@@ -11,6 +11,11 @@ export interface ModelFields {
   context_window?: number;
   // Thinking-Toggle — tri-state on/off (undefined = inherit vendor default).
   thinking_enabled?: boolean;
+  // E.11 — provider fallback chain, flat + ordered: primary → fallback[0] →
+  // fallback[1] → …. The backend pre-order-flattens the tree
+  // (agent_factory._flatten_chain), so a hand-authored nested sub-chain on an
+  // entry is preserved and walked before the next sibling.
+  fallback?: ModelFields[];
   [k: string]: unknown;
 }
 export interface LongTermFields {
@@ -150,6 +155,11 @@ export const readName = (m: unknown): string => asObj(m).metadata?.name ?? "";
 export const readDescription = (m: unknown): string =>
   specOf(m).description ?? "";
 export const readModel = (m: unknown): ModelFields => specOf(m).model ?? {};
+// E.11 — the main model's fallback chain (flat list, primary excluded).
+export const readFallback = (m: unknown): ModelFields[] => {
+  const fb = readModel(m).fallback;
+  return Array.isArray(fb) ? (fb as ModelFields[]) : [];
+};
 export const readSystemPrompt = (m: unknown): string =>
   specOf(m).system_prompt?.template ?? "";
 export const readMemoryOn = (m: unknown): boolean =>
@@ -223,6 +233,17 @@ export const setDescription = (
 ): AgentManifest => patchSpec(m, { description });
 export function setModel(m: unknown, model: ModelFields): AgentManifest {
   return patchSpec(m, { model: { ...readModel(m), ...model } });
+}
+// E.11 — replace the main model's fallback chain. An empty chain drops the key
+// so a single-provider agent's manifest stays byte-clean.
+export function setFallback(m: unknown, chain: ModelFields[]): AgentManifest {
+  const model: ModelFields = { ...readModel(m) };
+  if (chain.length === 0) {
+    delete model.fallback;
+  } else {
+    model.fallback = chain;
+  }
+  return patchSpec(m, { model });
 }
 export function setSystemPrompt(m: unknown, template: string): AgentManifest {
   return patchSpec(m, {
