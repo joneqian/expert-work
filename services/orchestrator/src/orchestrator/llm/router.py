@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -56,12 +56,18 @@ from expert_work.runtime.middleware import (
     LLMKeyUnavailableError,
     LLMOutputValidationError,
     LLMRateLimitError,
+    LLMStreamInterruptedError,
     LLMStreamStaleError,
     LLMUnauthorizedError,
     MiddlewareChain,
     MiddlewareContext,
 )
 from orchestrator.llm.oauth_provider import OAuthCapableProvider
+from orchestrator.llm.providers._streaming import (
+    LLMDelta,
+    OpenAIStreamAssembler,
+    supports_streaming,
+)
 from orchestrator.llm.structured_output import (
     MAX_VALIDATION_RETRIES,
     correction_message,
@@ -75,7 +81,7 @@ logger = logging.getLogger(__name__)
 # ``provider_key`` so dashboards can show which upstream is hanging.
 _llm_stream_stale_total = expert_work_counter(
     "expert_work_llm_stream_stale_total",
-    "Provider calls that exceeded LLMRouter.stream_deadline_s (Stream L.L3).",
+    "Provider calls that exceeded LLMRouter.first_token_timeout_s (Stream L.L3).",
     ("provider_key",),
 )
 
@@ -205,6 +211,39 @@ def _complete(
     return provider.complete(messages=messages, tools=tools, output_schema=output_schema)
 
 
+class _StreamEnded(Exception):  # noqa: N818 - internal control-flow sentinel, not a public error
+    """Internal — the delta iterator is exhausted (StopAsyncIteration)."""
+
+
+async def _next_delta(it: AsyncIterator[LLMDelta], timeout: float | None) -> LLMDelta:
+    """One ``__anext__`` under an optional timeout. Raises ``_StreamEnded``
+    on exhaustion, ``TimeoutError`` on expiry, or the provider's
+    :class:`LLMError` on a stream fault."""
+    coro = it.__anext__()
+    try:
+        if timeout is None or timeout <= 0:
+            return await coro
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except StopAsyncIteration as exc:
+        raise _StreamEnded from exc
+
+
+def _stream(
+    provider: LLMProvider,
+    *,
+    messages: Sequence[BaseMessage],
+    tools: Sequence[ToolSpec],
+    output_schema: StructuredOutputSpec | None,
+) -> AsyncIterator[LLMDelta]:
+    """Call ``provider.stream``, forwarding ``output_schema`` only when set
+    (mirrors ``_complete`` so pre-streaming doubles stay call-identical)."""
+    if output_schema is None:
+        return provider.stream(messages=messages, tools=tools)  # type: ignore[attr-defined]
+    return provider.stream(  # type: ignore[attr-defined]
+        messages=messages, tools=tools, output_schema=output_schema
+    )
+
+
 def _llm_response_payload(response: AIMessage) -> dict[str, Any]:
     """Build the ``ctx.payload["llm_response"]`` contract documented in
     :mod:`expert_work.runtime.middleware.langfuse` — ``{"output": ...,
@@ -288,13 +327,14 @@ class LLMRouter:
 
     providers: Sequence[ProviderHandle]
     around_llm_chain: MiddlewareChain | None = field(default=None)
-    #: Stream L.L3 — wall-clock cap on a single provider's ``complete()``
-    #: call. ``None`` or ``0`` disables the timeout (dev / long batch
-    #: paths); positive values wrap each provider attempt in
-    #: ``asyncio.wait_for`` and translate ``TimeoutError`` into
-    #: :class:`LLMStreamStaleError` so the router falls back to the next
-    #: provider rather than locking the run.
-    stream_deadline_s: float | None = field(default=None)
+    #: Stream L (P1) — the streaming idle-timeout pair. ``first_token_timeout_s``
+    #: bounds time-to-first-token (fallback-eligible on expiry); ``idle_timeout_s``
+    #: bounds inter-delta silence AFTER the first token (ends the turn with the
+    #: partial output). For a non-streaming provider (Anthropic until P1', test
+    #: doubles) ``first_token_timeout_s`` degrades to the legacy total wall-clock
+    #: cap around ``complete()``. ``None``/``0`` disables the respective timer.
+    first_token_timeout_s: float | None = field(default=None)
+    idle_timeout_s: float | None = field(default=None)
 
     async def __call__(
         self,
@@ -331,6 +371,11 @@ class LLMRouter:
                 # model behaviour, not a key/provider fault: never rotate
                 # to a sibling key, never fail over. Re-raise so the
                 # caller's defensive degradation path handles it.
+                raise
+            except LLMStreamInterruptedError:
+                # Buffer-until-first-token — a stall/error AFTER the first
+                # delta commits the run to this provider (partial output
+                # already streamed). No key rotation, no failover.
                 raise
             except _KEY_LEVEL_ERRORS as exc:
                 last_exc = exc
@@ -480,14 +525,8 @@ class LLMRouter:
         ``ctx.payload["response"]``.
         """
         if self.around_llm_chain is None:
-            result = await self._invoke_with_deadline(
-                handle,
-                _complete(
-                    handle.provider,
-                    messages=messages,
-                    tools=tools,
-                    output_schema=output_schema,
-                ),
+            result = await self._invoke_provider(
+                handle, messages=messages, tools=tools, output_schema=output_schema
             )
             assert isinstance(result, AIMessage)  # noqa: S101 - provider Protocol contract
             return result
@@ -509,8 +548,8 @@ class LLMRouter:
         ctx = MiddlewareContext(payload=payload)
 
         async def terminal(c: MiddlewareContext) -> None:
-            response = await _complete(
-                handle.provider,
+            response = await self._invoke_provider(
+                handle,
                 messages=c.payload["messages"],
                 tools=c.payload["tools"],
                 output_schema=output_schema,
@@ -518,7 +557,7 @@ class LLMRouter:
             c.payload["response"] = response
             c.payload["llm_response"] = _llm_response_payload(response)
 
-        await self._invoke_with_deadline(handle, self.around_llm_chain.invoke(ctx, terminal))
+        await self.around_llm_chain.invoke(ctx, terminal)
         response = ctx.payload.get("response")
         if not isinstance(response, AIMessage):
             # Middleware mis-handled the terminal (didn't call call_next, or
@@ -529,6 +568,87 @@ class LLMRouter:
                 f"response for provider_key={handle.key!r}"
             )
         return response
+
+    async def _invoke_provider(
+        self,
+        handle: ProviderHandle,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None,
+    ) -> AIMessage:
+        """Dispatch one provider attempt — streaming (two-threshold idle
+        driver) when the provider supports it, else the legacy
+        single-deadline ``complete()`` path."""
+        if supports_streaming(handle.provider):
+            return await self._drive_stream(
+                handle,
+                _stream(
+                    handle.provider, messages=messages, tools=tools, output_schema=output_schema
+                ),
+            )
+        result = await self._invoke_with_deadline(
+            handle,
+            _complete(handle.provider, messages=messages, tools=tools, output_schema=output_schema),
+        )
+        assert isinstance(result, AIMessage)  # noqa: S101
+        return result
+
+    async def _drive_stream(
+        self, handle: ProviderHandle, stream: AsyncIterator[LLMDelta]
+    ) -> AIMessage:
+        """Consume a provider delta stream under the two-threshold policy.
+
+        Phase 1 (until the first *progress* delta): bounded by
+        ``first_token_timeout_s``; a stall or error is retryable →
+        fallback. Phase 2 (after the first progress delta): bounded by
+        ``idle_timeout_s``; a stall ends the turn with the partial
+        output; an error is terminal (:class:`LLMStreamInterruptedError`,
+        no fallback)."""
+        assembler = OpenAIStreamAssembler()
+        it = stream.__aiter__()
+        first_progress = False
+
+        # Phase 1 — wait for the first progress delta.
+        while not first_progress:
+            try:
+                delta = await _next_delta(it, self.first_token_timeout_s)
+            except _StreamEnded:
+                return assembler.build()  # ended with no progress → empty answer
+            except TimeoutError as exc:
+                _llm_stream_stale_total.labels(provider_key=handle.key).inc()
+                logger.warning(
+                    "llm_router.first_token_timeout key=%s deadline_s=%s",
+                    handle.key,
+                    self.first_token_timeout_s,
+                )
+                raise LLMStreamStaleError(
+                    f"provider {handle.key!r} produced no token within "
+                    f"first_token_timeout_s={self.first_token_timeout_s}"
+                ) from exc
+            assembler.add(delta)
+            first_progress = delta.has_progress
+
+        # Phase 2 — consume the rest under the idle timeout.
+        while True:
+            try:
+                delta = await _next_delta(it, self.idle_timeout_s)
+            except _StreamEnded:
+                return assembler.build()
+            except TimeoutError:
+                logger.warning(
+                    "llm_router.idle_timeout key=%s deadline_s=%s (ending turn with partial)",
+                    handle.key,
+                    self.idle_timeout_s,
+                )
+                return assembler.build(interrupted=True)
+            except LLMError as exc:
+                # Post-first-token hard error → terminal, no fallback.
+                raise LLMStreamInterruptedError(
+                    f"provider {handle.key!r} stream failed after first token: {exc}",
+                    partial=assembler.build(interrupted=True),
+                ) from exc
+            assembler.add(delta)
 
     async def _handle_unauthorized(
         self,
@@ -609,14 +729,19 @@ class LLMRouter:
     ) -> Any:
         """Stream L.L3 — wrap a provider invocation in ``asyncio.wait_for``.
 
-        ``stream_deadline_s`` is per-provider (Mini-ADR L-3): a hung
+        ``first_token_timeout_s`` is per-provider (Mini-ADR L-3): a hung
         provider trips the timeout, raises :class:`LLMStreamStaleError`
         (a retryable :class:`LLMServerError` subclass), and the surrounding
         :meth:`__call__` loop falls back to the next provider rather than
-        locking the run. When ``stream_deadline_s`` is ``None`` or ``0``
+        locking the run. When ``first_token_timeout_s`` is ``None`` or ``0``
         the call is awaited directly (dev / long-batch path).
+
+        Non-streaming providers only (Stream L P1 — :meth:`_invoke_provider`
+        routes streaming providers through :meth:`_drive_stream` instead,
+        which applies the two-threshold ``first_token_timeout_s`` /
+        ``idle_timeout_s`` pair directly).
         """
-        deadline = self.stream_deadline_s
+        deadline = self.first_token_timeout_s
         if deadline is None or deadline <= 0:
             return await coro
         try:
@@ -629,5 +754,5 @@ class LLMRouter:
                 deadline,
             )
             raise LLMStreamStaleError(
-                f"provider {handle.key!r} exceeded stream_deadline_s={deadline:.1f}"
+                f"provider {handle.key!r} exceeded first_token_timeout_s={deadline:.1f}"
             ) from exc

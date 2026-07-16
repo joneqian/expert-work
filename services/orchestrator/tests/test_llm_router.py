@@ -299,8 +299,8 @@ def test_scripted_provider_satisfies_protocol() -> None:
 class _HangingProvider:
     """LLMProvider stub that sleeps ``sleep_s`` before returning.
 
-    Used by L3 tests to exercise the ``stream_deadline_s`` wall-clock cap
-    in :class:`LLMRouter._call_one`.
+    Used by L3 tests to exercise the ``first_token_timeout_s`` wall-clock
+    cap in :class:`LLMRouter._call_one`.
     """
 
     sleep_s: float
@@ -325,7 +325,7 @@ async def test_stream_deadline_triggers_stale_error_on_single_provider() -> None
     hanger = _HangingProvider(sleep_s=10)
     router = LLMRouter(
         providers=[_handle(hanger, "slow")],
-        stream_deadline_s=0.05,
+        first_token_timeout_s=0.05,
     )
 
     with pytest.raises(AllProvidersExhaustedError) as exc_info:
@@ -345,7 +345,7 @@ async def test_stream_stale_falls_back_to_next_provider() -> None:
     fallback = _ScriptedProvider(response=AIMessage(content="recovered"))
     router = LLMRouter(
         providers=[_handle(primary, "slow"), _handle(fallback, "fast")],
-        stream_deadline_s=0.05,
+        first_token_timeout_s=0.05,
     )
 
     result = await router(messages=_msgs(), tools=[])
@@ -357,7 +357,7 @@ async def test_stream_stale_falls_back_to_next_provider() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_deadline_zero_disables_timeout() -> None:
-    """``stream_deadline_s=None`` (or ``0``) skips ``asyncio.wait_for`` —
+    """``first_token_timeout_s=None`` (or ``0``) skips ``asyncio.wait_for`` —
     dev / long-batch paths can run without an upper bound when explicitly
     configured."""
     # A short sleep that would normally clear the 50ms deadline if
@@ -366,7 +366,7 @@ async def test_stream_deadline_zero_disables_timeout() -> None:
     slow = _HangingProvider(sleep_s=0.1)
     router = LLMRouter(
         providers=[_handle(slow, "slow")],
-        stream_deadline_s=None,
+        first_token_timeout_s=None,
     )
     result = await router(messages=_msgs(), tools=[])
     assert result is slow.response
@@ -380,7 +380,7 @@ async def test_stream_deadline_zero_explicit_int_disables_timeout() -> None:
     slow = _HangingProvider(sleep_s=0.1)
     router = LLMRouter(
         providers=[_handle(slow, "slow")],
-        stream_deadline_s=0,
+        first_token_timeout_s=0,
     )
     result = await router(messages=_msgs(), tools=[])
     assert result is slow.response
@@ -393,7 +393,7 @@ async def test_fast_provider_under_deadline_succeeds() -> None:
     fast = _ScriptedProvider(response=AIMessage(content="quick"))
     router = LLMRouter(
         providers=[_handle(fast, "fast")],
-        stream_deadline_s=5.0,
+        first_token_timeout_s=5.0,
     )
     result = await router(messages=_msgs(), tools=[])
     assert result.content == "quick"
@@ -413,7 +413,7 @@ async def test_stream_stale_emits_counter() -> None:
     hanger = _HangingProvider(sleep_s=10)
     router = LLMRouter(
         providers=[_handle(hanger, "counter-test")],
-        stream_deadline_s=0.05,
+        first_token_timeout_s=0.05,
     )
     with pytest.raises(AllProvidersExhaustedError):
         await router(messages=_msgs(), tools=[])

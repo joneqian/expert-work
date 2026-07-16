@@ -119,6 +119,20 @@ class LLMStreamStaleError(LLMServerError):
     """
 
 
+class LLMStreamInterruptedError(LLMError):
+    """Stream L (P1) — a streaming provider stalled or errored AFTER the
+    first progress delta. Buffer-until-first-token commits the run to
+    that provider once tokens flow, so this is terminal: it inherits the
+    plain :class:`LLMError` (NOT :class:`LLMServerError`), so the E.4
+    error-handling middleware does not retry it and the router does not
+    fall back. Carries the partial :class:`AIMessage` assembled so far
+    for callers that want to surface it."""
+
+    def __init__(self, message: str, *, partial: object | None = None) -> None:
+        super().__init__(message)
+        self.partial = partial
+
+
 class LLMOutputValidationError(LLMError):
     """Stream RT-1 — structured output still failed schema validation
     after the correction retries (RT-ADR-1).

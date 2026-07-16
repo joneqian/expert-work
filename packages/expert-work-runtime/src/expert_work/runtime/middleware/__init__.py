@@ -106,6 +106,9 @@ from expert_work.runtime.middleware.llm_error_handling import (
     LLMServerError as LLMServerError,
 )
 from expert_work.runtime.middleware.llm_error_handling import (
+    LLMStreamInterruptedError as LLMStreamInterruptedError,
+)
+from expert_work.runtime.middleware.llm_error_handling import (
     LLMStreamStaleError as LLMStreamStaleError,
 )
 from expert_work.runtime.middleware.llm_error_handling import (
@@ -162,6 +165,7 @@ __all__ = [
     "LLMOutputValidationError",
     "LLMRateLimitError",
     "LLMServerError",
+    "LLMStreamInterruptedError",
     "LLMStreamStaleError",
     "LLMUnauthorizedError",
     "LangfuseClient",

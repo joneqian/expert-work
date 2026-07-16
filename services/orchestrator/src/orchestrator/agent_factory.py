@@ -1813,8 +1813,9 @@ async def build_llm_router(
     content blocks resolve to bytes at call time (J.6 Path A).
 
     ``stream_deadline_s`` (Stream L.L3) caps each provider's ``complete()``
-    call in wall-clock time; ``None`` / ``0`` disables. See
-    :class:`LLMRouter.stream_deadline_s`.
+    call in wall-clock time; ``None`` / ``0`` disables. Forwarded to
+    :class:`LLMRouter.first_token_timeout_s` (Stream L P1 renamed the
+    field when the router grew the streaming idle-timeout pair).
 
     Mini-ADR J-33 (J.6.补强-4) — ``extra_fallbacks`` is the J.6 VL
     path's mirror of E.11 fallback. The list is appended **after** the
@@ -1884,7 +1885,7 @@ async def build_llm_router(
     return LLMRouter(
         providers=handles,
         around_llm_chain=around_llm_chain,
-        stream_deadline_s=stream_deadline_s,
+        first_token_timeout_s=stream_deadline_s,
     )
 
 
