@@ -4,7 +4,7 @@
 
 **Goal:** Give the OpenAI-wire provider a real token stream and drive it from the router with a two-threshold idle timeout, so the deadline stops mis-firing on healthy-but-slow generations — with **zero** external/UI contract change (`complete()` still returns a whole `AIMessage`).
 
-**Architecture:** The OpenAI-wire HTTP client gains a `stream_chat_completions` method (`stream=true` SSE). A new `_streaming.py` module normalizes vendor SSE chunks into `LLMDelta` objects and re-assembles them — via the *existing* `_from_openai_response` decoder — into an `AIMessage` byte-identical to today's non-streaming result. `OpenAIProvider.stream()` exposes the delta stream; `OpenAIProvider.complete()` now drains it internally. The router detects streaming-capable providers, drives two timers (`first_token_timeout_s` until the first progress delta → fallback-eligible; `idle_timeout_s` between deltas → ends the turn with the partial), and falls back to the legacy single-`asyncio.wait_for` path for non-streaming providers (Anthropic, test doubles) until P1'.
+**Architecture:** The OpenAI-wire HTTP client gains a `stream_chat_completions` method (`stream=true` SSE). A new `_streaming.py` module normalizes vendor SSE chunks into `LLMDelta` objects and re-assembles them — via the *existing* `_from_openai_response` decoder — into an `AIMessage` byte-identical to today's non-streaming result. `OpenAIProvider.stream()` exposes the delta stream; `OpenAIProvider.complete()` stays the non-streaming path unchanged (both share request building via `_prepare_request` and both decode via `_from_openai_response`, so they cannot diverge). The router detects streaming-capable providers, drives two timers (`first_token_timeout_s` until the first progress delta → fallback-eligible; `idle_timeout_s` between deltas → ends the turn with the partial), and calls `stream()` for OpenAI-wire providers; the legacy single-`asyncio.wait_for` `complete()` path remains for non-streaming providers (Anthropic, test doubles) until P1'. (Once the router streams OpenAI providers, `complete()` is production-dead for them but retained for Protocol conformance and the non-streaming path.)
 
 **Tech Stack:** Python 3.12, httpx streaming (`client.stream`), LangChain `AIMessage`, pytest with `httpx.MockTransport`, ruff + mypy.
 
@@ -848,23 +848,25 @@ git commit -m "feat(llm): HTTPOpenAIClient.stream_chat_completions (SSE) + recor
 
 ---
 
-### Task 3: `OpenAIProvider.stream()` + drain in `complete()`
+### Task 3: `OpenAIProvider.stream()` (complete() stays non-streaming)
 
 **Files:**
 - Modify: `services/orchestrator/src/orchestrator/llm/providers/openai.py` (`OpenAIProvider`)
-- Test: `services/orchestrator/tests/test_openai_provider_stream.py`
+- Test: `services/orchestrator/tests/test_llm_provider_openai_stream.py`
 
 **Interfaces:**
 - Consumes: `_streaming.LLMDelta`, `delta_from_openai_chunk`, `OpenAIStreamAssembler`; the client `stream_chat_completions` (Task 2).
-- Produces: `OpenAIProvider.stream(...) -> AsyncIterator[LLMDelta]`; `OpenAIProvider.complete()` now drains `stream()`. `complete()` keeps the same signature/return and the HX-13 allowed_tools fallback.
+- Produces: `OpenAIProvider.stream(...) -> AsyncIterator[LLMDelta]`. `complete()` keeps its exact behavior (non-streaming `chat_completions` + `_from_openai_response`) and the HX-13 allowed_tools fallback; both now share `_prepare_request`.
 
-- [ ] **Step 1: Write the failing test** — `tests/test_openai_provider_stream.py`
+**Why `complete()` is NOT rewritten to drain the stream (pre-flight decision):** the existing `test_llm_provider_openai.py` suite (~20 tests) builds `RecordingOpenAIClient(response=...)` and asserts on both the returned message and the recorded request. Once the router streams OpenAI providers (Task 5), `complete()` is production-dead for them, so rewriting it to drain the stream would break that whole suite for zero production benefit. Instead: extract `_prepare_request` (shared, so no duplicated message-mapping — a duplication the reviewer would flag), keep `complete()` on the non-streaming path, add `stream()`. Byte-equality of the two decode paths is guaranteed structurally: the assembler builds a synthetic non-streaming body and calls the *same* `_from_openai_response` (proven in Task 1) — and a new equivalence test here pins it end-to-end.
+
+- [ ] **Step 1: Write the failing test** — `tests/test_llm_provider_openai_stream.py`
 
 ```python
 import pytest
 from langchain_core.messages import HumanMessage
 
-from orchestrator.llm.providers._streaming import LLMDelta
+from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
 from orchestrator.llm.providers.openai import OpenAIProvider, RecordingOpenAIClient
 
 
@@ -887,22 +889,38 @@ async def test_stream_yields_normalized_deltas() -> None:
     ]
     assert [d.content for d in deltas if d.content] == ["Hel", "lo"]
     assert any(d.usage and d.usage["total_tokens"] == 5 for d in deltas)
+    assert client.calls[-1]["stream"] is True  # stream() went through the streaming client method
 
 
 @pytest.mark.asyncio
-async def test_complete_drains_stream_to_full_message() -> None:
-    client = RecordingOpenAIClient(stream_chunks=_text_chunks())
-    provider = OpenAIProvider(client=client, model="glm-5.2")
-    msg = await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
-    assert msg.content == "Hello"
-    assert msg.usage_metadata is not None
-    assert msg.usage_metadata["total_tokens"] == 5
-    assert msg.response_metadata["finish_reason"] == "stop"
-    assert client.calls[-1]["stream"] is True  # complete() now goes through the stream path
+async def test_stream_then_assemble_equals_non_streaming_complete() -> None:
+    # The end-to-end byte-equality pin: the SAME logical response, delivered
+    # once as a whole body (complete) and once as chunks (stream+assemble),
+    # yields an identical AIMessage.
+    whole = {
+        "choices": [{"message": {"role": "assistant", "content": "Hello"},
+                     "finish_reason": "stop"}],
+        "model": "glm-5.2",
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+    }
+    complete_provider = OpenAIProvider(client=RecordingOpenAIClient(response=whole), model="glm-5.2")
+    expected = await complete_provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    stream_provider = OpenAIProvider(client=RecordingOpenAIClient(stream_chunks=_text_chunks()), model="glm-5.2")
+    asm = OpenAIStreamAssembler()
+    async for d in stream_provider.stream(messages=[HumanMessage(content="hi")], tools=[]):
+        asm.add(d)
+    got = asm.build()
+
+    assert got.content == expected.content
+    assert got.additional_kwargs == expected.additional_kwargs
+    assert got.response_metadata == expected.response_metadata
+    assert got.usage_metadata == expected.usage_metadata
+    assert got.tool_calls == expected.tool_calls
 
 
 @pytest.mark.asyncio
-async def test_complete_reassembles_tool_call() -> None:
+async def test_stream_reassembles_tool_call_fragments() -> None:
     client = RecordingOpenAIClient(stream_chunks=[
         {"choices": [{"delta": {"tool_calls": [
             {"index": 0, "id": "call_1", "function": {"name": "search", "arguments": '{"q": '}}]}}]},
@@ -910,28 +928,30 @@ async def test_complete_reassembles_tool_call() -> None:
             {"index": 0, "function": {"arguments": '"hi"}'}}]}, "finish_reason": "tool_calls"}]},
     ])
     provider = OpenAIProvider(client=client, model="glm-5.2")
-    msg = await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+    asm = OpenAIStreamAssembler()
+    async for d in provider.stream(messages=[HumanMessage(content="hi")], tools=[]):
+        asm.add(d)
+    msg = asm.build()
     assert msg.tool_calls == [{"id": "call_1", "name": "search", "args": {"q": "hi"}, "type": "tool_call"}]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd services/orchestrator && python -m pytest tests/test_openai_provider_stream.py -q`
+Run: `cd services/orchestrator && python -m pytest tests/test_llm_provider_openai_stream.py -q`
 Expected: FAIL — `AttributeError: 'OpenAIProvider' object has no attribute 'stream'`.
 
 - [ ] **Step 3: Write minimal implementation** — edits to `OpenAIProvider`
 
-Import the streaming model at the top of `openai.py` **inside** the provider methods is not needed — add a module import guarded against the cycle. Since `_streaming.build()` imports `openai` lazily, `openai` can import `_streaming` at module top safely:
+Add the streaming-model import at the top of `openai.py` (`_streaming.build()` imports `openai` lazily, so `openai` importing `_streaming` at module top is cycle-safe):
 
 ```python
 from orchestrator.llm.providers._streaming import (
     LLMDelta,
-    OpenAIStreamAssembler,
     delta_from_openai_chunk,
 )
 ```
 
-Refactor `OpenAIProvider.complete()` to build the request via a shared helper and drain the stream. Extract the message/tool/response_format assembly (lines 276–322) into `_prepare_request` returning the kwargs dict, so `complete()` and `stream()` share it:
+Extract the message/tool/response_format assembly currently inline in `complete()` (lines 276–322) into `_prepare_request`, shared by `complete()` and `stream()`:
 
 ```python
     async def _prepare_request(
@@ -982,7 +1002,7 @@ Refactor `OpenAIProvider.complete()` to build the request via a shared helper an
         }
 ```
 
-Rewrite `complete()` to reuse `_prepare_request` + drain `stream()` (preserving the HX-13 allowed_tools fallback):
+Rewrite `complete()` to use `_prepare_request` — **behavior-identical** to today (still the non-streaming `chat_completions` path + HX-13 fallback):
 
 ```python
     async def complete(
@@ -992,10 +1012,25 @@ Rewrite `complete()` to reuse `_prepare_request` + drain `stream()` (preserving 
         tools: Sequence[ToolSpec],
         output_schema: StructuredOutputSpec | None = None,
     ) -> AIMessage:
-        assembler = OpenAIStreamAssembler()
-        async for delta in self.stream(messages=messages, tools=tools, output_schema=output_schema):
-            assembler.add(delta)
-        return assembler.build()
+        use_allowed = (
+            any(spec.defer_loading for spec in tools) and not self._allowed_tools_disabled
+        )
+        request = await self._prepare_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_allowed=use_allowed
+        )
+        try:
+            body = await self.client.chat_completions(**request)
+        except LLMClientError:
+            if not use_allowed:
+                raise
+            self._allowed_tools_disabled = True
+            disclosure_fallback_total.labels(provider="openai").inc()
+            logger.warning("openai.allowed_tools_rejected — falling back to app tier")
+            retry = await self._prepare_request(
+                messages=messages, tools=tools, output_schema=output_schema, use_allowed=False
+            )
+            body = await self.client.chat_completions(**retry)
+        return _from_openai_response(body)
 
     async def stream(
         self,
@@ -1029,19 +1064,19 @@ Rewrite `complete()` to reuse `_prepare_request` + drain `stream()` (preserving 
             yield delta_from_openai_chunk(chunk)
 ```
 
-Note: the HX-13 `LLMClientError` fallback only works cleanly because a 400 rejection arrives before the first chunk (the client raises during status check, no delta yielded yet) — matching buffer-until-first-token. Keep the `except LLMClientError` re-stream **outside** the first `async for` so a mid-stream client error (post-first-token) is not silently retried; here the only source of `LLMClientError` from `stream_chat_completions` is the pre-chunk status classification.
+Note: the HX-13 `LLMClientError` fallback works because a 400 rejection arrives before the first chunk (the client raises during the status check, no delta yielded yet) — matching buffer-until-first-token. The `except LLMClientError` re-stream sits **outside** the first `async for`, so a mid-stream error is never silently retried; the only `LLMClientError` from `stream_chat_completions` is the pre-chunk status classification. `AsyncIterator` is already imported in `openai.py` from Task 2.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd services/orchestrator && python -m pytest tests/test_openai_provider_stream.py tests/test_openai_provider.py -q`
-Expected: PASS — new streaming provider tests pass AND the existing non-streaming `test_openai_provider.py` suite still passes (now routed through the drain path; assembled message is byte-equal).
+Run: `cd services/orchestrator && python -m pytest tests/test_llm_provider_openai_stream.py tests/test_llm_provider_openai.py tests/test_llm_provider_openai_compatible.py -q`
+Expected: PASS — new streaming tests pass AND the existing `test_llm_provider_openai.py` / `_compatible.py` suites still pass unchanged (`complete()` behavior is byte-identical; only the internal `_prepare_request` extraction moved).
 
 - [ ] **Step 5: Lint + commit**
 
 ```bash
-cd services/orchestrator && ruff check src/orchestrator/llm/providers/openai.py tests/test_openai_provider_stream.py && ruff format src/orchestrator/llm/providers/openai.py
-git add services/orchestrator/src/orchestrator/llm/providers/openai.py services/orchestrator/tests/test_openai_provider_stream.py
-git commit -m "feat(llm): OpenAIProvider.stream() + complete() drains the stream"
+cd services/orchestrator && ruff check src/orchestrator/llm/providers/openai.py tests/test_llm_provider_openai_stream.py && ruff format src/orchestrator/llm/providers/openai.py
+git add services/orchestrator/src/orchestrator/llm/providers/openai.py services/orchestrator/tests/test_llm_provider_openai_stream.py
+git commit -m "feat(llm): OpenAIProvider.stream() sharing _prepare_request with complete()"
 ```
 
 ---
@@ -1722,8 +1757,8 @@ git add -A && git commit -m "chore(llm): mypy + ruff fixups for streaming P1"
 
 | Spec requirement | Covered by |
 | --- | --- |
-| multi-delta text assembly | Task 1 `test_assembler_text_matches_non_streaming_decoder`, Task 3 `test_complete_drains_stream_to_full_message` |
-| reassembled tool-call fragments | Task 1 `test_assembler_reassembles_tool_call_fragments`, Task 3 `test_complete_reassembles_tool_call` |
+| multi-delta text assembly | Task 1 `test_assembler_text_matches_non_streaming_decoder`, Task 3 `test_stream_then_assemble_equals_non_streaming_complete` |
+| reassembled tool-call fragments | Task 1 `test_assembler_reassembles_tool_call_fragments`, Task 3 `test_stream_reassembles_tool_call_fragments` |
 | reasoning deltas | Task 1 `test_delta_reasoning_is_progress` + assembler test (reasoning in `additional_kwargs`) |
 | mid-stream `error` event | Task 2 `test_stream_in_band_error_event_raises`, Task 5 `test_error_after_first_token_is_terminal_no_fallback` |
 | first-token stall | Task 5 `test_first_token_timeout_falls_over_to_next_provider`, `test_first_token_timeout_all_exhausted` |
@@ -1732,7 +1767,7 @@ git add -A && git commit -m "chore(llm): mypy + ruff fixups for streaming P1"
 | idle fires on silence not slowness | Task 5 `test_idle_fires_on_silence_not_on_slow_total` |
 | buffer-until-first-token honored | Task 5 pre/post-token error + idle tests |
 | cache-hit returns whole, no timeout | N/A at router — cache short-circuits at the agent node (`builder.py:730`); documented in Global Constraints, no code |
-| assembled == old non-streaming (byte-equal) | Task 1 assembler-vs-`_from_openai_response` test; Task 3 runs the existing non-streaming suite through the drain path |
+| assembled == old non-streaming (byte-equal) | Task 1 assembler-vs-`_from_openai_response` test; Task 3 `test_stream_then_assemble_equals_non_streaming_complete` (same content via complete() vs stream()+assemble) |
 
 ## Out of Scope (deferred to later phases, per the spec)
 
