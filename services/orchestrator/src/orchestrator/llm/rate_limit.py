@@ -34,7 +34,7 @@ between the 2nd and 3rd call; it refills at 1 token per 30s.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Self
 
@@ -42,6 +42,7 @@ from aiolimiter import AsyncLimiter
 from langchain_core.messages import AIMessage, BaseMessage
 
 from expert_work.protocol import StructuredOutputSpec
+from orchestrator.llm.providers._streaming import LLMDelta
 from orchestrator.llm.router import LLMProvider
 from orchestrator.tools.registry import ToolSpec
 
@@ -124,3 +125,25 @@ class RateLimitedProvider:
             return await self.inner.complete(
                 messages=messages, tools=tools, output_schema=output_schema
             )
+
+    async def stream(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AsyncIterator[LLMDelta]:
+        """Acquire a token (admission), then delegate to the inner
+        provider's stream. Only called when the inner provider is
+        streaming-capable (the router probes via ``supports_streaming``).
+        The token bucket gates admission; ``aiolimiter`` does not refund
+        on exit, so spanning the iteration is harmless."""
+        async with self.limiter:
+            if output_schema is None:
+                inner_stream = self.inner.stream(messages=messages, tools=tools)  # type: ignore[attr-defined]
+            else:
+                inner_stream = self.inner.stream(  # type: ignore[attr-defined]
+                    messages=messages, tools=tools, output_schema=output_schema
+                )
+            async for delta in inner_stream:
+                yield delta
