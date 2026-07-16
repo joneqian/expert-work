@@ -71,6 +71,7 @@ def test_delta_final_chunk_usage_and_finish() -> None:
     assert d.usage == {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8}
     assert d.model == "glm-5.2"
     assert d.system_fingerprint == "fp_1"
+    assert d.has_progress is False
 
 
 def test_assembler_text_matches_non_streaming_decoder() -> None:
@@ -214,3 +215,20 @@ def test_supports_streaming_false_for_plain_provider() -> None:
             return AIMessage(content="")
 
     assert supports_streaming(_Plain()) is False
+
+
+def test_supports_streaming_safe_on_self_referential_inner() -> None:
+    class _SelfRef:
+        def __init__(self) -> None:
+            self.inner: Any = self  # points at itself
+
+    assert supports_streaming(_SelfRef()) is False  # terminates, no hang, no stream()
+
+
+def test_delta_missing_choices_is_empty_no_progress() -> None:
+    d = delta_from_openai_chunk({})
+    assert d.content == ""
+    assert d.reasoning == ""
+    assert d.tool_calls == ()
+    assert d.finish_reason is None
+    assert d.has_progress is False
