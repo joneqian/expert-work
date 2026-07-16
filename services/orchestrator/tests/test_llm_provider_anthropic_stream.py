@@ -53,3 +53,59 @@ async def test_stream_then_assemble_equals_complete() -> None:
     assert got.content == expected.content
     assert got.usage_metadata == expected.usage_metadata
     assert got.tool_calls == expected.tool_calls
+
+
+def _tool_use_events() -> list[dict]:
+    return [
+        {"type": "message_start", "message": {"model": "claude-x", "usage": {"input_tokens": 4}}},
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "tool_use", "id": "toolu_1", "name": "search"},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"q": '},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '"hi"}'},
+        },
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 6},
+        },
+        {"type": "message_stop"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_then_assemble_tool_use_equals_complete() -> None:
+    # Highest-complexity path: a tool_use SSE sequence assembled via stream()
+    # must byte-equal complete()'s decode of the equivalent whole tool_use body.
+    whole = {
+        "model": "claude-x",
+        "content": [{"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"q": "hi"}}],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 4, "output_tokens": 6},
+    }
+    complete_p = AnthropicProvider(
+        client=RecordingAnthropicClient(response=whole), model="claude-x", max_tokens=1024
+    )
+    expected = await complete_p.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    stream_p = AnthropicProvider(
+        client=RecordingAnthropicClient(stream_events=_tool_use_events()),
+        model="claude-x",
+        max_tokens=1024,
+    )
+    asm = stream_p.new_stream_assembler()
+    async for d in stream_p.stream(messages=[HumanMessage(content="hi")], tools=[]):
+        asm.add(d)
+    got = asm.build()
+    assert got.tool_calls == expected.tool_calls
+    assert got.content == expected.content
+    assert got.usage_metadata == expected.usage_metadata
