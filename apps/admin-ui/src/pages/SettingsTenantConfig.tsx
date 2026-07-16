@@ -69,6 +69,7 @@ function recordToPatchJson(record: TenantConfigRecord): string {
     rate_limit_override: record.rate_limit_override,
     pii_fields: record.pii_fields,
     http_tool_allowlist: record.http_tool_allowlist,
+    http_tool_denylist: record.http_tool_denylist,
     mcp_servers: record.mcp_servers,
     audit_retention_days: record.audit_retention_days,
     event_log_retention_days: record.event_log_retention_days,
@@ -335,11 +336,23 @@ export function SettingsTenantConfig() {
             <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.http_allowlist")}</dt>
             <dd style={{ margin: 0 }}>
               {record.http_tool_allowlist.length === 0 ? (
-                <Text type="secondary">—</Text>
+                <Text type="secondary">{t("settings_ops.http_allowlist_empty")}</Text>
               ) : (
                 <Space size={4} wrap>
                   {record.http_tool_allowlist.map((url) => (
                     <Tag key={url} bordered={false}>{url}</Tag>
+                  ))}
+                </Space>
+              )}
+            </dd>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.http_denylist")}</dt>
+            <dd style={{ margin: 0 }} data-testid="tenant-config-http-denylist">
+              {record.http_tool_denylist.length === 0 ? (
+                <Text type="secondary">—</Text>
+              ) : (
+                <Space size={4} wrap>
+                  {record.http_tool_denylist.map((host) => (
+                    <Tag key={host} color="red" bordered={false}>{host}</Tag>
                   ))}
                 </Space>
               )}

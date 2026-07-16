@@ -30,7 +30,12 @@ export interface TenantConfigRecord {
   mcp_allowlist: string[];
   rate_limit_override: Record<string, unknown>;
   pii_fields: string[];
+  /** E.8 — HTTP-tool egress. Empty allowlist ↔ allow all public hosts
+   *  (SSRF blocked by the tool); non-empty ↔ strict allow-only. */
   http_tool_allowlist: string[];
+  /** E.8 — hosts (exact or subdomain) the HTTP tool refuses even under
+   *  allow-all; takes precedence over the allowlist. */
+  http_tool_denylist: string[];
   mcp_servers: Record<string, unknown>[];
   audit_retention_days: number;
   event_log_retention_days: number;
@@ -64,6 +69,7 @@ export interface TenantConfigPatchBody {
   rate_limit_override?: Record<string, unknown>;
   pii_fields?: string[];
   http_tool_allowlist?: string[];
+  http_tool_denylist?: string[];
   mcp_servers?: Record<string, unknown>[];
   audit_retention_days?: number;
   event_log_retention_days?: number;

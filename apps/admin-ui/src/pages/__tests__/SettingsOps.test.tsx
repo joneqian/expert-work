@@ -120,6 +120,7 @@ const configRow = {
   rate_limit_override: {},
   pii_fields: [],
   http_tool_allowlist: ["https://api.github.com/*"],
+  http_tool_denylist: ["internal.example.com"],
   mcp_servers: [],
   audit_retention_days: 90,
   event_log_retention_days: 30,

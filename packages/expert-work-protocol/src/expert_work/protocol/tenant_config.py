@@ -125,9 +125,15 @@ class TenantConfigRecord(BaseModel):
     mcp_allowlist: list[str] = Field(default_factory=list)
     rate_limit_override: dict[str, Any] = Field(default_factory=dict)
     pii_fields: list[str] = Field(default_factory=list)
-    # E.8: glob patterns the HTTP tool may call (e.g. ``"https://api.github.com/*"``).
-    # Default ``[]`` ↔ deny-all so a freshly-provisioned tenant is safe.
+    # E.8 HTTP-tool egress policy (denylist model — mirrors the sandbox
+    # ``NetworkSpec``). ``http_tool_allowlist``: glob URL patterns
+    # (``"https://api.github.com/*"``). Empty ↔ allow all *public* hosts
+    # (SSRF / private-net targets are still blocked by the tool's static
+    # guard); non-empty ↔ strict allow-only-these. ``http_tool_denylist``:
+    # hosts (exact or subdomain, e.g. ``"internal.example.com"``) refused
+    # even under allow-all — takes precedence over the allowlist.
     http_tool_allowlist: list[str] = Field(default_factory=list)
+    http_tool_denylist: list[str] = Field(default_factory=list)
     # E.9: MCP server configs.
     # Shape: ``[{"name": str, "command": [str, ...], "env": {str: str}}]``.
     # NOT used to launch servers in M0 — STREAM-E-DESIGN Mini-ADR E-17:
@@ -238,6 +244,7 @@ class TenantConfigPatch(BaseModel):
     rate_limit_override: dict[str, Any] | None = None
     pii_fields: list[str] | None = None
     http_tool_allowlist: list[str] | None = None
+    http_tool_denylist: list[str] | None = None
     mcp_servers: list[dict[str, Any]] | None = None
     audit_retention_days: int | None = Field(
         default=None, ge=_RETENTION_MIN_DAYS, le=_RETENTION_MAX_DAYS

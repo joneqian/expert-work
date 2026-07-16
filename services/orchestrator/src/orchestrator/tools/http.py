@@ -1,10 +1,10 @@
 """Generic HTTP tool — Stream E.8.
 
-LLM-callable HTTP client gated by a **per-tenant URL allowlist**
-(glob patterns from ``tenant_config.http_tool_allowlist``). M0
-ships without Credential Proxy (F.5) — the tool just dispatches via
-httpx directly; F.5 swaps the dispatch layer underneath without
-touching this surface.
+LLM-callable HTTP client gated by a **per-tenant egress policy** (a
+static SSRF guard, plus ``tenant_config.http_tool_denylist`` /
+``http_tool_allowlist``). M0 ships without Credential Proxy (F.5) — the
+tool just dispatches via httpx directly; F.5 swaps the dispatch layer
+underneath without touching this surface.
 
 Output truncation per Mini-ADR E-10 in
 [STREAM-E-DESIGN](../../../../../docs/streams/STREAM-E-DESIGN.md):
@@ -15,14 +15,21 @@ Output truncation per Mini-ADR E-10 in
 - Status code is always preserved — even a truncated body without it
   leaves the LLM with no reasoning anchor.
 
-Per-tenant policy:
+Per-tenant policy (denylist model — mirrors the sandbox ``NetworkSpec``):
 
 - ``ctx.tenant_id`` is **required**; missing → :class:`ToolBlockedError`.
-- ``http_tool_allowlist`` is fetched via the injected ``allowlist_provider``
-  (the orchestrator wires this to ``TenantConfigService.get(...).http_tool_allowlist``).
-- Empty allowlist ↔ deny-all (the design's safe default).
-- Matching uses :func:`fnmatch.fnmatch` so admins can write
-  ``"https://api.github.com/*"`` rather than full regex.
+- **SSRF guard first**: every URL passes :func:`validate_remote_url` before the
+  allow/deny lists, so a private / loopback / link-local / cloud-metadata
+  target is refused even under allow-all. The check is static (no DNS);
+  DNS-rebind defense is the infra egress layer's job (ADR-0009). This tool
+  dispatches httpx directly (no Credential Proxy backstop), so this static
+  guard is its first-line SSRF defense.
+- ``http_tool_denylist`` (via ``denylist_provider``): hosts blocked even under
+  allow-all, matched exact-or-subdomain. Takes precedence over the allowlist.
+- ``http_tool_allowlist`` (via ``allowlist_provider``, wired to
+  ``TenantConfigService.get(...).http_tool_allowlist``): empty ↔ allow all
+  public hosts; non-empty ↔ strict allow-only-these, matched with
+  :func:`fnmatch.fnmatch` (``"https://api.github.com/*"``).
 
 Per Mini-ADR E-7, M0 skips Credential Proxy. Auth headers come from
 the manifest ``secret_ref`` → SecretStore at agent compile time (the
@@ -37,10 +44,13 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
 
+from expert_work.common.egress_token import host_in_denylist
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
 from orchestrator.tools.registry import (
     ToolBlockedError,
     ToolContext,
@@ -62,8 +72,15 @@ _HEADERS_TRUNCATION_MARKER = "...[truncated]"
 
 #: Callable the orchestrator wires to ``TenantConfigService.get(...).http_tool_allowlist``.
 #:
-#: ``None`` tenant_id → return ``()`` (the tool treats this as deny-all).
+#: Empty result ↔ allow all public hosts (the SSRF guard + denylist are the
+#: safety net); a non-empty list is strict allow-only-these.
 AllowlistProvider = Callable[[UUID | None], Awaitable[Sequence[str]]]
+
+#: Callable the orchestrator wires to ``TenantConfigService.get(...).http_tool_denylist``.
+#:
+#: Host entries (exact or subdomain) refused even under allow-all — takes
+#: precedence over the allowlist. Empty / unset ↔ nothing denied.
+DenylistProvider = Callable[[UUID | None], Awaitable[Sequence[str]]]
 
 #: Factory for the underlying httpx ``AsyncClient``. Production wires
 #: a singleton client; tests inject one preloaded with a
@@ -80,6 +97,8 @@ class HTTPTool:
     """Tenant-scoped HTTP caller exposed to the LLM as ``http``."""
 
     allowlist_provider: AllowlistProvider
+    #: Optional per-tenant host denylist (E.8). ``None`` ↔ nothing denied.
+    denylist_provider: DenylistProvider | None = None
     client_factory: HTTPXClientFactory = field(default=_default_client_factory)
     body_char_cap: int = DEFAULT_BODY_CHAR_CAP
     header_char_cap: int = DEFAULT_HEADER_CHAR_CAP
@@ -89,9 +108,10 @@ class HTTPTool:
         return ToolSpec(
             name="http",
             description=(
-                "Issue an HTTP request. The URL must match one of the tenant's "
-                "configured allowlist patterns (e.g., "
-                "'https://api.github.com/*'). Returns status, headers, body."
+                "Issue an HTTP request to a public URL. Private, loopback and "
+                "cloud-metadata addresses are always blocked; the tenant may "
+                "additionally deny specific hosts or restrict to an allowlist. "
+                "Returns status, headers, body."
             ),
             parameters={
                 "type": "object",
@@ -122,7 +142,7 @@ class HTTPTool:
         headers = self._coerce_headers(args.get("headers"))
         body_kwargs = self._coerce_body(args.get("body"))
 
-        await self._check_allowlist(url, ctx.tenant_id)
+        await self._check_policy(url, ctx.tenant_id)
 
         async with self.client_factory() as client:
             response = await client.request(
@@ -181,26 +201,38 @@ class HTTPTool:
         raise ValueError(msg)
 
     # ------------------------------------------------------------------
-    # Allowlist
+    # Policy — SSRF guard, then denylist, then allowlist
     # ------------------------------------------------------------------
 
-    async def _check_allowlist(self, url: str, tenant_id: UUID | None) -> None:
+    async def _check_policy(self, url: str, tenant_id: UUID | None) -> None:
         if tenant_id is None:
             logger.warning("http_tool.no_tenant_id url=%s", url)
             msg = "http tool requires a tenant-bound context"
             raise ToolBlockedError(msg)
 
-        patterns = await self.allowlist_provider(tenant_id)
-        if not patterns:
-            logger.warning(
-                "http_tool.deny_empty_allowlist tenant_id=%s url=%s",
-                tenant_id,
-                url,
-            )
-            msg = f"http_tool_allowlist is empty for this tenant; blocked {url!r}"
+        # SSRF guard first — refuse private / loopback / link-local / metadata
+        # targets (and non-canonical IP literals) regardless of the lists, so
+        # allow-all-public can never reach an internal address. Static, no DNS.
+        try:
+            validate_remote_url(url)
+        except RemoteURLError as exc:
+            logger.warning("http_tool.deny_ssrf tenant_id=%s url=%s reason=%s", tenant_id, url, exc)
+            msg = f"URL blocked by SSRF guard: {exc}"
+            raise ToolBlockedError(msg) from exc
+
+        host = (urlparse(url).hostname or "").rstrip(".")
+
+        # Denylist precedence — blocked even under allow-all or an allowlist.
+        denylist = tuple(await self.denylist_provider(tenant_id)) if self.denylist_provider else ()
+        if host_in_denylist(host, denylist):
+            logger.warning("http_tool.deny_denylist tenant_id=%s url=%s", tenant_id, url)
+            msg = f"host {host!r} is in the tenant http_tool_denylist; blocked {url!r}"
             raise ToolBlockedError(msg)
 
-        if not any(fnmatch.fnmatch(url, pattern) for pattern in patterns):
+        # Allowlist — empty ↔ allow all public hosts (SSRF guard + denylist are
+        # the safety net); non-empty ↔ strict allow-only-these (URL glob).
+        patterns = await self.allowlist_provider(tenant_id)
+        if patterns and not any(fnmatch.fnmatch(url, pattern) for pattern in patterns):
             logger.warning(
                 "http_tool.deny_not_in_allowlist tenant_id=%s url=%s",
                 tenant_id,

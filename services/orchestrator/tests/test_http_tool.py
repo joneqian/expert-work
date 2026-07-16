@@ -28,6 +28,13 @@ def _allowlist(*patterns: str):
     return provider
 
 
+def _denylist(*hosts: str):
+    async def provider(_tenant_id: UUID | None) -> Sequence[str]:
+        return hosts
+
+    return provider
+
+
 def _client_factory(handler):
     """Build a factory that yields an httpx client backed by ``handler``."""
 
@@ -43,21 +50,114 @@ def _tenant_ctx(tenant_id: UUID | None = None) -> ToolContext:
 
 
 # ---------------------------------------------------------------------------
-# Allowlist
+# Policy — SSRF guard, denylist, allowlist
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_empty_allowlist_is_deny_all() -> None:
-    """Default ``[]`` ↔ deny-all so freshly-provisioned tenants are safe."""
+async def test_empty_allowlist_allows_public_url() -> None:
+    """Denylist model: empty allowlist ↔ allow all *public* hosts (the SSRF
+    guard still blocks internal targets). Mirrors the sandbox ``NetworkSpec``."""
+    captured: list[httpx.Request] = []
 
-    def handler(_req: httpx.Request) -> httpx.Response:
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured.append(req)
+        return httpx.Response(200, text='{"ok": true}')
+
+    tool = HTTPTool(allowlist_provider=_allowlist(), client_factory=_client_factory(handler))
+    result = await tool.call(
+        {"method": "GET", "url": "https://api.github.com/users/x"},
+        ctx=_tenant_ctx(),
+    )
+    assert result.meta["status_code"] == 200
+    assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/latest/meta-data/",  # cloud metadata (link-local)
+        "http://127.0.0.1/admin",  # loopback
+        "http://10.1.2.3/internal",  # RFC1918
+        "http://localhost/x",  # localhost name
+        "http://0x7f000001/x",  # non-canonical (hex) loopback literal
+    ],
+)
+async def test_ssrf_targets_blocked_even_under_allow_all(url: str) -> None:
+    """The SSRF guard runs before the allow/deny lists, so private / loopback /
+    link-local / metadata targets are refused even with an empty allowlist."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:  # pragma: no cover
         return httpx.Response(200, text="should not happen")
 
     tool = HTTPTool(allowlist_provider=_allowlist(), client_factory=_client_factory(handler))
-    with pytest.raises(ToolBlockedError, match="empty"):
+    with pytest.raises(ToolBlockedError, match="SSRF"):
+        await tool.call({"method": "GET", "url": url}, ctx=_tenant_ctx())
+
+
+@pytest.mark.asyncio
+async def test_denylist_blocks_matching_host() -> None:
+    """A denylisted host is refused even under the default allow-all-public."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:  # pragma: no cover
+        return httpx.Response(200, text="should not happen")
+
+    tool = HTTPTool(
+        allowlist_provider=_allowlist(),
+        denylist_provider=_denylist("evil.example.com"),
+        client_factory=_client_factory(handler),
+    )
+    with pytest.raises(ToolBlockedError, match="denylist"):
         await tool.call(
-            {"method": "GET", "url": "https://api.github.com/users/x"},
+            {"method": "GET", "url": "https://evil.example.com/x"},
+            ctx=_tenant_ctx(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_denylist_matches_subdomain_but_allows_others() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured.append(req)
+        return httpx.Response(200, text="ok")
+
+    tool = HTTPTool(
+        allowlist_provider=_allowlist(),
+        denylist_provider=_denylist("evil.example.com"),
+        client_factory=_client_factory(handler),
+    )
+    # Subdomain of a denied host is blocked...
+    with pytest.raises(ToolBlockedError, match="denylist"):
+        await tool.call(
+            {"method": "GET", "url": "https://api.evil.example.com/x"},
+            ctx=_tenant_ctx(),
+        )
+    # ...an unrelated public host passes.
+    result = await tool.call(
+        {"method": "GET", "url": "https://api.github.com/x"},
+        ctx=_tenant_ctx(),
+    )
+    assert result.meta["status_code"] == 200
+    assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+async def test_denylist_takes_precedence_over_allowlist() -> None:
+    """A denied host loses even when the allowlist would permit the URL."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:  # pragma: no cover
+        return httpx.Response(200, text="should not happen")
+
+    tool = HTTPTool(
+        allowlist_provider=_allowlist("https://api.github.com/*"),
+        denylist_provider=_denylist("api.github.com"),
+        client_factory=_client_factory(handler),
+    )
+    with pytest.raises(ToolBlockedError, match="denylist"):
+        await tool.call(
+            {"method": "GET", "url": "https://api.github.com/x"},
             ctx=_tenant_ctx(),
         )
 

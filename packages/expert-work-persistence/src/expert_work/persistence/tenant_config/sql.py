@@ -45,6 +45,7 @@ def _row_to_record(row: TenantConfigRow) -> TenantConfigRecord:
         rate_limit_override=dict(row.rate_limit_override),
         pii_fields=[str(x) for x in row.pii_fields],
         http_tool_allowlist=[str(x) for x in row.http_tool_allowlist],
+        http_tool_denylist=[str(x) for x in row.http_tool_denylist],
         mcp_servers=[dict(x) for x in row.mcp_servers],
         audit_retention_days=row.audit_retention_days,
         event_log_retention_days=row.event_log_retention_days,
@@ -146,6 +147,7 @@ class SqlTenantConfigStore(TenantConfigStore):
                     "rate_limit_override": dict(patch.rate_limit_override or {}),
                     "pii_fields": list(patch.pii_fields or []),
                     "http_tool_allowlist": list(patch.http_tool_allowlist or []),
+                    "http_tool_denylist": list(patch.http_tool_denylist or []),
                     "mcp_servers": list(patch.mcp_servers or []),
                     "created_at": now,
                     "updated_at": now,
@@ -231,6 +233,8 @@ class SqlTenantConfigStore(TenantConfigStore):
                 existing.pii_fields = list(patch.pii_fields)
             if patch.http_tool_allowlist is not None:
                 existing.http_tool_allowlist = list(patch.http_tool_allowlist)
+            if patch.http_tool_denylist is not None:
+                existing.http_tool_denylist = list(patch.http_tool_denylist)
             if patch.mcp_servers is not None:
                 existing.mcp_servers = list(patch.mcp_servers)
             if patch.audit_retention_days is not None:
