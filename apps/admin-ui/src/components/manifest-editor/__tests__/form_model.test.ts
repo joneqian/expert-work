@@ -58,7 +58,23 @@ import {
   readFallback,
   setFallback,
   normalizeForSubmit,
+  readPromptInjection,
+  readOutputScreen,
+  readOutputJudge,
+  readOutputJudgeOnError,
+  readActionScreen,
+  readActionScreenOnError,
+  readOutputDlp,
+  readExtends,
+  setPromptInjection,
+  setOutputScreen,
+  setOutputJudge,
+  setOutputJudgeOnError,
+  setActionScreen,
+  setActionScreenOnError,
+  setOutputDlp,
 } from "../form_model";
+import type { AgentManifest } from "../form_model";
 
 const seed = {
   apiVersion: "expert_work.io/v1",
@@ -691,5 +707,105 @@ describe("form_model — dynamic prompt (jinja + variables)", () => {
     expect(
       (seed.spec.system_prompt as { jinja?: unknown }).jinja,
     ).toBeUndefined();
+  });
+});
+
+describe("form_model defenses readers (default-aware)", () => {
+  it("reads effective DefenseSpec defaults when defenses absent", () => {
+    const m: AgentManifest = { spec: {} };
+    expect(readPromptInjection(m)).toBe("spotlight");
+    expect(readOutputScreen(m)).toBe("block");
+    expect(readOutputJudge(m)).toBe("off");
+    expect(readOutputJudgeOnError(m)).toBe("open");
+    expect(readActionScreen(m)).toBe("off");
+    expect(readActionScreenOnError(m)).toBe("open");
+    expect(readOutputDlp(m)).toBe("off");
+    expect(readExtends(m)).toBeUndefined();
+  });
+
+  it("reads explicit values", () => {
+    const m: AgentManifest = {
+      spec: {
+        extends: "secure-template",
+        defenses: {
+          prompt_injection: "off",
+          output_screen: "off",
+          output_judge: "block",
+          output_judge_on_error: "closed",
+          action_screen: "approval",
+          action_screen_on_error: "closed",
+          output_dlp: "redact",
+        },
+      },
+    };
+    expect(readPromptInjection(m)).toBe("off");
+    expect(readOutputScreen(m)).toBe("off");
+    expect(readOutputJudge(m)).toBe("block");
+    expect(readOutputJudgeOnError(m)).toBe("closed");
+    expect(readActionScreen(m)).toBe("approval");
+    expect(readActionScreenOnError(m)).toBe("closed");
+    expect(readOutputDlp(m)).toBe("redact");
+    expect(readExtends(m)).toBe("secure-template");
+  });
+});
+
+describe("form_model defenses setters (default-omission + orphan cleanup)", () => {
+  const BASE: AgentManifest = { spec: { model: { provider: "openai" } } };
+
+  it("writing a non-default value adds the defenses key", () => {
+    const out = setOutputScreen(BASE, "off");
+    expect(out.spec?.defenses?.output_screen).toBe("off");
+    // sibling spec fields untouched
+    expect(out.spec?.model?.provider).toBe("openai");
+  });
+
+  it("writing the default value omits the key and drops an empty defenses block", () => {
+    const withOff = setOutputScreen(BASE, "off");
+    const backToDefault = setOutputScreen(withOff, "block");
+    expect(backToDefault.spec?.defenses).toBeUndefined();
+  });
+
+  it("turning the judge off clears the output_judge_on_error orphan", () => {
+    const on = setOutputJudge(BASE, "block");
+    const withErr = setOutputJudgeOnError(on, "closed");
+    expect(withErr.spec?.defenses?.output_judge).toBe("block");
+    expect(withErr.spec?.defenses?.output_judge_on_error).toBe("closed");
+    const off = setOutputJudge(withErr, "off");
+    expect(off.spec?.defenses?.output_judge).toBeUndefined();
+    expect(off.spec?.defenses?.output_judge_on_error).toBeUndefined();
+  });
+
+  it("turning action_screen off clears the action_screen_on_error orphan", () => {
+    const on = setActionScreen(BASE, "block");
+    const withErr = setActionScreenOnError(on, "closed");
+    const off = setActionScreen(withErr, "off");
+    expect(off.spec?.defenses?.action_screen).toBeUndefined();
+    expect(off.spec?.defenses?.action_screen_on_error).toBeUndefined();
+  });
+
+  it("on_error at its default (open) is omitted", () => {
+    const on = setOutputJudge(BASE, "block");
+    const openErr = setOutputJudgeOnError(on, "open");
+    expect(openErr.spec?.defenses?.output_judge_on_error).toBeUndefined();
+    // judge itself stays written
+    expect(openErr.spec?.defenses?.output_judge).toBe("block");
+  });
+
+  it("setting one switch preserves other defense siblings", () => {
+    const a = setOutputScreen(BASE, "off");
+    const b = setOutputDlp(a, "redact");
+    const c = setPromptInjection(b, "off");
+    expect(c.spec?.defenses?.output_screen).toBe("off");
+    expect(c.spec?.defenses?.output_dlp).toBe("redact");
+    expect(c.spec?.defenses?.prompt_injection).toBe("off");
+  });
+
+  it("does not mutate the input manifest", () => {
+    const frozen: AgentManifest = {
+      spec: { defenses: { output_dlp: "redact" } },
+    };
+    const snapshot = JSON.stringify(frozen);
+    setOutputScreen(frozen, "off");
+    expect(JSON.stringify(frozen)).toBe(snapshot);
   });
 });
