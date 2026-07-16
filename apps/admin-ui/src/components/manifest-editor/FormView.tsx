@@ -10,6 +10,7 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  Alert,
   Button,
   Checkbox,
   Collapse,
@@ -30,15 +31,23 @@ import { PromptVariablesEditor } from "./PromptVariablesEditor";
 import { loadModelCatalog } from "./catalog";
 import { ModelSelect } from "./widgets/ModelSelect";
 import {
+  readActionScreen,
+  readActionScreenOnError,
   readApprovalTools,
   readDescription,
   readDynamicWorkersOn,
+  readExtends,
   readFallback,
   readMainSupportsVision,
   readMemoryOn,
   readModel,
   readName,
+  readOutputDlp,
+  readOutputJudge,
+  readOutputJudgeOnError,
   readOutputSchemaName,
+  readOutputScreen,
+  readPromptInjection,
   readPromptJinja,
   readPromptVariables,
   readApprovalTimeout,
@@ -57,6 +66,8 @@ import {
   readVisionOn,
   readWriteBack,
   readWriteMinImportance,
+  setActionScreen,
+  setActionScreenOnError,
   setApprovalTimeout,
   setApprovalTools,
   setDescription,
@@ -66,6 +77,11 @@ import {
   setMemoryOn,
   setModel,
   setName,
+  setOutputDlp,
+  setOutputJudge,
+  setOutputJudgeOnError,
+  setOutputScreen,
+  setPromptInjection,
   setReconcileWrites,
   setRecallMode,
   setReflectionEvaluator,
@@ -97,7 +113,8 @@ export type FormSection =
   | "skills"
   | "subagents"
   | "memory"
-  | "governance";
+  | "governance"
+  | "defenses";
 
 interface FormViewProps {
   formData: unknown;
@@ -758,6 +775,216 @@ export function FormView({
           ]}
         />
       </>
+    ),
+
+    defenses: (
+      <section data-testid="af-defenses" style={SECTION}>
+        <Heading>
+          {t("agent_form.section_defenses")}
+          <FieldHelp
+            text={t("agent_form.section_defenses_help")}
+            testId="af-defenses"
+          />
+        </Heading>
+
+        {readExtends(formData) !== undefined && (
+          <div data-testid="af-defenses-extends-note" style={FIELD}>
+            <Alert
+              type="info"
+              showIcon
+              message={t("agent_form.defenses_extends_note")}
+            />
+          </div>
+        )}
+
+        {/* 输入防护 */}
+        <Text type="secondary" style={{ display: "block", margin: "0 0 8px" }}>
+          {t("agent_form.defenses_group_input")}
+        </Text>
+        <div style={FIELD} data-testid="af-defenses-prompt-injection">
+          <label style={LABEL}>
+            {t("agent_form.defenses_prompt_injection")}
+            <FieldHelp
+              text={t("agent_form.defenses_prompt_injection_help")}
+              testId="af-defenses-prompt-injection"
+            />
+          </label>
+          <Switch
+            checked={readPromptInjection(formData) === "spotlight"}
+            onChange={(on) =>
+              onChange(setPromptInjection(formData, on ? "spotlight" : "off"))
+            }
+          />
+          {readPromptInjection(formData) === "off" && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 8 }}
+              message={t("agent_form.defenses_prompt_injection_off_warn")}
+            />
+          )}
+        </div>
+
+        {/* 输出防护 */}
+        <Text type="secondary" style={{ display: "block", margin: "16px 0 8px" }}>
+          {t("agent_form.defenses_group_output")}
+        </Text>
+        <div style={FIELD} data-testid="af-defenses-output-screen">
+          <label style={LABEL}>
+            {t("agent_form.defenses_output_screen")}
+            <FieldHelp
+              text={t("agent_form.defenses_output_screen_help")}
+              testId="af-defenses-output-screen"
+            />
+          </label>
+          <Switch
+            checked={readOutputScreen(formData) === "block"}
+            onChange={(on) =>
+              onChange(setOutputScreen(formData, on ? "block" : "off"))
+            }
+          />
+          {readOutputScreen(formData) === "off" && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 8 }}
+              message={t("agent_form.defenses_output_screen_off_warn")}
+            />
+          )}
+        </div>
+
+        <div style={FIELD} data-testid="af-defenses-output-judge">
+          <label style={LABEL}>
+            {t("agent_form.defenses_output_judge")}
+            <FieldHelp
+              text={t("agent_form.defenses_output_judge_help")}
+              testId="af-defenses-output-judge"
+            />
+          </label>
+          <Switch
+            checked={readOutputJudge(formData) === "block"}
+            onChange={(on) =>
+              onChange(setOutputJudge(formData, on ? "block" : "off"))
+            }
+          />
+          {readOutputJudge(formData) === "block" && (
+            <div style={{ marginTop: 8 }}>
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 8 }}
+                message={t("agent_form.defenses_output_judge_on_warn")}
+              />
+              <label style={LABEL}>
+                {t("agent_form.defenses_output_judge_on_error")}
+              </label>
+              <Select
+                data-testid="af-defenses-output-judge-on-error"
+                style={{ width: 240 }}
+                value={readOutputJudgeOnError(formData)}
+                onChange={(v) =>
+                  onChange(
+                    setOutputJudgeOnError(
+                      formData,
+                      v as "open" | "closed",
+                    ),
+                  )
+                }
+                options={[
+                  { value: "open", label: t("agent_form.defenses_on_error_open") },
+                  { value: "closed", label: t("agent_form.defenses_on_error_closed") },
+                ]}
+              />
+            </div>
+          )}
+        </div>
+
+        <div style={FIELD} data-testid="af-defenses-output-dlp">
+          <label style={LABEL}>
+            {t("agent_form.defenses_output_dlp")}
+            <FieldHelp
+              text={t("agent_form.defenses_output_dlp_help")}
+              testId="af-defenses-output-dlp"
+            />
+          </label>
+          <Switch
+            checked={readOutputDlp(formData) === "redact"}
+            onChange={(on) =>
+              onChange(setOutputDlp(formData, on ? "redact" : "off"))
+            }
+          />
+          {readOutputDlp(formData) === "redact" && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 8 }}
+              message={t("agent_form.defenses_output_dlp_on_note")}
+            />
+          )}
+        </div>
+
+        {/* 工具行为防护 */}
+        <Text type="secondary" style={{ display: "block", margin: "16px 0 8px" }}>
+          {t("agent_form.defenses_group_action")}
+        </Text>
+        <div style={FIELD} data-testid="af-defenses-action-screen">
+          <label style={LABEL}>
+            {t("agent_form.defenses_action_screen")}
+            <FieldHelp
+              text={t("agent_form.defenses_action_screen_help")}
+              testId="af-defenses-action-screen"
+            />
+          </label>
+          <Select
+            data-testid="af-defenses-action-screen-select"
+            style={{ width: 240 }}
+            value={readActionScreen(formData)}
+            onChange={(v) =>
+              onChange(
+                setActionScreen(
+                  formData,
+                  v as "off" | "block" | "approval",
+                ),
+              )
+            }
+            options={[
+              { value: "off", label: t("agent_form.defenses_action_screen_off") },
+              { value: "block", label: t("agent_form.defenses_action_screen_block") },
+              { value: "approval", label: t("agent_form.defenses_action_screen_approval") },
+            ]}
+          />
+          {readActionScreen(formData) !== "off" && (
+            <div style={{ marginTop: 8 }}>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 8 }}
+                message={t("agent_form.defenses_action_screen_on_note")}
+              />
+              <label style={LABEL}>
+                {t("agent_form.defenses_action_screen_on_error")}
+              </label>
+              <Select
+                data-testid="af-defenses-action-screen-on-error"
+                style={{ width: 240 }}
+                value={readActionScreenOnError(formData)}
+                onChange={(v) =>
+                  onChange(
+                    setActionScreenOnError(
+                      formData,
+                      v as "open" | "closed",
+                    ),
+                  )
+                }
+                options={[
+                  { value: "open", label: t("agent_form.defenses_on_error_open") },
+                  { value: "closed", label: t("agent_form.defenses_on_error_closed") },
+                ]}
+              />
+            </div>
+          )}
+        </div>
+      </section>
     ),
   };
 

@@ -36,6 +36,7 @@ const MANIFEST_TABS: ReadonlyArray<{
   { value: "subagents", labelKey: "manifest_editor.tab_subagents" },
   { value: "memory", labelKey: "manifest_editor.tab_memory" },
   { value: "governance", labelKey: "manifest_editor.tab_governance" },
+  { value: "defenses", labelKey: "manifest_editor.tab_defenses" },
   { value: "yaml", labelKey: "manifest_editor.tab_yaml" },
 ];
 

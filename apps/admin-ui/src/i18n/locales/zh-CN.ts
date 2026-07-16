@@ -585,6 +585,7 @@ const zhCN: TranslationKeys = {
     tab_subagents: "子 Agent",
     tab_memory: "记忆",
     tab_governance: "治理",
+    tab_defenses: "防御",
     tab_yaml: "YAML",
     loading_schema: "正在加载配置清单结构…",
     schema_load_failed: "加载配置清单结构失败",
@@ -680,6 +681,46 @@ const zhCN: TranslationKeys = {
       "每次对话最多调取几条最相关的记忆。\n太多会挤占上下文,太少会漏信息。\n示例:5",
     section_reflection_evaluator_help:
       "可选。让 Agent 回答前先自我反思、打分,提升质量;不配则跳过。\n示例:留空(不启用),或选一个轻量模型做评估",
+    section_defenses: "防御守卫",
+    section_defenses_help:
+      "配置该 agent 的安全守卫姿态:输入注入防护、输出筛查/脱敏、工具行为审查。",
+    defenses_extends_note:
+      "此 agent 继承了模板,模板可能强制比这里更严的防御 —— 你在此调弱的开关可能被模板下限覆盖。",
+    defenses_group_input: "输入防护",
+    defenses_group_output: "输出防护",
+    defenses_group_action: "工具行为防护",
+    defenses_prompt_injection: "注入 spotlighting",
+    defenses_prompt_injection_help:
+      "对不可信来源内容(检索结果、工具输出等)加标记,降低 prompt 注入劫持风险。默认开。",
+    defenses_prompt_injection_off_warn:
+      "关闭后不再标记不可信内容,降低注入防护。",
+    defenses_output_screen: "输出规则筛查",
+    defenses_output_screen_help:
+      "用规则拦截疑似凭据/外泄形的回复。默认开,建议保持。",
+    defenses_output_screen_off_warn:
+      "关闭后不再拦截凭据/外泄形回复(默认开,不建议关)。",
+    defenses_output_judge: "模型型输出 judge",
+    defenses_output_judge_help:
+      "用一个模型逐条判定回复是否对齐/泄漏,是规则筛查之上的兜底。",
+    defenses_output_judge_on_warn:
+      "每条回复额外一次 LLM 调用(增加延迟与成本);并禁用该 agent 的逐-token 流式响应(回复整条一次性返回)。judge 使用的模型在「平台设置」中配置。",
+    defenses_output_judge_on_error: "judge 失败时",
+    defenses_output_dlp: "输出 PII 脱敏",
+    defenses_output_dlp_help:
+      "把回复中的 PII(邮箱/手机/身份证/银行卡)替换为 [redacted]。",
+    defenses_output_dlp_on_note:
+      "会改写含 PII 的合法回复,例如「你的邮箱是 a@b.com」→「你的邮箱是[redacted]」。",
+    defenses_action_screen: "工具调用审查",
+    defenses_action_screen_help:
+      "在每个工具调用执行前判定其是否对齐:关闭 / 拦截 / 转人工审批。",
+    defenses_action_screen_off: "关闭",
+    defenses_action_screen_block: "拦截",
+    defenses_action_screen_approval: "转人工审批",
+    defenses_action_screen_on_note:
+      "每个工具调用前额外一次判定,增加工具轮延迟(审批模式还会暂停等待人工)。",
+    defenses_action_screen_on_error: "审查失败时",
+    defenses_on_error_open: "放行(fail-open)",
+    defenses_on_error_closed: "拦截(fail-closed)",
     section_tools_help:
       "勾选 Agent 能用的工具。\n给的能力越多越强,但也更难管。\n示例:勾联网搜索 + MCP",
     section_mcp: "MCP",
