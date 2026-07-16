@@ -21,7 +21,7 @@ class _StreamProvider:
 
     async def stream(self, *, messages, tools, output_schema=None) -> AsyncIterator[LLMDelta]:
         for item in self.script:
-            if isinstance(item, (int, float)):
+            if isinstance(item, int | float):
                 await asyncio.sleep(item)
             elif isinstance(item, Exception):
                 raise item
