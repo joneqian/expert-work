@@ -571,6 +571,7 @@ export interface TranslationKeys {
     tab_subagents: string;
     tab_memory: string;
     tab_governance: string;
+    tab_defenses: string;
     tab_yaml: string;
     loading_schema: string;
     schema_load_failed: string;
@@ -652,6 +653,34 @@ export interface TranslationKeys {
     section_memory_help: string;
     memory_topk_help: string;
     section_reflection_evaluator_help: string;
+    section_defenses: string;
+    section_defenses_help: string;
+    defenses_extends_note: string;
+    defenses_group_input: string;
+    defenses_group_output: string;
+    defenses_group_action: string;
+    defenses_prompt_injection: string;
+    defenses_prompt_injection_help: string;
+    defenses_prompt_injection_off_warn: string;
+    defenses_output_screen: string;
+    defenses_output_screen_help: string;
+    defenses_output_screen_off_warn: string;
+    defenses_output_judge: string;
+    defenses_output_judge_help: string;
+    defenses_output_judge_on_warn: string;
+    defenses_output_judge_on_error: string;
+    defenses_output_dlp: string;
+    defenses_output_dlp_help: string;
+    defenses_output_dlp_on_note: string;
+    defenses_action_screen: string;
+    defenses_action_screen_help: string;
+    defenses_action_screen_off: string;
+    defenses_action_screen_block: string;
+    defenses_action_screen_approval: string;
+    defenses_action_screen_on_note: string;
+    defenses_action_screen_on_error: string;
+    defenses_on_error_open: string;
+    defenses_on_error_closed: string;
     section_tools_help: string;
     section_mcp: string;
     section_mcp_help: string;
@@ -3042,6 +3071,7 @@ const en: TranslationKeys = {
     tab_subagents: "Sub-agents",
     tab_memory: "Memory",
     tab_governance: "Governance",
+    tab_defenses: "Defenses",
     tab_yaml: "YAML",
     loading_schema: "Loading schema…",
     schema_load_failed: "Failed to load the manifest schema",
@@ -3141,6 +3171,46 @@ const en: TranslationKeys = {
       "How many of the most relevant memories to pull in per chat.\nToo many crowd the context; too few miss info.\nExample: 5",
     section_reflection_evaluator_help:
       "Optional. Let the agent self-reflect and score before replying to raise quality; skip to disable.\nExample: leave empty, or pick a light model for evaluation",
+    section_defenses: "Defenses",
+    section_defenses_help:
+      "Configure this agent's safety posture: input injection defense, output screening/redaction, and tool-action review.",
+    defenses_extends_note:
+      "This agent extends a template. The template may enforce stricter defenses than shown here — switches you weaken here can be overridden by the template's floor.",
+    defenses_group_input: "Input defense",
+    defenses_group_output: "Output defense",
+    defenses_group_action: "Tool-action defense",
+    defenses_prompt_injection: "Injection spotlighting",
+    defenses_prompt_injection_help:
+      "Marks content from untrusted sources (retrieved data, tool output) to reduce prompt-injection hijack risk. On by default.",
+    defenses_prompt_injection_off_warn:
+      "Off: untrusted content is no longer marked, weakening injection defense.",
+    defenses_output_screen: "Output rule screen",
+    defenses_output_screen_help:
+      "Rule-based blocking of replies that look like credential leaks / exfiltration. On by default; recommended.",
+    defenses_output_screen_off_warn:
+      "Off: credential-leak / exfil-shaped replies are no longer blocked (on by default; not recommended).",
+    defenses_output_judge: "Model-backed output judge",
+    defenses_output_judge_help:
+      "Uses a model to judge each reply for alignment / leakage — a backstop above the rule screen.",
+    defenses_output_judge_on_warn:
+      "Adds one extra LLM call per reply (higher latency and cost); and disables token-by-token streaming for this agent (the reply is returned all at once). The judge model is configured in Platform Settings.",
+    defenses_output_judge_on_error: "When the judge fails",
+    defenses_output_dlp: "Output PII redaction",
+    defenses_output_dlp_help:
+      "Replaces PII (email / phone / national ID / card number) in replies with [redacted].",
+    defenses_output_dlp_on_note:
+      "Rewrites legitimate replies containing PII, e.g. \"your email is a@b.com\" → \"your email is [redacted]\".",
+    defenses_action_screen: "Tool-call review",
+    defenses_action_screen_help:
+      "Judges each tool call for alignment before it runs: off / block / route to human approval.",
+    defenses_action_screen_off: "Off",
+    defenses_action_screen_block: "Block",
+    defenses_action_screen_approval: "Human approval",
+    defenses_action_screen_on_note:
+      "Adds one judgement before each tool call, increasing latency on tool turns (approval mode also pauses for a human).",
+    defenses_action_screen_on_error: "When review fails",
+    defenses_on_error_open: "Allow (fail-open)",
+    defenses_on_error_closed: "Block (fail-closed)",
     section_tools_help:
       "Check the tools the agent may use.\nMore capability = more power, but harder to manage.\nExample: web search + MCP",
     section_mcp: "MCP",

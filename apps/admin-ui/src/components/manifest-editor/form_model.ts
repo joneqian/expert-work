@@ -114,6 +114,22 @@ export interface AgentManifest {
     // Static delegation — named sub-agents (agent_ref to a deployed agent)
     // the parent may delegate to via a per-subagent tool.
     subagents?: SubAgentFields[];
+    // Safety posture — the DefenseSpec switches, surfaced in the "defenses" form
+    // section. Every field optional; an absent field takes its DefenseSpec
+    // default (output_screen=block, prompt_injection=spotlight, rest off/open).
+    defenses?: {
+      prompt_injection?: string;
+      output_screen?: string;
+      output_judge?: string;
+      output_judge_on_error?: string;
+      action_screen?: string;
+      action_screen_on_error?: string;
+      output_dlp?: string;
+      [k: string]: unknown;
+    } | null;
+    // Template this agent extends (AgentSpecBody.extends). Presence drives the
+    // "template may enforce stricter defenses" hint in the defenses section.
+    extends?: string;
     [k: string]: unknown;
   };
   [k: string]: unknown;
@@ -148,6 +164,24 @@ function specOf(m: unknown): NonNullable<AgentManifest["spec"]> {
 function patchSpec(m: unknown, spec: Record<string, unknown>): AgentManifest {
   const base = asObj(m);
   return { ...base, spec: { ...specOf(base), ...spec } };
+}
+
+// Merge a partial patch into ``spec.defenses`` preserving siblings. A patch
+// value of ``undefined`` DELETES that key (a setter signalling "back to the
+// DefenseSpec default → omit"). When the merge empties ``defenses``, the whole
+// block is dropped so the manifest stays clean (js-yaml omits ``undefined``).
+function patchDefenses(
+  m: unknown,
+  patch: Record<string, string | undefined>,
+): AgentManifest {
+  const merged: Record<string, unknown> = { ...(specOf(m).defenses ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete merged[k];
+    else merged[k] = v;
+  }
+  return patchSpec(m, {
+    defenses: Object.keys(merged).length > 0 ? merged : undefined,
+  });
 }
 
 // ---- readers ----
@@ -589,3 +623,71 @@ export function setSubagents(
 ): AgentManifest {
   return patchSpec(m, { subagents: rows.length > 0 ? rows : undefined });
 }
+
+// ---- defenses (DefenseSpec switches — the "defenses" form section) ----
+// Readers return the EFFECTIVE value: an absent key reads as its DefenseSpec
+// default so the control shows what the backend would actually apply. Setters
+// omit a key whose value equals the default (keeping the YAML minimal) and clear
+// the ``_on_error`` sub-knob when its parent switch is turned off.
+export const readPromptInjection = (m: unknown): "spotlight" | "off" =>
+  (specOf(m).defenses?.prompt_injection as "spotlight" | "off") ?? "spotlight";
+export const readOutputScreen = (m: unknown): "block" | "off" =>
+  (specOf(m).defenses?.output_screen as "block" | "off") ?? "block";
+export const readOutputJudge = (m: unknown): "block" | "off" =>
+  (specOf(m).defenses?.output_judge as "block" | "off") ?? "off";
+export const readOutputJudgeOnError = (m: unknown): "open" | "closed" =>
+  (specOf(m).defenses?.output_judge_on_error as "open" | "closed") ?? "open";
+export const readActionScreen = (m: unknown): "off" | "block" | "approval" =>
+  (specOf(m).defenses?.action_screen as "off" | "block" | "approval") ?? "off";
+export const readActionScreenOnError = (m: unknown): "open" | "closed" =>
+  (specOf(m).defenses?.action_screen_on_error as "open" | "closed") ?? "open";
+export const readOutputDlp = (m: unknown): "redact" | "off" =>
+  (specOf(m).defenses?.output_dlp as "redact" | "off") ?? "off";
+export const readExtends = (m: unknown): string | undefined => specOf(m).extends;
+
+export const setPromptInjection = (
+  m: unknown,
+  v: "spotlight" | "off",
+): AgentManifest =>
+  patchDefenses(m, { prompt_injection: v === "spotlight" ? undefined : v });
+
+export const setOutputScreen = (m: unknown, v: "block" | "off"): AgentManifest =>
+  patchDefenses(m, { output_screen: v === "block" ? undefined : v });
+
+export function setOutputJudge(m: unknown, v: "block" | "off"): AgentManifest {
+  if (v === "off") {
+    return patchDefenses(m, {
+      output_judge: undefined,
+      output_judge_on_error: undefined,
+    });
+  }
+  return patchDefenses(m, { output_judge: v });
+}
+
+export const setOutputJudgeOnError = (
+  m: unknown,
+  v: "open" | "closed",
+): AgentManifest =>
+  patchDefenses(m, { output_judge_on_error: v === "open" ? undefined : v });
+
+export function setActionScreen(
+  m: unknown,
+  v: "off" | "block" | "approval",
+): AgentManifest {
+  if (v === "off") {
+    return patchDefenses(m, {
+      action_screen: undefined,
+      action_screen_on_error: undefined,
+    });
+  }
+  return patchDefenses(m, { action_screen: v });
+}
+
+export const setActionScreenOnError = (
+  m: unknown,
+  v: "open" | "closed",
+): AgentManifest =>
+  patchDefenses(m, { action_screen_on_error: v === "open" ? undefined : v });
+
+export const setOutputDlp = (m: unknown, v: "redact" | "off"): AgentManifest =>
+  patchDefenses(m, { output_dlp: v === "off" ? undefined : v });
