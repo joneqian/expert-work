@@ -64,6 +64,11 @@ from expert_work.runtime.middleware import (
 from orchestrator.llm.coalesce import coalesce_system_messages
 from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
+from orchestrator.llm.providers._streaming import (
+    AnthropicStreamAssembler,
+    LLMDelta,
+    delta_from_anthropic_event,
+)
 from orchestrator.llm.structured_output import StructuredOutputCapability
 from orchestrator.multimodal import ImageResolver, split_human_content
 from orchestrator.tools.registry import ToolSpec
@@ -548,13 +553,25 @@ class AnthropicProvider:
     #: A restart retries the native tier.
     _native_search_disabled: bool = field(default=False, init=False, repr=False)
 
-    async def complete(
+    async def _prepare_anthropic_request(
         self,
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
-        output_schema: StructuredOutputSpec | None = None,
-    ) -> AIMessage:
+        output_schema: StructuredOutputSpec | None,
+        use_native: bool,
+    ) -> dict[str, Any]:
+        """Translate history + tools into ``client.messages`` /
+        ``client.stream_messages`` kwargs. Shared by ``complete`` and
+        ``stream`` (Task 4, P1') so both put the exact same request on
+        the wire — only ``stream`` differs at the client. ``use_native``
+        (the HX-13 beta-header decision) is computed by the caller and
+        passed in; the defer-marker strip below instead reads the
+        current ``_native_search_disabled`` instance state directly, so
+        a retry call made right after that flag flips strips correctly
+        even though the caller's own ``use_native`` for the retry is
+        simply ``False``.
+        """
         # Stream RT-2 (RT-ADR-5) — fold any mid-conversation SystemMessage
         # (the L2 ``<context-summary>`` lands mid-list) into the leading
         # system before mapping. Per-request only; input never mutated.
@@ -565,13 +582,6 @@ class AnthropicProvider:
         # Stream HX-13 — deferred markers ride the specs (agent_node sets
         # them on the native_search tier). Once the beta has been rejected,
         # strip the markers so every later call goes out plain.
-        # Stream RT-1 (§ 7.5) — a structured call forces a single tool, so
-        # the tool-search beta / defer markers step aside for this request.
-        use_native = (
-            any(spec.defer_loading for spec in tools)
-            and not self._native_search_disabled
-            and output_schema is None
-        )
         if self._native_search_disabled:
             tools = [
                 replace(spec, defer_loading=False) if spec.defer_loading else spec for spec in tools
@@ -617,19 +627,39 @@ class AnthropicProvider:
         else:
             thinking_payload = {"type": "adaptive"} if self.adaptive_thinking else None
             output_config = {"effort": self.effort} if self.effort is not None else None
+
+        return {
+            "model": self.model,
+            "system": system_payload,
+            "messages": mapped,
+            "tools": tool_payload,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "thinking": thinking_payload,
+            "output_config": output_config,
+            "betas": [_TOOL_SEARCH_BETA] if use_native else None,
+            "tool_choice": tool_choice,
+        }
+
+    async def complete(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AIMessage:
+        # Stream RT-1 (§ 7.5) — a structured call forces a single tool, so
+        # the tool-search beta / defer markers step aside for this request.
+        use_native = (
+            any(spec.defer_loading for spec in tools)
+            and not self._native_search_disabled
+            and output_schema is None
+        )
+        request = await self._prepare_anthropic_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_native=use_native
+        )
         try:
-            body = await self.client.messages(
-                model=self.model,
-                system=system_payload,
-                messages=mapped,
-                tools=tool_payload,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                thinking=thinking_payload,
-                output_config=output_config,
-                betas=[_TOOL_SEARCH_BETA] if use_native else None,
-                tool_choice=tool_choice,
-            )
+            body = await self.client.messages(**request)
         except LLMClientError:
             if not use_native:
                 raise
@@ -640,25 +670,51 @@ class AnthropicProvider:
             self._native_search_disabled = True
             disclosure_fallback_total.labels(provider="anthropic").inc()
             logger.warning("anthropic.tool_search_beta_rejected — falling back to app tier")
-            plain_tools = [
-                replace(spec, defer_loading=False) if spec.defer_loading else spec for spec in tools
-            ]
-            body = await self.client.messages(
-                model=self.model,
-                system=system_payload,
-                messages=mapped,
-                tools=[_to_anthropic_tool(spec) for spec in plain_tools] if plain_tools else None,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                thinking=thinking_payload,
-                output_config=output_config,
-                betas=None,
+            retry = await self._prepare_anthropic_request(
+                messages=messages, tools=tools, output_schema=output_schema, use_native=False
             )
+            body = await self.client.messages(**retry)
 
         decoded = _from_anthropic_response(body)
         if output_schema is not None:
             return _extract_structured_response(decoded, output_schema)
         return decoded
+
+    def new_stream_assembler(self) -> AnthropicStreamAssembler:
+        return AnthropicStreamAssembler()
+
+    async def stream(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AsyncIterator[LLMDelta]:
+        # The router never drives the stream for structured output (it
+        # routes output_schema to complete() instead — T1); a defensive
+        # assert documents that invariant.
+        assert output_schema is None  # noqa: S101 - structured output uses complete()
+        use_native = any(spec.defer_loading for spec in tools) and not self._native_search_disabled
+        request = await self._prepare_anthropic_request(
+            messages=messages, tools=tools, output_schema=None, use_native=use_native
+        )
+        try:
+            async for event in self.client.stream_messages(**request):
+                yield delta_from_anthropic_event(event)
+            return
+        except LLMClientError:
+            if not use_native:
+                raise
+            # Stream HX-13 (Mini-ADR HX-J4) — beta-rejection 400 arrives
+            # pre-first-event, so the re-stream lives OUTSIDE this loop.
+            self._native_search_disabled = True
+            disclosure_fallback_total.labels(provider="anthropic").inc()
+            logger.warning("anthropic.tool_search_beta_rejected — falling back to app tier")
+        retry = await self._prepare_anthropic_request(
+            messages=messages, tools=tools, output_schema=None, use_native=False
+        )
+        async for event in self.client.stream_messages(**retry):
+            yield delta_from_anthropic_event(event)
 
 
 def _truncate(text: str) -> str:
