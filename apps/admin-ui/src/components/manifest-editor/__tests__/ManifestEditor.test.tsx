@@ -65,6 +65,27 @@ describe("ManifestEditor", () => {
     expect(ta.value).toContain("name: bot");
   });
 
+  it("strips an incomplete fallback entry when serializing to YAML", async () => {
+    const user = userEvent.setup();
+    const withEmptyFallback =
+      "metadata:\n  name: bot\n" +
+      "spec:\n  model:\n    provider: openai\n    name: gpt-4o\n" +
+      "    fallback:\n      - {}\n";
+    render(
+      <ManifestEditor
+        mode="create"
+        initialYaml={withEmptyFallback}
+        onChange={vi.fn()}
+      />,
+    );
+    await screen.findByTestId("manifest-form-view");
+    await user.click(screen.getByTestId("manifest-tab-yaml"));
+    const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
+    // The empty entry is pruned; the now-empty fallback key drops out entirely.
+    expect(ta.value).not.toContain("fallback");
+    expect(ta.value).toContain("name: gpt-4o");
+  });
+
   it("blocks the YAML→Form switch when YAML is invalid against the schema", async () => {
     const user = userEvent.setup();
     render(

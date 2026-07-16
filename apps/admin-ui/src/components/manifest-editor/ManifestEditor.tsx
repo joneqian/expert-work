@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import type { JsonSchema } from "../../api/manifest_schema";
 import { loadAgentSchema } from "./schema";
 import { dumpYaml, parseYaml } from "./yaml";
+import { normalizeForSubmit } from "./form_model";
 import { FormView, type FormSection } from "./FormView";
 import { YamlView } from "./YamlView";
 import type { McpPickerSource } from "./widgets/McpToolPicker";
@@ -118,8 +119,13 @@ export function ManifestEditor({
     // non-curated fields: keys a user hand-added in raw YAML survive a Form
     // round-trip (the form_model writers patch only the curated paths). The
     // backend ManifestLoader re-validates on submit regardless.
+    //
+    // Keep the raw ``data`` as the form's working state (so an added-but-unfilled
+    // fallback row still shows its picker), but serialize a normalized copy so
+    // the submitted manifest never carries an incomplete / duplicate fallback
+    // entry the backend would reject.
     setManifestObject(data);
-    const y = dumpYaml(data);
+    const y = dumpYaml(normalizeForSubmit(data));
     setYamlText(y);
     onChange(y);
   }
@@ -131,9 +137,10 @@ export function ManifestEditor({
 
   function switchTo(next: string): void {
     if (next === tab) return;
-    // Leaving for YAML: serialise the current curated manifest.
+    // Leaving for YAML: serialise the current curated manifest (normalized so
+    // an incomplete fallback row doesn't leak into the YAML view / submit).
     if (next === "yaml") {
-      const y = dumpYaml(manifestObject);
+      const y = dumpYaml(normalizeForSubmit(manifestObject));
       setYamlText(y);
       onChange(y);
       setSwitchError(null);

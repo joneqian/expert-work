@@ -245,6 +245,25 @@ export function setFallback(m: unknown, chain: ModelFields[]): AgentManifest {
   }
   return patchSpec(m, { model });
 }
+
+// Serialize-boundary normalization. Drop fallback entries the backend would
+// reject: an added-but-unfilled row (no provider/name), or a (provider, name)
+// that repeats the primary or an earlier entry (``_check_fallback_chain`` treats
+// a repeat as a cycle). Pruning here — not in ``setFallback`` — keeps the "Add"
+// button able to show an empty row to fill in-form; only the submitted manifest
+// is cleaned. Preserves every other field (incl. an entry's own nested chain).
+export function normalizeForSubmit(m: unknown): AgentManifest {
+  const primary = readModel(m);
+  const seen = new Set<string>();
+  const key = (e: ModelFields): string => `${e.provider} ${e.name}`;
+  if (primary.provider && primary.name) seen.add(key(primary));
+  const pruned = readFallback(m).filter((e) => {
+    if (!e.provider || !e.name || seen.has(key(e))) return false;
+    seen.add(key(e));
+    return true;
+  });
+  return setFallback(m, pruned);
+}
 export function setSystemPrompt(m: unknown, template: string): AgentManifest {
   return patchSpec(m, {
     system_prompt: { ...(specOf(m).system_prompt ?? {}), template },

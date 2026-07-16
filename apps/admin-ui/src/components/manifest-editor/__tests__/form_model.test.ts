@@ -57,6 +57,7 @@ import {
   setTrajectoryRecording,
   readFallback,
   setFallback,
+  normalizeForSubmit,
 } from "../form_model";
 
 const seed = {
@@ -140,6 +141,59 @@ describe("model fallback chain (spec.model.fallback)", () => {
     const before = JSON.stringify(seed);
     setFallback(seed, [{ provider: "glm", name: "glm-4-flash" }]);
     expect(JSON.stringify(seed)).toBe(before);
+  });
+});
+
+describe("normalizeForSubmit (serialize-boundary fallback pruning)", () => {
+  it("drops an added-but-unfilled entry so the backend never sees [{}]", () => {
+    const m = setFallback(seed, [{}, { provider: "glm", name: "glm-4-flash" }]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([
+      { provider: "glm", name: "glm-4-flash" },
+    ]);
+  });
+
+  it("drops a provider-only (name missing) entry", () => {
+    const m = setFallback(seed, [{ provider: "glm" }]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([]);
+    // Fully pruned → key removed, single-provider manifest stays clean.
+    expect("fallback" in (normalizeForSubmit(m).spec?.model ?? {})).toBe(false);
+  });
+
+  it("drops an entry that duplicates the primary (backend rejects as a cycle)", () => {
+    // seed primary = anthropic/claude-sonnet-4-6
+    const m = setFallback(seed, [
+      { provider: "anthropic", name: "claude-sonnet-4-6" },
+      { provider: "glm", name: "glm-4-flash" },
+    ]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([
+      { provider: "glm", name: "glm-4-flash" },
+    ]);
+  });
+
+  it("de-dupes repeated entries within the chain, keeping the first", () => {
+    const m = setFallback(seed, [
+      { provider: "glm", name: "glm-4-flash", temperature: 0.1 },
+      { provider: "glm", name: "glm-4-flash", temperature: 0.9 },
+    ]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([
+      { provider: "glm", name: "glm-4-flash", temperature: 0.1 },
+    ]);
+  });
+
+  it("keeps a fully-valid chain untouched (incl. an entry's nested fallback)", () => {
+    const chain = [
+      { provider: "glm", name: "glm-4-flash", fallback: [{ provider: "kimi", name: "kimi-k2" }] },
+      { provider: "deepseek", name: "deepseek-chat" },
+    ];
+    const m = setFallback(seed, chain);
+    expect(readFallback(normalizeForSubmit(m))).toEqual(chain);
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m = setFallback(seed, [{}, { provider: "glm", name: "glm-4-flash" }]);
+    const before = JSON.stringify(m);
+    normalizeForSubmit(m);
+    expect(JSON.stringify(m)).toBe(before);
   });
 });
 
