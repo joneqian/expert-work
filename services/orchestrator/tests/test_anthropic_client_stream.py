@@ -3,7 +3,11 @@ import json
 import httpx
 import pytest
 
-from expert_work.runtime.middleware import LLMClientError, LLMServerError
+from expert_work.runtime.middleware import (
+    LLMClientError,
+    LLMRateLimitError,
+    LLMServerError,
+)
 from orchestrator.llm.providers.anthropic import HTTPAnthropicClient, RecordingAnthropicClient
 
 
@@ -122,3 +126,79 @@ async def test_recording_client_streams_canned_events() -> None:
     ]
     assert [e["type"] for e in out] == ["message_start", "content_block_delta", "message_stop"]
     assert client.calls[-1]["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_recording_client_synthesizes_events_from_response() -> None:
+    # When stream_events is empty, stream_messages() must synthesize a coherent
+    # event sequence from `response` (used by T4's response=-primed tests).
+    client = RecordingAnthropicClient(
+        response={
+            "model": "claude-x",
+            "content": [
+                {"type": "text", "text": "hello"},
+                {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"q": "hi"}},
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+        }
+    )
+    events = [
+        dict(e)
+        async for e in client.stream_messages(
+            model="claude-x",
+            system=None,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=1024,
+        )
+    ]
+    types = [e["type"] for e in events]
+    # message_start ... (text delta) (tool_use start + json delta) ... message_delta, message_stop
+    assert types[0] == "message_start"
+    assert types[-1] == "message_stop"
+    assert types[-2] == "message_delta"
+    # message_start carries input_tokens; message_delta carries output_tokens
+    assert events[0]["message"]["usage"]["input_tokens"] == 5
+    assert events[-2]["usage"]["output_tokens"] == 3
+    # text block -> a text_delta
+    text_deltas = [
+        e
+        for e in events
+        if e.get("type") == "content_block_delta" and e.get("delta", {}).get("type") == "text_delta"
+    ]
+    assert any(d["delta"]["text"] == "hello" for d in text_deltas)
+    # tool_use block -> a content_block_start (carries id+name) + an input_json_delta
+    starts = [e for e in events if e.get("type") == "content_block_start"]
+    assert any(
+        s["content_block"]["id"] == "toolu_1" and s["content_block"]["name"] == "search"
+        for s in starts
+    )
+    json_deltas = [
+        e
+        for e in events
+        if e.get("type") == "content_block_delta"
+        and e.get("delta", {}).get("type") == "input_json_delta"
+    ]
+    assert any(json.loads(d["delta"]["partial_json"]) == {"q": "hi"} for d in json_deltas)
+
+
+@pytest.mark.asyncio
+async def test_stream_in_band_rate_limit_error_maps_to_rate_limit() -> None:
+    # rate_limit_error is Anthropic's 429 analog -> LLMRateLimitError (key-level),
+    # distinct from overloaded_error -> LLMServerError (provider-level).
+    raw = (
+        b'event: error\ndata: {"type":"error","error":'
+        b'{"type":"rate_limit_error","message":"slow down"}}\n\n'
+    )
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=raw))
+    client = HTTPAnthropicClient(api_key="k", base_url="https://x", transport=transport)
+    with pytest.raises(LLMRateLimitError):
+        async for _ in client.stream_messages(
+            model="m",
+            system=None,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=16,
+        ):
+            pass
