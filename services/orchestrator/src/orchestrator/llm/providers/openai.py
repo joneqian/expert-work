@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
@@ -59,6 +59,7 @@ from langchain_core.messages import (
 from expert_work.protocol import StructuredOutputSpec
 from expert_work.runtime.middleware import (
     LLMClientError,
+    LLMError,
     LLMNetworkError,
     LLMServerError,
 )
@@ -79,6 +80,70 @@ _DEFAULT_BASE_URL = "https://api.openai.com"
 DEFAULT_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 _DEFAULT_TIMEOUT_S = 60.0
 _ERROR_BODY_CHAR_CAP = 500
+
+_SSE_SKIP = object()
+_SSE_DONE = object()
+
+
+def _build_request_body(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    temperature: float | None,
+    extra_body: dict[str, Any] | None,
+    tool_choice: dict[str, Any] | None,
+    response_format: dict[str, Any] | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"model": model, "messages": messages}
+    if tools:
+        body["tools"] = tools
+    if tool_choice is not None:
+        body["tool_choice"] = tool_choice
+    if response_format is not None:
+        body["response_format"] = response_format
+    if temperature is not None:
+        body["temperature"] = temperature
+    if extra_body:
+        body.update(extra_body)
+    return body
+
+
+def _parse_sse_line(line: str) -> Any:
+    """Parse one SSE line into a JSON chunk, ``_SSE_DONE``, or ``_SSE_SKIP``.
+
+    Blank lines, comment lines (``:`` keepalive), and non-``data:`` lines
+    are skipped; ``data: [DONE]`` terminates; malformed JSON is skipped
+    (lenient, like the non-streaming decoder)."""
+    line = line.strip()
+    if not line or line.startswith(":") or not line.startswith("data:"):
+        return _SSE_SKIP
+    data = line[len("data:") :].strip()
+    if data == "[DONE]":
+        return _SSE_DONE
+    try:
+        parsed = json.loads(data)
+    except json.JSONDecodeError:
+        return _SSE_SKIP
+    return parsed if isinstance(parsed, Mapping) else _SSE_SKIP
+
+
+def _looks_billing(message: str) -> bool:
+    low = message.lower()
+    return "quota" in low or "billing" in low or "balance" in low
+
+
+def _classify_stream_error(error: Mapping[str, Any]) -> LLMError:
+    """Map an in-band SSE ``error`` object to an :class:`LLMError`.
+
+    OpenAI-wire error events carry ``{message, type, code}``. Without an
+    HTTP status we default to a retryable :class:`LLMServerError`; a
+    billing/quota marker in the message escalates to key-level via the
+    shared classifier (status 429 forces the marker inspection path)."""
+    message = str(error.get("message") or "")
+    if _looks_billing(message):
+        return classify_http_error("openai", 429, message)
+    return LLMServerError(f"openai stream error: {message}")
 
 
 @runtime_checkable
@@ -112,6 +177,23 @@ class OpenAIClient(Protocol):
         ``response_format`` (Stream RT-1, native path) carries the
         ``{"type": "json_schema", ...}`` structured-output constraint;
         ``None`` omits the field entirely."""
+
+    async def stream_chat_completions(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        """Stream ``/v1/chat/completions`` (``stream=true``), yielding each
+        parsed SSE JSON chunk and stopping at ``[DONE]``. An HTTP >= 400
+        status raises the classified :class:`LLMError` before the first
+        chunk; an in-band ``error`` event raises mid-stream (Stream L, P1)."""
+        ...
 
 
 @dataclass
@@ -153,21 +235,15 @@ class HTTPOpenAIClient:
         tool_choice: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        body: dict[str, Any] = {"model": model, "messages": messages}
-        if tools:
-            body["tools"] = tools
-        if tool_choice is not None:
-            # Stream HX-13 — the allowed_tools subset constraint.
-            body["tool_choice"] = tool_choice
-        if response_format is not None:
-            # Stream RT-1 — native structured-output constraint.
-            body["response_format"] = response_format
-        if temperature is not None:
-            body["temperature"] = temperature
-        if extra_body:
-            # Stream CM-10 — vendor thinking controls, merged last so the
-            # translated payload is exactly what goes on the wire.
-            body.update(extra_body)
+        body = _build_request_body(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            extra_body=extra_body,
+            tool_choice=tool_choice,
+            response_format=response_format,
+        )
 
         try:
             async with httpx.AsyncClient(
@@ -197,6 +273,61 @@ class HTTPOpenAIClient:
             raise LLMServerError(f"openai returned non-object body: {type(data).__name__}")
         return data
 
+    async def stream_chat_completions(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        body = _build_request_body(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            extra_body=extra_body,
+            tool_choice=tool_choice,
+            response_format=response_format,
+        )
+        body["stream"] = True
+        body["stream_options"] = {"include_usage": True}
+        # Disable httpx's read timeout on the stream — the router's
+        # idle_timeout_s governs inter-chunk silence (Stream L, P1).
+        timeout = httpx.Timeout(self.timeout_s, read=None)
+        try:
+            async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}{self.chat_completions_path}",
+                    headers={
+                        self.api_key_header: f"{self.api_key_prefix}{self.api_key}",
+                        "content-type": "application/json",
+                    },
+                    json=body,
+                ) as response:
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise classify_http_error(
+                            "openai", response.status_code, _truncate(response.text)
+                        )
+                    async for line in response.aiter_lines():
+                        chunk = _parse_sse_line(line)
+                        if chunk is _SSE_SKIP:
+                            continue
+                        if chunk is _SSE_DONE:
+                            return
+                        assert isinstance(chunk, Mapping)  # noqa: S101
+                        error = chunk.get("error")
+                        if isinstance(error, Mapping):
+                            raise _classify_stream_error(error)
+                        yield chunk
+        except httpx.HTTPError as exc:
+            raise LLMNetworkError(f"openai: {exc}") from exc
+
 
 @dataclass
 class RecordingOpenAIClient:
@@ -208,6 +339,7 @@ class RecordingOpenAIClient:
     """
 
     response: Mapping[str, Any] = field(default_factory=dict)
+    stream_chunks: list[Mapping[str, Any]] = field(default_factory=list)
     raise_with: BaseException | None = None
     calls: list[dict[str, Any]] = field(default_factory=list)
 
@@ -236,6 +368,34 @@ class RecordingOpenAIClient:
         if self.raise_with is not None:
             raise self.raise_with
         return self.response
+
+    async def stream_chat_completions(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        self.calls.append(
+            {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+                "temperature": temperature,
+                "extra_body": extra_body,
+                "tool_choice": tool_choice,
+                "response_format": response_format,
+                "stream": True,
+            }
+        )
+        if self.raise_with is not None:
+            raise self.raise_with
+        for chunk in self.stream_chunks:
+            yield chunk
 
 
 @dataclass
