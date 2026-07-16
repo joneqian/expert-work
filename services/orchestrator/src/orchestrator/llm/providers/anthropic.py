@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
@@ -57,6 +57,7 @@ from expert_work.common.uplift_metrics import record_anthropic_cache_anchor
 from expert_work.protocol import StructuredOutputSpec
 from expert_work.runtime.middleware import (
     LLMClientError,
+    LLMError,
     LLMNetworkError,
     LLMServerError,
 )
@@ -94,6 +95,140 @@ _CACHE_CONTROL_TAIL_COUNT: int = 2
 _CACHE_CONTROL_EPHEMERAL: dict[str, str] = {"type": "ephemeral"}
 
 
+def _build_messages_body(
+    *,
+    model: str,
+    system: str | list[dict[str, Any]] | None,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    max_tokens: int,
+    temperature: float | None,
+    thinking: dict[str, Any] | None,
+    output_config: dict[str, Any] | None,
+    tool_choice: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Assemble the ``/v1/messages`` request body shared by the
+    non-streaming and streaming paths — extracted from
+    :meth:`HTTPAnthropicClient.messages` (Task 3, P1') so
+    :meth:`HTTPAnthropicClient.stream_messages` doesn't duplicate the
+    field-assembly logic. ``stream`` is NOT set here — the streaming
+    caller adds it after this returns."""
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if system is not None:
+        body["system"] = system
+    if tools:
+        body["tools"] = tools
+    if tool_choice is not None:
+        # Stream RT-1 — force the schema-carrying tool.
+        body["tool_choice"] = tool_choice
+    if temperature is not None:
+        body["temperature"] = temperature
+    # Stream CM-9 — compute-control fields (both GA, no beta header).
+    if thinking is not None:
+        body["thinking"] = thinking
+    if output_config is not None:
+        body["output_config"] = output_config
+    return body
+
+
+def _parse_anthropic_sse_line(line: str) -> dict[str, Any] | None:
+    """Parse one Anthropic SSE line: only ``data:`` lines carry JSON (the
+    JSON's own ``type`` field is authoritative; ``event:`` lines are
+    ignored). Blank / comment / non-data / malformed lines → None."""
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    data = line[len("data:") :].strip()
+    try:
+        parsed = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _classify_anthropic_stream_error(event: Mapping[str, Any]) -> LLMError:
+    """Map an in-band Anthropic SSE ``error`` event to an :class:`LLMError`.
+
+    Only ``rate_limit_error`` (Anthropic's 429 analog) routes through the
+    shared ``classify_http_error`` billing/quota-marker inspection —
+    ``overloaded_error`` (Anthropic's 529 analog, a transient vendor-side
+    capacity issue) is a plain 5xx-shaped fault and maps directly to
+    :class:`LLMServerError`, which is already retried + counts toward the
+    breaker."""
+    err = event.get("error")
+    err = err if isinstance(err, Mapping) else {}
+    message = str(err.get("message") or "")
+    etype = str(err.get("type") or "")
+    if "rate_limit" in etype:
+        return classify_http_error("anthropic", 429, message)
+    return LLMServerError(f"anthropic stream error: {etype}: {message}")
+
+
+def _response_to_anthropic_events(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Build a minimal event sequence from a whole Messages body, so a
+    RecordingAnthropicClient primed with only ``response`` yields coherent
+    deltas on the streaming path (the router prefers stream())."""
+    blocks = response.get("content") or []
+    usage_raw = response.get("usage")
+    usage: Mapping[str, Any] = usage_raw if isinstance(usage_raw, Mapping) else {}
+    events: list[Mapping[str, Any]] = [
+        {
+            "type": "message_start",
+            "message": {
+                "model": response.get("model"),
+                "usage": {"input_tokens": usage.get("input_tokens", 0)},
+            },
+        }
+    ]
+    if isinstance(blocks, list):
+        for i, b in enumerate(blocks):
+            if not isinstance(b, Mapping):
+                continue
+            if b.get("type") == "text":
+                events.append(
+                    {
+                        "type": "content_block_delta",
+                        "index": i,
+                        "delta": {"type": "text_delta", "text": b.get("text", "")},
+                    }
+                )
+            elif b.get("type") == "tool_use":
+                events.append(
+                    {
+                        "type": "content_block_start",
+                        "index": i,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": b.get("id"),
+                            "name": b.get("name"),
+                        },
+                    }
+                )
+                events.append(
+                    {
+                        "type": "content_block_delta",
+                        "index": i,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(b.get("input") or {}),
+                        },
+                    }
+                )
+    events.append(
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": response.get("stop_reason")},
+            "usage": {"output_tokens": usage.get("output_tokens", 0)},
+        }
+    )
+    events.append({"type": "message_stop"})
+    return events
+
+
 @runtime_checkable
 class AnthropicClient(Protocol):
     """Sized to the one Messages API endpoint we use.
@@ -122,6 +257,25 @@ class AnthropicClient(Protocol):
 
         ``tool_choice`` (Stream RT-1, tool_call path) forces the
         schema-carrying tool; ``None`` omits the field entirely."""
+
+    def stream_messages(
+        self,
+        *,
+        model: str,
+        system: str | list[dict[str, Any]] | None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+        temperature: float | None = None,
+        thinking: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
+        betas: list[str] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        """Stream ``/v1/messages`` (``stream=true``), yielding each parsed
+        SSE event dict until ``message_stop``. An HTTP >= 400 status raises
+        the classified :class:`LLMError` before the first event; an
+        in-band ``error`` event raises mid-stream (Task 3, P1')."""
 
 
 @dataclass
@@ -153,25 +307,17 @@ class HTTPAnthropicClient:
         betas: list[str] | None = None,
         tool_choice: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        body: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-        }
-        if system is not None:
-            body["system"] = system
-        if tools:
-            body["tools"] = tools
-        if tool_choice is not None:
-            # Stream RT-1 — force the schema-carrying tool.
-            body["tool_choice"] = tool_choice
-        if temperature is not None:
-            body["temperature"] = temperature
-        # Stream CM-9 — compute-control fields (both GA, no beta header).
-        if thinking is not None:
-            body["thinking"] = thinking
-        if output_config is not None:
-            body["output_config"] = output_config
+        body = _build_messages_body(
+            model=model,
+            system=system,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            thinking=thinking,
+            output_config=output_config,
+            tool_choice=tool_choice,
+        )
 
         try:
             async with httpx.AsyncClient(
@@ -205,6 +351,63 @@ class HTTPAnthropicClient:
             raise LLMServerError(f"anthropic returned non-object body: {type(data).__name__}")
         return data
 
+    async def stream_messages(
+        self,
+        *,
+        model: str,
+        system: str | list[dict[str, Any]] | None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+        temperature: float | None = None,
+        thinking: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
+        betas: list[str] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        body = _build_messages_body(
+            model=model,
+            system=system,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            thinking=thinking,
+            output_config=output_config,
+            tool_choice=tool_choice,
+        )
+        body["stream"] = True
+        # Disable httpx's read timeout on the stream — the router's
+        # idle_timeout_s governs inter-event silence (Task 3, P1').
+        timeout = httpx.Timeout(self.timeout_s, read=None)
+        try:
+            async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/v1/messages",
+                    headers={
+                        "x-api-key": self.api_key,
+                        "anthropic-version": _ANTHROPIC_VERSION,
+                        "content-type": "application/json",
+                        **({"anthropic-beta": ",".join(betas)} if betas else {}),
+                    },
+                    json=body,
+                ) as response:
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise classify_http_error(
+                            "anthropic", response.status_code, _truncate(response.text)
+                        )
+                    async for line in response.aiter_lines():
+                        event = _parse_anthropic_sse_line(line)
+                        if event is None:
+                            continue
+                        if event.get("type") == "error":
+                            raise _classify_anthropic_stream_error(event)
+                        yield event
+        except httpx.HTTPError as exc:
+            raise LLMNetworkError(f"anthropic: {exc}") from exc
+
 
 @dataclass
 class RecordingAnthropicClient:
@@ -217,6 +420,12 @@ class RecordingAnthropicClient:
     """
 
     response: Mapping[str, Any] = field(default_factory=dict)
+    #: Canned SSE-event sequence for :meth:`stream_messages`. When empty,
+    #: :meth:`stream_messages` synthesizes a coherent sequence from
+    #: ``response`` instead (the P1 recording-double lesson —
+    #: ``response=``-primed tests must still yield deltas on the
+    #: streaming path).
+    stream_events: list[Mapping[str, Any]] = field(default_factory=list)
     raise_with: BaseException | None = None
     calls: list[dict[str, Any]] = field(default_factory=list)
 
@@ -251,6 +460,41 @@ class RecordingAnthropicClient:
         if self.raise_with is not None:
             raise self.raise_with
         return self.response
+
+    async def stream_messages(
+        self,
+        *,
+        model: str,
+        system: str | list[dict[str, Any]] | None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+        temperature: float | None = None,
+        thinking: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
+        betas: list[str] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        self.calls.append(
+            {
+                "model": model,
+                "system": system,
+                "messages": messages,
+                "tools": tools,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "thinking": thinking,
+                "output_config": output_config,
+                "betas": betas,
+                "tool_choice": tool_choice,
+                "stream": True,
+            }
+        )
+        if self.raise_with is not None:
+            raise self.raise_with
+        events = list(self.stream_events) or _response_to_anthropic_events(self.response)
+        for e in events:
+            yield e
 
 
 @dataclass
