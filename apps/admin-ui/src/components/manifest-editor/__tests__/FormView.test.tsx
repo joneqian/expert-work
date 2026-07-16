@@ -70,6 +70,8 @@ describe("FormView", () => {
     renderSection("model");
     expect(screen.getByTestId("af-model")).toBeInTheDocument();
     expect(screen.getByTestId("af-reflection-evaluator")).toBeInTheDocument();
+    // E.11 — the fallback-chain section shows once a primary model is picked.
+    expect(screen.getByTestId("af-fallback")).toBeInTheDocument();
 
     renderSection("prompt");
     expect(screen.getByTestId("af-prompt")).toBeInTheDocument();
@@ -106,6 +108,46 @@ describe("FormView", () => {
     expect(screen.getByTestId("af-dynamic-workers")).toBeInTheDocument();
     expect(screen.getByTestId("af-run-deadline")).toBeInTheDocument();
     expect(screen.getByTestId("af-governance-advanced")).toBeInTheDocument();
+  });
+
+  it("hides the fallback section until a primary model is picked", () => {
+    const noPrimary: AgentManifest = {
+      ...SEED,
+      spec: { ...SEED.spec, model: {} },
+    };
+    renderSection("model", noPrimary);
+    expect(screen.queryByTestId("af-fallback")).not.toBeInTheDocument();
+  });
+
+  it("adding a fallback provider writes spec.model.fallback", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection("model", SEED, onChange);
+    await user.click(screen.getByTestId("af-fallback-add"));
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.model?.fallback).toHaveLength(1);
+    // The primary model is untouched by adding a fallback.
+    expect(last.spec?.model?.provider).toBe("openai");
+  });
+
+  it("removing the last fallback entry drops the chain key", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const withFb: AgentManifest = {
+      ...SEED,
+      spec: {
+        ...SEED.spec,
+        model: {
+          provider: "openai",
+          name: "gpt-4o",
+          fallback: [{ provider: "openai", name: "gpt-4o" }],
+        },
+      },
+    };
+    renderSection("model", withFb, onChange);
+    await user.click(screen.getByTestId("af-fallback-remove-0"));
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.model?.fallback).toBeUndefined();
   });
 
   it("toggling write-back off sets memory.long_term.write_back false", async () => {

@@ -55,6 +55,9 @@ import {
   setRunDeadline,
   setToolBudgetOn,
   setTrajectoryRecording,
+  readFallback,
+  setFallback,
+  normalizeForSubmit,
 } from "../form_model";
 
 const seed = {
@@ -93,6 +96,104 @@ describe("form_model readers", () => {
       mcpAllowTools: [],
       mcpServers: [],
     });
+  });
+});
+
+describe("model fallback chain (spec.model.fallback)", () => {
+  it("reads an empty chain when no fallback is set", () => {
+    expect(readFallback(seed)).toEqual([]);
+  });
+
+  it("writes a chain, preserves the primary + siblings, reads it back", () => {
+    const chain = [
+      { provider: "glm", name: "glm-4-flash" },
+      { provider: "deepseek", name: "deepseek-chat" },
+    ];
+    const next = setFallback(seed, chain);
+    expect(readFallback(next)).toEqual(chain);
+    // Primary model + its name untouched.
+    expect(next.spec?.model?.provider).toBe("anthropic");
+    expect(next.spec?.model?.name).toBe("claude-sonnet-4-6");
+    // Unrelated spec keys preserved.
+    expect(next.spec?.system_prompt).toEqual(seed.spec.system_prompt);
+  });
+
+  it("setFallback([]) drops the key so a single-provider manifest stays clean", () => {
+    const withChain = setFallback(seed, [{ provider: "glm", name: "glm-4-flash" }]);
+    const cleared = setFallback(withChain, []);
+    expect(readFallback(cleared)).toEqual([]);
+    expect("fallback" in (cleared.spec?.model ?? {})).toBe(false);
+  });
+
+  it("preserves an entry's own nested fallback (YAML power-user round-trip)", () => {
+    const chain = [
+      {
+        provider: "glm",
+        name: "glm-4-flash",
+        fallback: [{ provider: "kimi", name: "kimi-k2" }],
+      },
+    ];
+    const next = setFallback(seed, chain);
+    expect(readFallback(next)[0].fallback).toEqual([{ provider: "kimi", name: "kimi-k2" }]);
+  });
+
+  it("does not mutate the input manifest", () => {
+    const before = JSON.stringify(seed);
+    setFallback(seed, [{ provider: "glm", name: "glm-4-flash" }]);
+    expect(JSON.stringify(seed)).toBe(before);
+  });
+});
+
+describe("normalizeForSubmit (serialize-boundary fallback pruning)", () => {
+  it("drops an added-but-unfilled entry so the backend never sees [{}]", () => {
+    const m = setFallback(seed, [{}, { provider: "glm", name: "glm-4-flash" }]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([
+      { provider: "glm", name: "glm-4-flash" },
+    ]);
+  });
+
+  it("drops a provider-only (name missing) entry", () => {
+    const m = setFallback(seed, [{ provider: "glm" }]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([]);
+    // Fully pruned → key removed, single-provider manifest stays clean.
+    expect("fallback" in (normalizeForSubmit(m).spec?.model ?? {})).toBe(false);
+  });
+
+  it("drops an entry that duplicates the primary (backend rejects as a cycle)", () => {
+    // seed primary = anthropic/claude-sonnet-4-6
+    const m = setFallback(seed, [
+      { provider: "anthropic", name: "claude-sonnet-4-6" },
+      { provider: "glm", name: "glm-4-flash" },
+    ]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([
+      { provider: "glm", name: "glm-4-flash" },
+    ]);
+  });
+
+  it("de-dupes repeated entries within the chain, keeping the first", () => {
+    const m = setFallback(seed, [
+      { provider: "glm", name: "glm-4-flash", temperature: 0.1 },
+      { provider: "glm", name: "glm-4-flash", temperature: 0.9 },
+    ]);
+    expect(readFallback(normalizeForSubmit(m))).toEqual([
+      { provider: "glm", name: "glm-4-flash", temperature: 0.1 },
+    ]);
+  });
+
+  it("keeps a fully-valid chain untouched (incl. an entry's nested fallback)", () => {
+    const chain = [
+      { provider: "glm", name: "glm-4-flash", fallback: [{ provider: "kimi", name: "kimi-k2" }] },
+      { provider: "deepseek", name: "deepseek-chat" },
+    ];
+    const m = setFallback(seed, chain);
+    expect(readFallback(normalizeForSubmit(m))).toEqual(chain);
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m = setFallback(seed, [{}, { provider: "glm", name: "glm-4-flash" }]);
+    const before = JSON.stringify(m);
+    normalizeForSubmit(m);
+    expect(JSON.stringify(m)).toBe(before);
   });
 });
 
