@@ -66,6 +66,10 @@ from expert_work.runtime.middleware import (
 from orchestrator.llm.coalesce import coalesce_system_messages
 from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
+from orchestrator.llm.providers._streaming import (
+    LLMDelta,
+    delta_from_openai_chunk,
+)
 from orchestrator.llm.structured_output import (
     StructuredOutputCapability,
     schema_instruction,
@@ -426,33 +430,21 @@ class OpenAIProvider:
     #: the application tier for its remaining lifetime (restart retries).
     _allowed_tools_disabled: bool = field(default=False, init=False, repr=False)
 
-    async def complete(
+    async def _prepare_request(
         self,
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
-        output_schema: StructuredOutputSpec | None = None,
-    ) -> AIMessage:
-        # Stream RT-1 (RT-ADR-2 prompt path, § 7.5) — inject the schema
-        # instruction as a trailing SystemMessage BEFORE coalescing:
-        # RT-ADR-5 below folds it into the single leading system block,
-        # where in-order concatenation makes it the FINAL segment.
-        # Injecting after mapping would ship a non-leading wire-level
-        # ``system`` role — exactly the strict-backend 400 that coalescing
-        # exists to prevent, and the prompt-path vendors (qwen / glm /
-        # deepseek / vLLM ...) are that strict population.
+        output_schema: StructuredOutputSpec | None,
+        use_allowed: bool,
+    ) -> dict[str, Any]:
+        """Translate history + tools into ``chat_completions`` kwargs.
+        Shared by ``complete`` and ``stream`` so both put the exact same
+        request on the wire (only ``stream`` differs at the client)."""
         if output_schema is not None and self.structured_output_capability != "native":
             messages = [*messages, SystemMessage(content=schema_instruction(output_schema))]
-        # Stream RT-2 (RT-ADR-5) — strict OpenAI-compatible backends 400 on
-        # a non-leading ``system`` role (the L2 ``<context-summary>`` lands
-        # mid-list); fold mid-conversation SystemMessages into the leading
-        # system before mapping. Per-request only; input never mutated.
         messages = coalesce_system_messages(messages)
         mapped = await _to_openai_messages(messages, self.image_resolver)
-        # Stream RT-1 (RT-ADR-2 native path) — stock OpenAI enforces the
-        # schema on the wire via response_format json_schema.
-        # output_schema=None keeps the request byte-identical (hard
-        # backward-compat constraint).
         response_format: dict[str, Any] | None = None
         if output_schema is not None and self.structured_output_capability == "native":
             response_format = {
@@ -463,11 +455,6 @@ class OpenAIProvider:
                     "strict": output_schema.strict,
                 },
             }
-        # Stream HX-13 — defer markers ride the specs (agent_node sets them
-        # on the allowed_tools tier): the FULL schema set stays on the wire
-        # (prompt-cache friendly) and the marked tools are excluded from
-        # the allowed subset until promoted.
-        use_allowed = any(spec.defer_loading for spec in tools) and not self._allowed_tools_disabled
         tool_payload = [_to_openai_tool(spec) for spec in tools] if tools else None
         tool_choice: dict[str, Any] | None = None
         if use_allowed:
@@ -480,37 +467,69 @@ class OpenAIProvider:
                     if not spec.defer_loading
                 ],
             }
+        return {
+            "model": self.model,
+            "messages": mapped,
+            "tools": tool_payload,
+            "temperature": self.temperature,
+            "extra_body": self.thinking_payload,
+            "tool_choice": tool_choice,
+            "response_format": response_format,
+        }
 
+    async def complete(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AIMessage:
+        use_allowed = any(spec.defer_loading for spec in tools) and not self._allowed_tools_disabled
+        request = await self._prepare_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_allowed=use_allowed
+        )
         try:
-            body = await self.client.chat_completions(
-                model=self.model,
-                messages=mapped,
-                tools=tool_payload,
-                temperature=self.temperature,
-                extra_body=self.thinking_payload,
-                tool_choice=tool_choice,
-                response_format=response_format,
-            )
+            body = await self.client.chat_completions(**request)
         except LLMClientError:
             if not use_allowed:
                 raise
-            # Stream HX-13 (Mini-ADR HX-J4) — the allowed_tools constraint
-            # was rejected. Fail open: drop to the application tier for
-            # this provider instance and resend once without it.
             self._allowed_tools_disabled = True
             disclosure_fallback_total.labels(provider="openai").inc()
             logger.warning("openai.allowed_tools_rejected — falling back to app tier")
-            body = await self.client.chat_completions(
-                model=self.model,
-                messages=mapped,
-                tools=tool_payload,
-                temperature=self.temperature,
-                extra_body=self.thinking_payload,
-                tool_choice=None,
-                response_format=response_format,
+            retry = await self._prepare_request(
+                messages=messages, tools=tools, output_schema=output_schema, use_allowed=False
             )
-
+            body = await self.client.chat_completions(**retry)
         return _from_openai_response(body)
+
+    async def stream(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AsyncIterator[LLMDelta]:
+        use_allowed = any(spec.defer_loading for spec in tools) and not self._allowed_tools_disabled
+        request = await self._prepare_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_allowed=use_allowed
+        )
+        try:
+            async for chunk in self.client.stream_chat_completions(**request):
+                yield delta_from_openai_chunk(chunk)
+            return
+        except LLMClientError:
+            if not use_allowed:
+                raise
+            # HX-13 (Mini-ADR HX-J4) — allowed_tools rejected pre-stream.
+            # Fail open: drop to the application tier and re-stream once.
+            self._allowed_tools_disabled = True
+            disclosure_fallback_total.labels(provider="openai").inc()
+            logger.warning("openai.allowed_tools_rejected — falling back to app tier")
+        retry = await self._prepare_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_allowed=False
+        )
+        async for chunk in self.client.stream_chat_completions(**retry):
+            yield delta_from_openai_chunk(chunk)
 
 
 def _truncate(text: str) -> str:
