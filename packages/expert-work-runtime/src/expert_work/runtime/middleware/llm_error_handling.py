@@ -108,15 +108,34 @@ class LLMNetworkError(LLMError):
     """Connection / timeout / TLS error — treated as retryable server-side."""
 
 
-class LLMStreamStaleError(LLMServerError):
-    """Stream L.L3 — the provider call exceeded the wall-clock deadline.
+class LLMStreamStaleError(LLMError):
+    """Stream L.L3 / L (P1) — the provider produced no token within the
+    first-token / wall-clock deadline.
 
-    Raised by :class:`~orchestrator.llm.router.LLMRouter._call_one` when
-    a provider hangs past ``stream_deadline_s`` (default 90s). Inherits
-    :class:`LLMServerError` so the router treats it as retryable and
-    falls back to the next provider — a hung provider should not lock
-    the run; another provider on the chain may still respond.
+    A plain :class:`LLMError` (NOT :class:`LLMServerError`), so it is
+    deliberately absent from :data:`_RETRYABLE_ERRORS`: E.4
+    :class:`LLMErrorHandlingMiddleware` must NOT retry a hung provider
+    in-place (P1 moved the deadline inside the middleware chain; retrying
+    a first-token timeout up to ``max_retries`` times would delay
+    fallover by that multiple). The router's ``__call__`` still catches
+    it via its generic ``except LLMError`` arm and falls over to the next
+    provider — prompt fallover, no in-place retries. A hung provider
+    should not lock the run; another provider may still respond.
     """
+
+
+class LLMStreamInterruptedError(LLMError):
+    """Stream L (P1) — a streaming provider stalled or errored AFTER the
+    first progress delta. Buffer-until-first-token commits the run to
+    that provider once tokens flow, so this is terminal: it inherits the
+    plain :class:`LLMError` (NOT :class:`LLMServerError`), so the E.4
+    error-handling middleware does not retry it and the router does not
+    fall back. Carries the partial :class:`AIMessage` assembled so far
+    for callers that want to surface it."""
+
+    def __init__(self, message: str, *, partial: object | None = None) -> None:
+        super().__init__(message)
+        self.partial = partial
 
 
 class LLMOutputValidationError(LLMError):

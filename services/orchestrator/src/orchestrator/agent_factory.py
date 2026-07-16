@@ -163,6 +163,13 @@ def _chat_stream_deadline_s(manifest_deadline_s: int) -> float | None:
     return float(max(manifest_deadline_s, _CHAT_STREAM_DEADLINE_FLOOR_S))
 
 
+#: Floor is not applied to the idle timer — it is an inter-token gap, not a
+#: total budget, so the manifest value is honoured directly (0 = off).
+def _chat_idle_timeout_s(manifest_idle_s: int) -> float | None:
+    """Effective inter-token idle timeout; ``0`` disables (dev / long-batch)."""
+    return float(manifest_idle_s) if manifest_idle_s > 0 else None
+
+
 #: Default provider-client httpx wall-clock timeout (matches the per-vendor
 #: factory defaults). Used when no explicit ``timeout_s`` is threaded in.
 _PROVIDER_HTTP_TIMEOUT_DEFAULT_S = 60.0
@@ -592,14 +599,16 @@ async def build_agent(
     escalated_llm_caller: LLMCaller | None = None
     escalated_spec = _escalated_model(spec.spec.model)
     if escalated_spec is not None:
-        escalated_deadline = _chat_stream_deadline_s(spec.spec.stream_deadline_s)
+        escalated_first_token = _chat_stream_deadline_s(spec.spec.stream_deadline_s)
+        escalated_idle = _chat_idle_timeout_s(spec.spec.idle_timeout_s)
         escalated_llm_caller = await build_llm_router(
             escalated_spec,
             secret_store=secret_store,
             around_llm_chain=chains.around_llm_call,
             image_resolver=env.image_resolver,
-            stream_deadline_s=escalated_deadline,
-            provider_timeout_s=escalated_deadline,
+            first_token_timeout_s=escalated_first_token,
+            idle_timeout_s=escalated_idle,
+            provider_timeout_s=escalated_first_token,
             provider_key_resolver=provider_key_resolver,
             ignore_api_key_ref=True,
         )
@@ -624,7 +633,10 @@ async def build_agent(
             secret_store=secret_store,
             around_llm_chain=chains.around_llm_call,
             image_resolver=env.image_resolver,
-            stream_deadline_s=vl_deadline_s,
+            first_token_timeout_s=vl_deadline_s,
+            # VL also streams (same OpenAI provider), so pass the same idle
+            # timer as chat — keep the VL floor for first-token only.
+            idle_timeout_s=_chat_idle_timeout_s(spec.spec.idle_timeout_s),
             provider_timeout_s=vl_deadline_s,
             # Mini-ADR J-33 — VL fallback chain (J.6.补强-4).
             extra_fallbacks=list(spec.spec.vision.fallbacks),
@@ -1791,7 +1803,8 @@ async def build_llm_router(
     secret_store: SecretStore,
     around_llm_chain: MiddlewareChain | None = None,
     image_resolver: ImageResolver | None = None,
-    stream_deadline_s: float | None = None,
+    first_token_timeout_s: float | None = None,
+    idle_timeout_s: float | None = None,
     provider_timeout_s: float | None = None,
     extra_fallbacks: list[ModelSpec] | None = None,
     provider_key_resolver: ProviderKeyResolver | None = None,
@@ -1812,9 +1825,11 @@ async def build_llm_router(
     ``image_resolver`` is threaded into every provider so ``image_ref``
     content blocks resolve to bytes at call time (J.6 Path A).
 
-    ``stream_deadline_s`` (Stream L.L3) caps each provider's ``complete()``
-    call in wall-clock time; ``None`` / ``0`` disables. See
-    :class:`LLMRouter.stream_deadline_s`.
+    ``first_token_timeout_s`` (Stream L P1, formerly ``stream_deadline_s``)
+    caps each provider's time-to-first-token in wall-clock time; ``None`` /
+    ``0`` disables. ``idle_timeout_s`` caps the inter-token gap once
+    streaming has started. Both are forwarded as-is to
+    :class:`LLMRouter.first_token_timeout_s` / ``idle_timeout_s``.
 
     Mini-ADR J-33 (J.6.补强-4) — ``extra_fallbacks`` is the J.6 VL
     path's mirror of E.11 fallback. The list is appended **after** the
@@ -1884,7 +1899,8 @@ async def build_llm_router(
     return LLMRouter(
         providers=handles,
         around_llm_chain=around_llm_chain,
-        stream_deadline_s=stream_deadline_s,
+        first_token_timeout_s=first_token_timeout_s,
+        idle_timeout_s=idle_timeout_s,
     )
 
 
@@ -1906,23 +1922,27 @@ async def build_step_routers(
     ``image_resolver`` is threaded into every router so ``image_ref``
     content blocks resolve to bytes at call time (Stream J.6 Path A).
 
-    Stream L.L3 — ``spec.spec.stream_deadline_s`` is applied uniformly
-    to every router (default + planning + reflection); a hung provider
-    on any step class trips the same wall-clock cap.
+    Stream L (P1) — ``spec.spec.stream_deadline_s`` (first-token budget)
+    and ``spec.spec.idle_timeout_s`` (inter-token idle cap) are applied
+    uniformly to every router (default + planning + reflection); a hung
+    provider on any step class trips the same caps.
     """
-    deadline: float | None = _chat_stream_deadline_s(spec.spec.stream_deadline_s)
+    first_token: float | None = _chat_stream_deadline_s(spec.spec.stream_deadline_s)
+    idle: float | None = _chat_idle_timeout_s(spec.spec.idle_timeout_s)
     default = await build_llm_router(
         spec.spec.model,
         secret_store=secret_store,
         around_llm_chain=around_llm_chain,
         image_resolver=image_resolver,
-        stream_deadline_s=deadline,
-        # Align the provider httpx timeout to the deadline (Stream L.L3, as VL
-        # already does). Otherwise the fixed 60s client read timeout fires first
-        # on a slow time-to-first-token (e.g. a large-context prefill), raising
-        # LLMNetworkError + a wasted retry before the router deadline even
-        # applies — the real reason a big-context call "times out".
-        provider_timeout_s=deadline,
+        first_token_timeout_s=first_token,
+        idle_timeout_s=idle,
+        # Align the provider httpx timeout to the first-token budget (Stream
+        # L.L3, as VL already does). Otherwise the fixed 60s client read
+        # timeout fires first on a slow time-to-first-token (e.g. a
+        # large-context prefill), raising LLMNetworkError + a wasted retry
+        # before the router deadline even applies — the real reason a
+        # big-context call "times out".
+        provider_timeout_s=first_token,
         provider_key_resolver=provider_key_resolver,
         ignore_api_key_ref=ignore_api_key_ref,
     )
@@ -1936,8 +1956,9 @@ async def build_step_routers(
                 secret_store=secret_store,
                 around_llm_chain=around_llm_chain,
                 image_resolver=image_resolver,
-                stream_deadline_s=deadline,
-                provider_timeout_s=deadline,
+                first_token_timeout_s=first_token,
+                idle_timeout_s=idle,
+                provider_timeout_s=first_token,
                 provider_key_resolver=provider_key_resolver,
                 ignore_api_key_ref=ignore_api_key_ref,
             )

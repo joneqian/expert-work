@@ -85,6 +85,7 @@ FIELD_TIERS: dict[str, FieldTier] = {
     "tenant_config": FieldTier.TENANT_OWNED,
     "dynamic_context": FieldTier.TENANT_OWNED,
     "stream_deadline_s": FieldTier.TENANT_OWNED,
+    "idle_timeout_s": FieldTier.TENANT_OWNED,
     "code": FieldTier.TENANT_OWNED,
     "hooks": FieldTier.TENANT_OWNED,
     "observability": FieldTier.TENANT_OWNED,

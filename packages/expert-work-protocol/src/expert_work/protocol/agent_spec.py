@@ -1191,14 +1191,29 @@ class AgentSpecBody(BaseModel):
         ge=0,
         le=3600,
         description=(
-            "Stream L.L3 — wall-clock cap on a single LLM provider call. "
-            "Default 180s — a single heavy generation (a long report section, "
-            "or an orchestrator-worker doing real work) routinely runs past the "
-            "original 90s, which mis-fired LLMStreamStaleError and exhausted the "
-            "fallback chain on healthy-but-slow providers. Matches the VL "
-            "deadline floor. Hits still trigger LLMStreamStaleError so the "
-            "router falls back rather than locking the run. Set ``0`` to disable "
-            "(dev / long-batch paths)."
+            "Stream L (P1) — time-to-first-token budget for a single LLM "
+            "provider call. Default 180s — a single heavy generation (a long "
+            "report section, or an orchestrator-worker doing real work) "
+            "routinely runs past the original 90s, which mis-fired "
+            "LLMStreamStaleError and exhausted the fallback chain on "
+            "healthy-but-slow providers. Matches the VL deadline floor. Hits "
+            "still trigger LLMStreamStaleError so the router falls back "
+            "rather than locking the run. Set ``0`` to disable (dev / "
+            "long-batch paths). Distinct from ``idle_timeout_s`` (the "
+            "inter-token idle cap once streaming has started)."
+        ),
+    )
+    idle_timeout_s: int = Field(
+        default=45,
+        ge=0,
+        le=600,
+        description=(
+            "Stream L (P1) — inter-token idle cap for a STREAMING provider "
+            "call. After the first token, a gap between deltas longer than "
+            "this ends the turn with the partial output (the model went "
+            "silent mid-stream). Distinct from ``stream_deadline_s`` (the "
+            "time-to-first-token budget). Set ``0`` to disable the idle "
+            "timer (dev / long-batch). Non-streaming providers ignore this."
         ),
     )
     policies: PolicySpec = Field(default_factory=PolicySpec)

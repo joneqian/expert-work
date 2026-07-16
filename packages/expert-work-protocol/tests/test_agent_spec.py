@@ -927,3 +927,16 @@ def test_output_schema_extra_field_rejected() -> None:
     doc["spec"]["output_schema"] = {"json_schema": {"type": "object"}, "bogus": 1}
     with pytest.raises(ValidationError):
         AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
+# Stream L (P1) — idle_timeout_s / stream_deadline_s reinterpretation
+# ---------------------------------------------------------------------------
+
+
+def test_idle_timeout_field_default() -> None:
+    from expert_work.protocol.agent_spec import AgentSpecBody
+
+    assert AgentSpecBody.model_fields["idle_timeout_s"].default == 45
+    # stream_deadline_s stays a field (reinterpreted as the first-token budget)
+    assert AgentSpecBody.model_fields["stream_deadline_s"].default == 180

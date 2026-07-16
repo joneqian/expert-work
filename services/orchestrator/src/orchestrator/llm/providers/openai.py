@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
@@ -59,12 +59,17 @@ from langchain_core.messages import (
 from expert_work.protocol import StructuredOutputSpec
 from expert_work.runtime.middleware import (
     LLMClientError,
+    LLMError,
     LLMNetworkError,
     LLMServerError,
 )
 from orchestrator.llm.coalesce import coalesce_system_messages
 from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
+from orchestrator.llm.providers._streaming import (
+    LLMDelta,
+    delta_from_openai_chunk,
+)
 from orchestrator.llm.structured_output import (
     StructuredOutputCapability,
     schema_instruction,
@@ -79,6 +84,107 @@ _DEFAULT_BASE_URL = "https://api.openai.com"
 DEFAULT_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 _DEFAULT_TIMEOUT_S = 60.0
 _ERROR_BODY_CHAR_CAP = 500
+
+_SSE_SKIP = object()
+_SSE_DONE = object()
+
+
+def _build_request_body(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    temperature: float | None,
+    extra_body: dict[str, Any] | None,
+    tool_choice: dict[str, Any] | None,
+    response_format: dict[str, Any] | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"model": model, "messages": messages}
+    if tools:
+        body["tools"] = tools
+    if tool_choice is not None:
+        body["tool_choice"] = tool_choice
+    if response_format is not None:
+        body["response_format"] = response_format
+    if temperature is not None:
+        body["temperature"] = temperature
+    if extra_body:
+        body.update(extra_body)
+    return body
+
+
+def _parse_sse_line(line: str) -> Any:
+    """Parse one SSE line into a JSON chunk, ``_SSE_DONE``, or ``_SSE_SKIP``.
+
+    Blank lines, comment lines (``:`` keepalive), and non-``data:`` lines
+    are skipped; ``data: [DONE]`` terminates; malformed JSON is skipped
+    (lenient, like the non-streaming decoder)."""
+    line = line.strip()
+    if not line or line.startswith(":") or not line.startswith("data:"):
+        return _SSE_SKIP
+    data = line[len("data:") :].strip()
+    if data == "[DONE]":
+        return _SSE_DONE
+    try:
+        parsed = json.loads(data)
+    except json.JSONDecodeError:
+        return _SSE_SKIP
+    return parsed if isinstance(parsed, Mapping) else _SSE_SKIP
+
+
+def _looks_billing(message: str) -> bool:
+    low = message.lower()
+    return "quota" in low or "billing" in low or "balance" in low
+
+
+def _classify_stream_error(error: Mapping[str, Any]) -> LLMError:
+    """Map an in-band SSE ``error`` object to an :class:`LLMError`.
+
+    OpenAI-wire error events carry ``{message, type, code}``. Without an
+    HTTP status we default to a retryable :class:`LLMServerError`; a
+    billing/quota marker in the message escalates to key-level via the
+    shared classifier (status 429 forces the marker inspection path)."""
+    message = str(error.get("message") or "")
+    if _looks_billing(message):
+        return classify_http_error("openai", 429, message)
+    return LLMServerError(f"openai stream error: {message}")
+
+
+def _response_to_stream_chunks(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Synthesize a single streaming chunk from a whole non-streaming
+    response body, so a :class:`RecordingOpenAIClient` primed with only
+    ``response`` still yields coherent deltas when consumed via the
+    streaming path (the router prefers ``stream()`` for streaming-capable
+    providers). Tool calls get an ``index`` so multi-call responses
+    reassemble correctly."""
+    choices = response.get("choices") or []
+    if not choices or not isinstance(choices[0], Mapping):
+        return []
+    first = choices[0]
+    message = first.get("message")
+    if not isinstance(message, Mapping):
+        return []
+    delta: dict[str, Any] = {}
+    content = message.get("content")
+    if content is not None:
+        delta["content"] = content
+    reasoning = message.get("reasoning_content")
+    if reasoning is not None:
+        delta["reasoning_content"] = reasoning
+    raw_tcs = message.get("tool_calls")
+    if isinstance(raw_tcs, list) and raw_tcs:
+        delta["tool_calls"] = [
+            {"index": i, "id": tc.get("id"), "type": tc.get("type"), "function": tc.get("function")}
+            for i, tc in enumerate(raw_tcs)
+            if isinstance(tc, Mapping)
+        ]
+    chunk: dict[str, Any] = {
+        "choices": [{"delta": delta, "finish_reason": first.get("finish_reason")}]
+    }
+    for key in ("usage", "model", "system_fingerprint"):
+        if key in response:
+            chunk[key] = response[key]
+    return [chunk]
 
 
 @runtime_checkable
@@ -112,6 +218,22 @@ class OpenAIClient(Protocol):
         ``response_format`` (Stream RT-1, native path) carries the
         ``{"type": "json_schema", ...}`` structured-output constraint;
         ``None`` omits the field entirely."""
+
+    def stream_chat_completions(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        """Stream ``/v1/chat/completions`` (``stream=true``), yielding each
+        parsed SSE JSON chunk and stopping at ``[DONE]``. An HTTP >= 400
+        status raises the classified :class:`LLMError` before the first
+        chunk; an in-band ``error`` event raises mid-stream (Stream L, P1)."""
 
 
 @dataclass
@@ -153,21 +275,15 @@ class HTTPOpenAIClient:
         tool_choice: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        body: dict[str, Any] = {"model": model, "messages": messages}
-        if tools:
-            body["tools"] = tools
-        if tool_choice is not None:
-            # Stream HX-13 — the allowed_tools subset constraint.
-            body["tool_choice"] = tool_choice
-        if response_format is not None:
-            # Stream RT-1 — native structured-output constraint.
-            body["response_format"] = response_format
-        if temperature is not None:
-            body["temperature"] = temperature
-        if extra_body:
-            # Stream CM-10 — vendor thinking controls, merged last so the
-            # translated payload is exactly what goes on the wire.
-            body.update(extra_body)
+        body = _build_request_body(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            extra_body=extra_body,
+            tool_choice=tool_choice,
+            response_format=response_format,
+        )
 
         try:
             async with httpx.AsyncClient(
@@ -197,6 +313,61 @@ class HTTPOpenAIClient:
             raise LLMServerError(f"openai returned non-object body: {type(data).__name__}")
         return data
 
+    async def stream_chat_completions(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        body = _build_request_body(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            extra_body=extra_body,
+            tool_choice=tool_choice,
+            response_format=response_format,
+        )
+        body["stream"] = True
+        body["stream_options"] = {"include_usage": True}
+        # Disable httpx's read timeout on the stream — the router's
+        # idle_timeout_s governs inter-chunk silence (Stream L, P1).
+        timeout = httpx.Timeout(self.timeout_s, read=None)
+        try:
+            async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}{self.chat_completions_path}",
+                    headers={
+                        self.api_key_header: f"{self.api_key_prefix}{self.api_key}",
+                        "content-type": "application/json",
+                    },
+                    json=body,
+                ) as response:
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise classify_http_error(
+                            "openai", response.status_code, _truncate(response.text)
+                        )
+                    async for line in response.aiter_lines():
+                        chunk = _parse_sse_line(line)
+                        if chunk is _SSE_SKIP:
+                            continue
+                        if chunk is _SSE_DONE:
+                            return
+                        assert isinstance(chunk, Mapping)  # noqa: S101
+                        error = chunk.get("error")
+                        if isinstance(error, Mapping):
+                            raise _classify_stream_error(error)
+                        yield chunk
+        except httpx.HTTPError as exc:
+            raise LLMNetworkError(f"openai: {exc}") from exc
+
 
 @dataclass
 class RecordingOpenAIClient:
@@ -208,6 +379,7 @@ class RecordingOpenAIClient:
     """
 
     response: Mapping[str, Any] = field(default_factory=dict)
+    stream_chunks: list[Mapping[str, Any]] = field(default_factory=list)
     raise_with: BaseException | None = None
     calls: list[dict[str, Any]] = field(default_factory=list)
 
@@ -236,6 +408,35 @@ class RecordingOpenAIClient:
         if self.raise_with is not None:
             raise self.raise_with
         return self.response
+
+    async def stream_chat_completions(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        self.calls.append(
+            {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+                "temperature": temperature,
+                "extra_body": extra_body,
+                "tool_choice": tool_choice,
+                "response_format": response_format,
+                "stream": True,
+            }
+        )
+        if self.raise_with is not None:
+            raise self.raise_with
+        chunks = self.stream_chunks or _response_to_stream_chunks(self.response)
+        for chunk in chunks:
+            yield chunk
 
 
 @dataclass
@@ -266,33 +467,21 @@ class OpenAIProvider:
     #: the application tier for its remaining lifetime (restart retries).
     _allowed_tools_disabled: bool = field(default=False, init=False, repr=False)
 
-    async def complete(
+    async def _prepare_request(
         self,
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
-        output_schema: StructuredOutputSpec | None = None,
-    ) -> AIMessage:
-        # Stream RT-1 (RT-ADR-2 prompt path, § 7.5) — inject the schema
-        # instruction as a trailing SystemMessage BEFORE coalescing:
-        # RT-ADR-5 below folds it into the single leading system block,
-        # where in-order concatenation makes it the FINAL segment.
-        # Injecting after mapping would ship a non-leading wire-level
-        # ``system`` role — exactly the strict-backend 400 that coalescing
-        # exists to prevent, and the prompt-path vendors (qwen / glm /
-        # deepseek / vLLM ...) are that strict population.
+        output_schema: StructuredOutputSpec | None,
+        use_allowed: bool,
+    ) -> dict[str, Any]:
+        """Translate history + tools into ``chat_completions`` kwargs.
+        Shared by ``complete`` and ``stream`` so both put the exact same
+        request on the wire (only ``stream`` differs at the client)."""
         if output_schema is not None and self.structured_output_capability != "native":
             messages = [*messages, SystemMessage(content=schema_instruction(output_schema))]
-        # Stream RT-2 (RT-ADR-5) — strict OpenAI-compatible backends 400 on
-        # a non-leading ``system`` role (the L2 ``<context-summary>`` lands
-        # mid-list); fold mid-conversation SystemMessages into the leading
-        # system before mapping. Per-request only; input never mutated.
         messages = coalesce_system_messages(messages)
         mapped = await _to_openai_messages(messages, self.image_resolver)
-        # Stream RT-1 (RT-ADR-2 native path) — stock OpenAI enforces the
-        # schema on the wire via response_format json_schema.
-        # output_schema=None keeps the request byte-identical (hard
-        # backward-compat constraint).
         response_format: dict[str, Any] | None = None
         if output_schema is not None and self.structured_output_capability == "native":
             response_format = {
@@ -303,11 +492,6 @@ class OpenAIProvider:
                     "strict": output_schema.strict,
                 },
             }
-        # Stream HX-13 — defer markers ride the specs (agent_node sets them
-        # on the allowed_tools tier): the FULL schema set stays on the wire
-        # (prompt-cache friendly) and the marked tools are excluded from
-        # the allowed subset until promoted.
-        use_allowed = any(spec.defer_loading for spec in tools) and not self._allowed_tools_disabled
         tool_payload = [_to_openai_tool(spec) for spec in tools] if tools else None
         tool_choice: dict[str, Any] | None = None
         if use_allowed:
@@ -320,37 +504,69 @@ class OpenAIProvider:
                     if not spec.defer_loading
                 ],
             }
+        return {
+            "model": self.model,
+            "messages": mapped,
+            "tools": tool_payload,
+            "temperature": self.temperature,
+            "extra_body": self.thinking_payload,
+            "tool_choice": tool_choice,
+            "response_format": response_format,
+        }
 
+    async def complete(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AIMessage:
+        use_allowed = any(spec.defer_loading for spec in tools) and not self._allowed_tools_disabled
+        request = await self._prepare_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_allowed=use_allowed
+        )
         try:
-            body = await self.client.chat_completions(
-                model=self.model,
-                messages=mapped,
-                tools=tool_payload,
-                temperature=self.temperature,
-                extra_body=self.thinking_payload,
-                tool_choice=tool_choice,
-                response_format=response_format,
-            )
+            body = await self.client.chat_completions(**request)
         except LLMClientError:
             if not use_allowed:
                 raise
-            # Stream HX-13 (Mini-ADR HX-J4) — the allowed_tools constraint
-            # was rejected. Fail open: drop to the application tier for
-            # this provider instance and resend once without it.
             self._allowed_tools_disabled = True
             disclosure_fallback_total.labels(provider="openai").inc()
             logger.warning("openai.allowed_tools_rejected — falling back to app tier")
-            body = await self.client.chat_completions(
-                model=self.model,
-                messages=mapped,
-                tools=tool_payload,
-                temperature=self.temperature,
-                extra_body=self.thinking_payload,
-                tool_choice=None,
-                response_format=response_format,
+            retry = await self._prepare_request(
+                messages=messages, tools=tools, output_schema=output_schema, use_allowed=False
             )
-
+            body = await self.client.chat_completions(**retry)
         return _from_openai_response(body)
+
+    async def stream(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AsyncIterator[LLMDelta]:
+        use_allowed = any(spec.defer_loading for spec in tools) and not self._allowed_tools_disabled
+        request = await self._prepare_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_allowed=use_allowed
+        )
+        try:
+            async for chunk in self.client.stream_chat_completions(**request):
+                yield delta_from_openai_chunk(chunk)
+            return
+        except LLMClientError:
+            if not use_allowed:
+                raise
+            # HX-13 (Mini-ADR HX-J4) — allowed_tools rejected pre-stream.
+            # Fail open: drop to the application tier and re-stream once.
+            self._allowed_tools_disabled = True
+            disclosure_fallback_total.labels(provider="openai").inc()
+            logger.warning("openai.allowed_tools_rejected — falling back to app tier")
+        retry = await self._prepare_request(
+            messages=messages, tools=tools, output_schema=output_schema, use_allowed=False
+        )
+        async for chunk in self.client.stream_chat_completions(**retry):
+            yield delta_from_openai_chunk(chunk)
 
 
 def _truncate(text: str) -> str:
