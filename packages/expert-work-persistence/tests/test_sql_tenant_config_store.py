@@ -113,6 +113,8 @@ async def test_first_upsert_then_get_round_trip(
                 plan=TenantPlan.PRO,
                 mcp_allowlist=["github-mcp"],
                 pii_fields=["email"],
+                http_tool_allowlist=["https://api.github.com/*"],
+                http_tool_denylist=["internal.acme.com"],
             ),
             actor_id="admin@acme",
         )
@@ -120,10 +122,13 @@ async def test_first_upsert_then_get_round_trip(
         assert created.plan is TenantPlan.PRO
         assert created.mcp_allowlist == ["github-mcp"]
         assert created.pii_fields == ["email"]
+        assert created.http_tool_allowlist == ["https://api.github.com/*"]
+        assert created.http_tool_denylist == ["internal.acme.com"]
 
         fetched = await store.get(tenant_id=tenant)
         assert fetched is not None
         assert fetched.display_name == "ACME Inc"
+        assert fetched.http_tool_denylist == ["internal.acme.com"]
     finally:
         await engine.dispose()
 
@@ -142,6 +147,7 @@ async def test_partial_update_preserves_unset_fields(
                 display_name="initial",
                 mcp_allowlist=["github-mcp"],
                 pii_fields=["ssn"],
+                http_tool_denylist=["blocked.example.com"],
             ),
             actor_id="admin",
         )
@@ -156,6 +162,8 @@ async def test_partial_update_preserves_unset_fields(
         assert final.mcp_allowlist == ["github-mcp"]
         assert final.pii_fields == ["ssn"]
         assert final.display_name == "initial"
+        # A plan-only patch leaves the denylist untouched.
+        assert final.http_tool_denylist == ["blocked.example.com"]
     finally:
         await engine.dispose()
 

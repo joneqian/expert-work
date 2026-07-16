@@ -1119,6 +1119,9 @@ export interface TranslationKeys {
     skill_evolution_judge_sample_pct: string;
     mcp_allowlist: string;
     http_allowlist: string;
+    http_allowlist_empty: string;
+    http_denylist: string;
+    http_denylist_empty: string;
     updated: string;
     dirty: string;
     config_saved: string;
@@ -3645,6 +3648,9 @@ const en: TranslationKeys = {
     skill_evolution_judge_sample_pct: "Implicit judge sample rate",
     mcp_allowlist: "MCP allowlist",
     http_allowlist: "HTTP tool allowlist",
+    http_allowlist_empty: "— (all public hosts allowed; SSRF blocked)",
+    http_denylist: "HTTP tool denylist",
+    http_denylist_empty: "— (nothing denied)",
     updated: "Updated",
     dirty: "edited (unsaved)",
     config_saved: "Tenant config saved.",

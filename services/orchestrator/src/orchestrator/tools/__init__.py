@@ -52,6 +52,9 @@ from orchestrator.tools.http import (
     AllowlistProvider as AllowlistProvider,
 )
 from orchestrator.tools.http import (
+    DenylistProvider as DenylistProvider,
+)
+from orchestrator.tools.http import (
     HTTPTool as HTTPTool,
 )
 from orchestrator.tools.knowledge import (
@@ -213,6 +216,7 @@ __all__ = [
     "AskImageTool",
     "BashTool",
     "ChildAgentBuilder",
+    "DenylistProvider",
     "EditFileTool",
     "ExecPythonTool",
     "FileOpError",

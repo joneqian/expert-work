@@ -93,6 +93,7 @@ from orchestrator.multimodal import (
 )
 from orchestrator.tools import (
     AllowlistProvider,
+    DenylistProvider,
     HTTPSupervisorClient,
     KnowledgeRetriever,
     LLMReranker,
@@ -957,8 +958,9 @@ async def resolve_reranker(
 
 def _tenant_allowlist_provider(service: TenantConfigService) -> AllowlistProvider:
     """An :data:`AllowlistProvider` reading ``http_tool_allowlist`` from
-    the per-tenant config. A header-less / un-configured tenant yields
-    an empty allowlist — the HTTP tool then blocks every URL."""
+    the per-tenant config. Empty / un-configured ↔ allow all public hosts
+    (the HTTP tool's SSRF guard + denylist are the safety net); a non-empty
+    list restricts the tool to those URL patterns."""
 
     async def _provider(tenant_id: UUID | None) -> Sequence[str]:
         if tenant_id is None:
@@ -968,6 +970,23 @@ def _tenant_allowlist_provider(service: TenantConfigService) -> AllowlistProvide
         except TenantConfigNotConfiguredError:
             return []
         return record.http_tool_allowlist
+
+    return _provider
+
+
+def _tenant_denylist_provider(service: TenantConfigService) -> DenylistProvider:
+    """A :data:`DenylistProvider` reading ``http_tool_denylist`` from the
+    per-tenant config. Empty / un-configured ↔ nothing denied. Denied hosts
+    are refused even under allow-all — precedence over the allowlist."""
+
+    async def _provider(tenant_id: UUID | None) -> Sequence[str]:
+        if tenant_id is None:
+            return []
+        try:
+            record = await service.get(tenant_id=tenant_id)
+        except TenantConfigNotConfiguredError:
+            return []
+        return record.http_tool_denylist
 
     return _provider
 
@@ -1192,6 +1211,7 @@ def build_tool_env(
     """
     return ToolEnv(
         allowlist_provider=_tenant_allowlist_provider(tenant_config_service),
+        denylist_provider=_tenant_denylist_provider(tenant_config_service),
         web_search_client=web_search_client,
         supervisor_client=supervisor_client,
         mcp_pool=mcp_pool,

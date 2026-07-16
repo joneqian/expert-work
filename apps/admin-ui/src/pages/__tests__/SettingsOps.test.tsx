@@ -120,6 +120,7 @@ const configRow = {
   rate_limit_override: {},
   pii_fields: [],
   http_tool_allowlist: ["https://api.github.com/*"],
+  http_tool_denylist: ["internal.example.com"],
   mcp_servers: [],
   audit_retention_days: 90,
   event_log_retention_days: 30,
@@ -186,6 +187,10 @@ describe("SettingsTenantConfig", () => {
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument());
     expect(screen.getByText("pro")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
+    // E.8 — the per-tenant HTTP-tool denylist renders its hosts.
+    expect(screen.getByTestId("tenant-config-http-denylist")).toHaveTextContent(
+      "internal.example.com",
+    );
   });
 
   it("Edit button reveals the JSON editor + dirty detection", async () => {

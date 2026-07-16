@@ -111,11 +111,15 @@ class _FakeTenantConfigService:
     """Minimal stand-in — ``build_tool_env``'s provider only calls ``get``."""
 
     allowlist: list[str] | None  # None → the tenant has no config row
+    denylist: list[str] | None = None
 
     async def get(self, *, tenant_id: UUID, actor_id: str | None = None) -> object:
         if self.allowlist is None:
             raise TenantConfigNotConfiguredError(tenant_id=tenant_id)
-        return SimpleNamespace(http_tool_allowlist=self.allowlist)
+        return SimpleNamespace(
+            http_tool_allowlist=self.allowlist,
+            http_tool_denylist=self.denylist or [],
+        )
 
 
 def test_build_middleware_env_wires_cache_langfuse_and_redactor() -> None:
@@ -135,6 +139,8 @@ def test_build_middleware_env_redact_text_masks_secrets() -> None:
 def test_build_tool_env_wires_allowlist_provider_only() -> None:
     env = build_tool_env(_FakeTenantConfigService(allowlist=[]))
     assert env.allowlist_provider is not None
+    # The denylist provider is wired alongside the allowlist (E.8 denylist model).
+    assert env.denylist_provider is not None
     # web_search (Tavily), the supervisor client, and the mcp pool are opt-in.
     assert env.web_search_client is None
     assert env.supervisor_client is None
@@ -160,6 +166,27 @@ async def test_allowlist_provider_empty_when_tenant_unconfigured() -> None:
     env = build_tool_env(_FakeTenantConfigService(allowlist=None))
     assert env.allowlist_provider is not None
     assert await env.allowlist_provider(uuid4()) == []
+
+
+@pytest.mark.asyncio
+async def test_denylist_provider_returns_tenant_hosts() -> None:
+    env = build_tool_env(_FakeTenantConfigService(allowlist=[], denylist=["internal.example.com"]))
+    assert env.denylist_provider is not None
+    assert await env.denylist_provider(uuid4()) == ["internal.example.com"]
+
+
+@pytest.mark.asyncio
+async def test_denylist_provider_empty_for_headerless_tenant() -> None:
+    env = build_tool_env(_FakeTenantConfigService(allowlist=["x"], denylist=["y"]))
+    assert env.denylist_provider is not None
+    assert await env.denylist_provider(None) == []
+
+
+@pytest.mark.asyncio
+async def test_denylist_provider_empty_when_tenant_unconfigured() -> None:
+    env = build_tool_env(_FakeTenantConfigService(allowlist=None))
+    assert env.denylist_provider is not None
+    assert await env.denylist_provider(uuid4()) == []
 
 
 # ---------------------------------------------------------------------------

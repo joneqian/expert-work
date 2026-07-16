@@ -70,6 +70,12 @@ from expert_work.common.url_validation import (
     RemoteURLError as RemoteURLError,
 )
 from expert_work.common.url_validation import (
+    normalize_host as normalize_host,
+)
+from expert_work.common.url_validation import (
+    validate_remote_host as validate_remote_host,
+)
+from expert_work.common.url_validation import (
     validate_remote_url as validate_remote_url,
 )
 
@@ -94,11 +100,13 @@ __all__ = [
     "get_current_tenant",
     "get_current_trace_id",
     "make_health_handlers",
+    "normalize_host",
     "require_current_tenant",
     "reset_current_tenant",
     "reset_current_trace_id",
     "set_current_tenant",
     "set_current_trace_id",
+    "validate_remote_host",
     "validate_remote_url",
     "with_deadline",
 ]

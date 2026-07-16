@@ -37,9 +37,14 @@ class TenantConfigRow(Base):
     pii_fields: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
-    # E.8 / E.9: per-tenant tool gates. Both default to ``[]`` ↔
-    # deny-all; admins explicitly open endpoints.
+    # E.8 / E.9: per-tenant tool gates, default ``[]``.
+    # ``http_tool_allowlist`` empty ↔ allow all public hosts (SSRF blocked by
+    # the tool); ``http_tool_denylist`` blocks specific hosts even under
+    # allow-all. ``mcp_servers`` empty ↔ no MCP.
     http_tool_allowlist: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    http_tool_denylist: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     mcp_servers: Mapped[list[Any]] = mapped_column(

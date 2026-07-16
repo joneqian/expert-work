@@ -46,7 +46,7 @@ from orchestrator.tools.file_ops import (
     WriteFileTool,
 )
 from orchestrator.tools.find_tools import FindToolsTool
-from orchestrator.tools.http import AllowlistProvider, HTTPTool
+from orchestrator.tools.http import AllowlistProvider, DenylistProvider, HTTPTool
 from orchestrator.tools.knowledge import KnowledgeRetriever, KnowledgeSearchTool
 from orchestrator.tools.locks import NullWorkspaceLock, WorkspaceLock
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
@@ -110,6 +110,9 @@ class ToolEnv:
 
     web_search_client: TavilyClient | None = None
     allowlist_provider: AllowlistProvider | None = None
+    #: E.8 — per-tenant HTTP-tool host denylist (blocks specific hosts even
+    #: under the default allow-all-public). ``None`` ↔ nothing denied.
+    denylist_provider: DenylistProvider | None = None
     mcp_pool: MCPServerPool | None = None
     #: Stream O (Mini-ADR O-14) — per-tenant MCP server allowlist. Empty
     #: (the default) means no restriction: the agent sees every server in
@@ -655,7 +658,12 @@ def _register_http(registry: ToolRegistry, env: ToolEnv) -> None:
             "'http' tool declared but no allowlist provider is "
             "configured (ToolEnv.allowlist_provider)"
         )
-    registry.register(HTTPTool(allowlist_provider=env.allowlist_provider))
+    registry.register(
+        HTTPTool(
+            allowlist_provider=env.allowlist_provider,
+            denylist_provider=env.denylist_provider,
+        )
+    )
 
 
 async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv) -> None:
