@@ -220,7 +220,8 @@ class StreamingLLMProvider(Protocol):
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
         output_schema: StructuredOutputSpec | None = None,
-    ) -> AsyncIterator[LLMDelta]: ...
+    ) -> AsyncIterator[LLMDelta]:
+        """Yield normalized :class:`LLMDelta` chunks from the provider."""
 
 
 def supports_streaming(provider: object) -> bool:

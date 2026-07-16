@@ -234,7 +234,6 @@ class OpenAIClient(Protocol):
         parsed SSE JSON chunk and stopping at ``[DONE]``. An HTTP >= 400
         status raises the classified :class:`LLMError` before the first
         chunk; an in-band ``error`` event raises mid-stream (Stream L, P1)."""
-        ...
 
 
 @dataclass
