@@ -150,6 +150,43 @@ def _classify_stream_error(error: Mapping[str, Any]) -> LLMError:
     return LLMServerError(f"openai stream error: {message}")
 
 
+def _response_to_stream_chunks(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Synthesize a single streaming chunk from a whole non-streaming
+    response body, so a :class:`RecordingOpenAIClient` primed with only
+    ``response`` still yields coherent deltas when consumed via the
+    streaming path (the router prefers ``stream()`` for streaming-capable
+    providers). Tool calls get an ``index`` so multi-call responses
+    reassemble correctly."""
+    choices = response.get("choices") or []
+    if not choices or not isinstance(choices[0], Mapping):
+        return []
+    first = choices[0]
+    message = first.get("message")
+    if not isinstance(message, Mapping):
+        return []
+    delta: dict[str, Any] = {}
+    content = message.get("content")
+    if content is not None:
+        delta["content"] = content
+    reasoning = message.get("reasoning_content")
+    if reasoning is not None:
+        delta["reasoning_content"] = reasoning
+    raw_tcs = message.get("tool_calls")
+    if isinstance(raw_tcs, list) and raw_tcs:
+        delta["tool_calls"] = [
+            {"index": i, "id": tc.get("id"), "type": tc.get("type"), "function": tc.get("function")}
+            for i, tc in enumerate(raw_tcs)
+            if isinstance(tc, Mapping)
+        ]
+    chunk: dict[str, Any] = {
+        "choices": [{"delta": delta, "finish_reason": first.get("finish_reason")}]
+    }
+    for key in ("usage", "model", "system_fingerprint"):
+        if key in response:
+            chunk[key] = response[key]
+    return [chunk]
+
+
 @runtime_checkable
 class OpenAIClient(Protocol):
     """Sized to the one Chat Completions endpoint we use.
@@ -398,7 +435,8 @@ class RecordingOpenAIClient:
         )
         if self.raise_with is not None:
             raise self.raise_with
-        for chunk in self.stream_chunks:
+        chunks = self.stream_chunks or _response_to_stream_chunks(self.response)
+        for chunk in chunks:
             yield chunk
 
 
