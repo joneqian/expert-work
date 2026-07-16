@@ -44,13 +44,16 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
 
 from expert_work.common.egress_token import host_in_denylist
-from expert_work.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.common.url_validation import (
+    RemoteURLError,
+    validate_remote_host,
+    validate_remote_url,
+)
 from orchestrator.tools.registry import (
     ToolBlockedError,
     ToolContext,
@@ -210,23 +213,38 @@ class HTTPTool:
             msg = "http tool requires a tenant-bound context"
             raise ToolBlockedError(msg)
 
+        # Validate the host httpx will ACTUALLY dial, not the raw urlparse host.
+        # httpx applies IDNA normalization (Unicode dot-equivalents
+        # U+3002/U+FF0E/U+FF61 → '.') before it resolves, so a raw-string guard
+        # would pass 'http://169。254。169。254/' while httpx dials
+        # 169.254.169.254 (cloud metadata). Deriving the host from httpx.URL
+        # closes that parser differential by construction.
+        try:
+            dialed_host = httpx.URL(url).host.rstrip(".")
+        except httpx.InvalidURL as exc:
+            logger.warning("http_tool.deny_invalid_url tenant_id=%s url=%s", tenant_id, url)
+            msg = f"invalid URL: {exc}"
+            raise ToolBlockedError(msg) from exc
+
         # SSRF guard first — refuse private / loopback / link-local / metadata
         # targets (and non-canonical IP literals) regardless of the lists, so
-        # allow-all-public can never reach an internal address. Static, no DNS.
+        # allow-all-public can never reach an internal address. Static, no DNS:
+        # ``validate_remote_url`` checks the scheme + raw form,
+        # ``validate_remote_host`` checks the exact host httpx dials.
         try:
             validate_remote_url(url)
+            validate_remote_host(dialed_host)
         except RemoteURLError as exc:
             logger.warning("http_tool.deny_ssrf tenant_id=%s url=%s reason=%s", tenant_id, url, exc)
             msg = f"URL blocked by SSRF guard: {exc}"
             raise ToolBlockedError(msg) from exc
 
-        host = (urlparse(url).hostname or "").rstrip(".")
-
         # Denylist precedence — blocked even under allow-all or an allowlist.
+        # Matched against the dialed host so a Unicode-dot spelling can't evade.
         denylist = tuple(await self.denylist_provider(tenant_id)) if self.denylist_provider else ()
-        if host_in_denylist(host, denylist):
+        if host_in_denylist(dialed_host, denylist):
             logger.warning("http_tool.deny_denylist tenant_id=%s url=%s", tenant_id, url)
-            msg = f"host {host!r} is in the tenant http_tool_denylist; blocked {url!r}"
+            msg = f"host {dialed_host!r} is in the tenant http_tool_denylist; blocked {url!r}"
             raise ToolBlockedError(msg)
 
         # Allowlist — empty ↔ allow all public hosts (SSRF guard + denylist are

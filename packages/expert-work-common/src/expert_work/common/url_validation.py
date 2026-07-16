@@ -56,6 +56,63 @@ def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(ip in net for net in _BLOCKED_NETWORKS if ip.version == net.version)
 
 
+#: Characters UTS-46 / IDNA fold to an ASCII label separator (``.``) before a
+#: resolver — or httpx — connects. ``urlparse`` leaves them intact, so a guard
+#: that inspects the raw host sees a "hostname" while the client dials the
+#: ASCII-dotted form (e.g. an ideographic-dot spelling of an IPv4 quad becomes
+#: ``169.254.169.254`` — cloud metadata). Fold them up front so the IP-literal
+#: checks below see what is actually dialed. U+3002, U+FF0E, U+FF61.
+_IDNA_LABEL_SEPARATORS: tuple[str, ...] = (chr(0x3002), chr(0xFF0E), chr(0xFF61))
+
+
+def normalize_host(host: str) -> str:
+    """Fold IDNA label-separator variants to ASCII ``.`` and strip a trailing dot.
+
+    Mirrors the host a resolver / httpx actually dials, closing the
+    parser-normalization differential a raw-string check would leave open.
+    """
+    for sep in _IDNA_LABEL_SEPARATORS:
+        host = host.replace(sep, ".")
+    return host.rstrip(".")
+
+
+def validate_remote_host(host: str) -> str:
+    """Static SSRF check on a **host** (no scheme, no DNS).
+
+    Rejects a localhost name, a non-canonical IP literal, or a private /
+    loopback / link-local / metadata / multicast / unspecified IP literal. The
+    host is IDNA-normalized first (:func:`normalize_host`) so a Unicode-dot
+    spelling of an IP cannot slip past. Returns ``host`` unchanged when it is a
+    plausibly-public name; raises :class:`RemoteURLError` otherwise.
+    """
+    cleaned = normalize_host(host)
+
+    if not cleaned:
+        msg = "host is empty"
+        raise RemoteURLError(msg)
+
+    if cleaned.lower() in _LOCALHOST_NAMES:
+        msg = f"localhost address {cleaned!r} not allowed"
+        raise RemoteURLError(msg)
+
+    try:
+        ip = ipaddress.ip_address(cleaned)
+    except ValueError:
+        # Non-canonical IP literals (decimal 2130706433, hex 0x7f000001,
+        # shortened/octal dotted 127.1 / 0177.0.0.1) parse as private addrs in
+        # many HTTP stacks but not in ``ipaddress`` — reject them explicitly.
+        if re.fullmatch(r"[0-9.]+", cleaned) or re.fullmatch(r"0[xX][0-9a-fA-F]+", cleaned):
+            msg = f"non-canonical IP literal {cleaned!r} not allowed"
+            raise RemoteURLError(msg) from None
+        return host
+
+    if _ip_is_blocked(ip):
+        msg = f"private/loopback/link-local IP {cleaned!r} not allowed"
+        raise RemoteURLError(msg)
+
+    return host
+
+
 def validate_remote_url(
     url: str,
     *,
@@ -82,27 +139,7 @@ def validate_remote_url(
         msg = f"URL has no hostname: {url!r}"
         raise RemoteURLError(msg)
 
-    hostname = hostname.rstrip(".")  # FQDN trailing dot resolves identically
-
-    if hostname.lower() in _LOCALHOST_NAMES:
-        msg = f"localhost address {hostname!r} not allowed"
-        raise RemoteURLError(msg)
-
-    try:
-        ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        # Non-canonical IP literals (decimal 2130706433, hex 0x7f000001,
-        # shortened/octal dotted 127.1 / 0177.0.0.1) parse as private addrs in
-        # many HTTP stacks but not in ``ipaddress`` — reject them explicitly.
-        if re.fullmatch(r"[0-9.]+", hostname) or re.fullmatch(r"0[xX][0-9a-fA-F]+", hostname):
-            msg = f"non-canonical IP literal {hostname!r} not allowed"
-            raise RemoteURLError(msg) from None
-        return url
-
-    if _ip_is_blocked(ip):
-        msg = f"private/loopback/link-local IP {hostname!r} not allowed"
-        raise RemoteURLError(msg)
-
+    validate_remote_host(hostname)
     return url
 
 
@@ -119,7 +156,7 @@ def resolve_and_pin_host(host: str, port: int = 443) -> str:
     Raises :class:`RemoteURLError` on a localhost name, a non-canonical IP
     literal, a blocked address, or an unresolvable host.
     """
-    cleaned = host.rstrip(".")
+    cleaned = normalize_host(host)
     if cleaned.lower() in _LOCALHOST_NAMES:
         msg = f"localhost address {cleaned!r} not allowed"
         raise RemoteURLError(msg)

@@ -1180,6 +1180,7 @@ const zhCN: TranslationKeys = {
     http_allowlist: "HTTP 工具白名单",
     http_allowlist_empty: "—(放行所有公网主机;SSRF 已拦截)",
     http_denylist: "HTTP 工具黑名单",
+    http_denylist_empty: "—(未拦截任何主机)",
     updated: "更新",
     dirty: "已编辑(未保存)",
     config_saved: "租户配置已保存。",

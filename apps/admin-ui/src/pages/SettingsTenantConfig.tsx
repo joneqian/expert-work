@@ -348,7 +348,7 @@ export function SettingsTenantConfig() {
             <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.http_denylist")}</dt>
             <dd style={{ margin: 0 }} data-testid="tenant-config-http-denylist">
               {record.http_tool_denylist.length === 0 ? (
-                <Text type="secondary">—</Text>
+                <Text type="secondary">{t("settings_ops.http_denylist_empty")}</Text>
               ) : (
                 <Space size={4} wrap>
                   {record.http_tool_denylist.map((host) => (

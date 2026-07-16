@@ -187,6 +187,10 @@ describe("SettingsTenantConfig", () => {
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument());
     expect(screen.getByText("pro")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
+    // E.8 — the per-tenant HTTP-tool denylist renders its hosts.
+    expect(screen.getByTestId("tenant-config-http-denylist")).toHaveTextContent(
+      "internal.example.com",
+    );
   });
 
   it("Edit button reveals the JSON editor + dirty detection", async () => {

@@ -73,6 +73,13 @@ def test_https_only_mode_rejects_http() -> None:
         "http://0x7f000001/mcp",  # hex literal for 127.0.0.1
         "http://2130706433/mcp",  # decimal literal for 127.0.0.1
         "http://0177.0.0.1/mcp",  # octal dotted-decimal
+        # IDNA dot-equivalents a resolver folds to '.' before connecting — the
+        # guard must normalize them or a Unicode-dot IP reaches the metadata IP.
+        # The ambiguous chars are deliberate test data (U+FF0E also trips RUF001).
+        "http://169。254。169。254/latest/meta-data",
+        "http://169．254．169．254/x",  # noqa: RUF001  U+FF0E fullwidth dot
+        "http://169｡254｡169｡254/x",
+        "http://127。0。0。1/x",
     ],
 )
 def test_rejects_ssrf_bypass_variants(url: str) -> None:

@@ -8,7 +8,8 @@ column lets an admin block specific hosts even under allow-all — it takes
 precedence over the allowlist. Host entries match exact or subdomain.
 
 ``NOT NULL DEFAULT '[]'::jsonb`` so existing ``tenant_config`` rows backfill
-silently. Idempotent, reversible, no table locks.
+silently. Reversible; a constant default adds no table rewrite on PG11+ (only a
+brief metadata lock).
 
 Revision id ``0123_http_tool_denylist`` = 23 chars (within the 32-char alembic
 ``version_num`` ceiling).

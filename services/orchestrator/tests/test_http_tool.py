@@ -82,6 +82,12 @@ async def test_empty_allowlist_allows_public_url() -> None:
         "http://10.1.2.3/internal",  # RFC1918
         "http://localhost/x",  # localhost name
         "http://0x7f000001/x",  # non-canonical (hex) loopback literal
+        # Unicode dot-equivalents httpx IDNA-normalizes to '.' before dialing —
+        # a raw-string guard would miss these (parser-differential regression).
+        # The ambiguous chars are deliberate test data (U+FF0E also trips RUF001).
+        "http://169。254。169。254/latest/meta-data/",
+        "http://169．254．169．254/",  # noqa: RUF001  U+FF0E fullwidth dot
+        "http://169｡254｡169｡254/",
     ],
 )
 async def test_ssrf_targets_blocked_even_under_allow_all(url: str) -> None:
@@ -141,6 +147,27 @@ async def test_denylist_matches_subdomain_but_allows_others() -> None:
     )
     assert result.meta["status_code"] == 200
     assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+async def test_denylist_blocks_unicode_dot_spelling_of_denied_host() -> None:
+    """A Unicode-dot spelling of a denied host normalizes to the host httpx
+    dials and is still blocked (parser-differential regression)."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:  # pragma: no cover
+        return httpx.Response(200, text="should not happen")
+
+    tool = HTTPTool(
+        allowlist_provider=_allowlist(),
+        denylist_provider=_denylist("evil.example.com"),
+        client_factory=_client_factory(handler),
+    )
+    with pytest.raises(ToolBlockedError, match="denylist"):
+        await tool.call(
+            # U+3002 dots — normalized to what httpx dials (noqa: RUF001).
+            {"method": "GET", "url": "http://evil。example。com/x"},
+            ctx=_tenant_ctx(),
+        )
 
 
 @pytest.mark.asyncio
