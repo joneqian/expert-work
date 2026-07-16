@@ -68,6 +68,7 @@ from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
 from orchestrator.llm.providers._streaming import (
     LLMDelta,
+    OpenAIStreamAssembler,
     delta_from_openai_chunk,
 )
 from orchestrator.llm.structured_output import (
@@ -567,6 +568,9 @@ class OpenAIProvider:
         )
         async for chunk in self.client.stream_chat_completions(**retry):
             yield delta_from_openai_chunk(chunk)
+
+    def new_stream_assembler(self) -> OpenAIStreamAssembler:
+        return OpenAIStreamAssembler()
 
 
 def _truncate(text: str) -> str:

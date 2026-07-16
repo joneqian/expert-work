@@ -65,7 +65,7 @@ from expert_work.runtime.middleware import (
 from orchestrator.llm.oauth_provider import OAuthCapableProvider
 from orchestrator.llm.providers._streaming import (
     LLMDelta,
-    OpenAIStreamAssembler,
+    StreamAssembler,
     supports_streaming,
 )
 from orchestrator.llm.structured_output import (
@@ -242,6 +242,16 @@ def _stream(
     return provider.stream(  # type: ignore[attr-defined, no-any-return]
         messages=messages, tools=tools, output_schema=output_schema
     )
+
+
+def _provider_assembler(provider: object) -> Any:
+    """The innermost provider's stream assembler (unwraps ``.inner``)."""
+    p: Any = provider
+    seen: set[int] = set()
+    while hasattr(p, "inner") and id(p) not in seen:
+        seen.add(id(p))
+        p = p.inner
+    return p.new_stream_assembler()
 
 
 def _llm_response_payload(response: AIMessage) -> dict[str, Any]:
@@ -579,13 +589,18 @@ class LLMRouter:
     ) -> AIMessage:
         """Dispatch one provider attempt — streaming (two-threshold idle
         driver) when the provider supports it, else the legacy
-        single-deadline ``complete()`` path."""
-        if supports_streaming(handle.provider):
+        single-deadline ``complete()`` path.
+
+        Structured output does not stream (both vendors) — its contract is
+        a complete validated JSON object; token streaming has no value and
+        Anthropic's tool-call structured path needs post-processing the
+        streaming assembler cannot replicate.
+        """
+        if output_schema is None and supports_streaming(handle.provider):
             return await self._drive_stream(
                 handle,
-                _stream(
-                    handle.provider, messages=messages, tools=tools, output_schema=output_schema
-                ),
+                _stream(handle.provider, messages=messages, tools=tools, output_schema=None),
+                _provider_assembler(handle.provider),
             )
         result = await self._invoke_with_deadline(
             handle,
@@ -595,7 +610,10 @@ class LLMRouter:
         return result
 
     async def _drive_stream(
-        self, handle: ProviderHandle, stream: AsyncIterator[LLMDelta]
+        self,
+        handle: ProviderHandle,
+        stream: AsyncIterator[LLMDelta],
+        assembler: StreamAssembler,
     ) -> AIMessage:
         """Consume a provider delta stream under the two-threshold policy.
 
@@ -605,7 +623,6 @@ class LLMRouter:
         ``idle_timeout_s``; a stall ends the turn with the partial
         output; an error is terminal (:class:`LLMStreamInterruptedError`,
         no fallback)."""
-        assembler = OpenAIStreamAssembler()
         it = stream.__aiter__()
         first_progress = False
 

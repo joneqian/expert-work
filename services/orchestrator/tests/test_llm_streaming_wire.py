@@ -200,6 +200,9 @@ def test_supports_streaming_true_for_streaming_provider() -> None:
             if False:
                 yield LLMDelta()
 
+        def new_stream_assembler(self) -> OpenAIStreamAssembler:
+            return OpenAIStreamAssembler()
+
     class _Wrapper:  # mimics RateLimitedProvider.inner unwrapping
         def __init__(self, inner: Any) -> None:
             self.inner = inner
