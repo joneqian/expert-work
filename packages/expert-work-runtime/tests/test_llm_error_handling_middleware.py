@@ -20,6 +20,7 @@ from expert_work.runtime.middleware import (
     LLMNetworkError,
     LLMRateLimitError,
     LLMServerError,
+    LLMStreamStaleError,
     Middleware,
     MiddlewareContext,
 )
@@ -164,6 +165,20 @@ async def test_4xx_not_retried_and_does_not_trip_breaker() -> None:
     assert tracker.sleeps == []
     breaker = await mw.breaker_registry.get("test-key")
     assert breaker.consecutive_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_stale_not_retried_falls_over_promptly() -> None:
+    # Stream L (P1) — a first-token / stream-stale timeout is a plain
+    # LLMError (not LLMServerError), so E.4 must NOT retry it in-place: the
+    # terminal is invoked exactly once and the error propagates for the
+    # router to fall over to the next provider.
+    mw, tracker = _mw()
+    terminal = SequenceTerminal([LLMStreamStaleError("provider hung")])
+    with pytest.raises(LLMStreamStaleError):
+        await mw(_ctx(), terminal)
+    assert terminal.calls == 1
+    assert tracker.sleeps == []
 
 
 # ---------------------------------------------------------------------------

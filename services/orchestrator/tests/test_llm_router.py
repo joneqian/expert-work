@@ -338,9 +338,10 @@ async def test_stream_deadline_triggers_stale_error_on_single_provider() -> None
 
 @pytest.mark.asyncio
 async def test_stream_stale_falls_back_to_next_provider() -> None:
-    """``LLMStreamStaleError`` inherits :class:`LLMServerError`, so the
-    router treats it as retryable and tries the next provider — Mini-ADR
-    L-3's central guarantee that a hung provider doesn't lock the chain."""
+    """``LLMStreamStaleError`` is a plain ``LLMError`` — the router falls
+    over to the next provider on a hung provider without in-place
+    retries — Mini-ADR L-3's central guarantee that a hung provider
+    doesn't lock the chain."""
     primary = _HangingProvider(sleep_s=10)
     fallback = _ScriptedProvider(response=AIMessage(content="recovered"))
     router = LLMRouter(
