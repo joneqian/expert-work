@@ -120,6 +120,14 @@ def test_chat_stream_deadline_floors_low_values() -> None:
     assert _chat_stream_deadline_s(0) is None
 
 
+def test_chat_idle_timeout_default_and_off() -> None:
+    from orchestrator.agent_factory import _chat_idle_timeout_s
+
+    assert _chat_idle_timeout_s(45) == 45.0
+    assert _chat_idle_timeout_s(0) is None  # 0 disables the idle timer
+    assert _chat_idle_timeout_s(30) == 30.0
+
+
 @pytest.mark.asyncio
 async def test_build_llm_router_single_anthropic_provider() -> None:
     router = await build_llm_router(_spec().spec.model, secret_store=_secret_store())
