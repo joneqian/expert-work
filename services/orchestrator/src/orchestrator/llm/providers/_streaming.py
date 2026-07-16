@@ -208,6 +208,127 @@ def _is_valid_json_object(raw: str) -> bool:
         return False
 
 
+def delta_from_anthropic_event(event: Mapping[str, Any]) -> LLMDelta:
+    """Map one Anthropic Messages SSE event to an :class:`LLMDelta`.
+    Lenient: unknown / structural events (content_block_stop, message_stop,
+    ping) yield an empty (no-progress) delta."""
+    etype = event.get("type")
+    if etype == "message_start":
+        message = event.get("message")
+        message = message if isinstance(message, Mapping) else {}
+        usage = message.get("usage")
+        model = message.get("model")
+        return LLMDelta(
+            usage=usage if isinstance(usage, Mapping) else None,
+            model=model if isinstance(model, str) and model else None,
+        )
+    if etype == "content_block_start":
+        cb = event.get("content_block")
+        cb = cb if isinstance(cb, Mapping) else {}
+        if cb.get("type") == "tool_use":
+            idx = event.get("index")
+            return LLMDelta(
+                tool_calls=(
+                    ToolCallChunk(
+                        index=idx if isinstance(idx, int) else 0,
+                        id=str(cb["id"]) if cb.get("id") else None,
+                        name=str(cb["name"]) if cb.get("name") else None,
+                    ),
+                )
+            )
+        return LLMDelta()
+    if etype == "content_block_delta":
+        delta = event.get("delta")
+        delta = delta if isinstance(delta, Mapping) else {}
+        dtype = delta.get("type")
+        if dtype == "text_delta":
+            text = delta.get("text")
+            return LLMDelta(content=text if isinstance(text, str) else "")
+        if dtype == "thinking_delta":
+            th = delta.get("thinking")
+            return LLMDelta(reasoning=th if isinstance(th, str) else "")
+        if dtype == "input_json_delta":
+            idx = event.get("index")
+            pj = delta.get("partial_json")
+            return LLMDelta(
+                tool_calls=(
+                    ToolCallChunk(
+                        index=idx if isinstance(idx, int) else 0,
+                        args_fragment=pj if isinstance(pj, str) else "",
+                    ),
+                )
+            )
+        return LLMDelta()
+    if etype == "message_delta":
+        delta = event.get("delta")
+        delta = delta if isinstance(delta, Mapping) else {}
+        stop = delta.get("stop_reason")
+        usage = event.get("usage")
+        return LLMDelta(
+            finish_reason=stop if isinstance(stop, str) and stop else None,
+            usage=usage if isinstance(usage, Mapping) else None,
+        )
+    return LLMDelta()
+
+
+class AnthropicStreamAssembler:
+    """Accumulate Anthropic :class:`LLMDelta` chunks into a synthetic
+    Messages response body, then decode with the shared
+    :func:`~orchestrator.llm.providers.anthropic._from_anthropic_response`
+    (byte-identical to the non-streaming path). ``thinking`` is dropped
+    (the decoder ignores it); usage from message_start + message_delta is
+    merged."""
+
+    def __init__(self) -> None:
+        self._content: list[str] = []
+        self._tools: dict[int, _ToolAcc] = {}
+        self._tool_order: list[int] = []
+        self._usage: dict[str, Any] = {}
+        self._finish: str | None = None
+
+    def add(self, delta: LLMDelta) -> None:
+        if delta.content:
+            self._content.append(delta.content)
+        # reasoning intentionally dropped from the final message
+        for tc in delta.tool_calls:
+            acc = self._tools.get(tc.index)
+            if acc is None:
+                acc = _ToolAcc()
+                self._tools[tc.index] = acc
+                self._tool_order.append(tc.index)
+            if tc.id is not None:
+                acc.id = tc.id
+            if tc.name is not None:
+                acc.name = tc.name
+            if tc.args_fragment:
+                acc.args.append(tc.args_fragment)
+        if delta.usage is not None:
+            self._usage.update(delta.usage)  # MERGE (input from start, output from delta)
+        if delta.finish_reason is not None:
+            self._finish = delta.finish_reason
+
+    def build(self, *, interrupted: bool = False) -> AIMessage:
+        from orchestrator.llm.providers.anthropic import _from_anthropic_response
+
+        blocks: list[dict[str, Any]] = []
+        text = "".join(self._content)
+        if text:
+            blocks.append({"type": "text", "text": text})
+        for idx in self._tool_order:
+            acc = self._tools[idx]
+            args_str = "".join(acc.args)
+            if interrupted and not _is_valid_json_object(args_str):
+                continue
+            input_obj = json.loads(args_str) if _is_valid_json_object(args_str) else {}
+            blocks.append(
+                {"type": "tool_use", "id": acc.id or "", "name": acc.name or "", "input": input_obj}
+            )
+        body: dict[str, Any] = {"content": blocks}
+        if self._usage:
+            body["usage"] = self._usage
+        return _from_anthropic_response(body)
+
+
 @runtime_checkable
 class StreamAssembler(Protocol):
     """Accumulates provider deltas into a final :class:`AIMessage`. Each
