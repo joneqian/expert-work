@@ -21,6 +21,11 @@ async def test_stream_delegates_and_admits() -> None:
             yield LLMDelta(content="a")
             yield LLMDelta(content="b")
 
+        def new_stream_assembler(self):
+            from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
+
+            return OpenAIStreamAssembler()
+
     inner = _StreamingInner()
     limited = RateLimitedProvider(inner=inner, limiter=AsyncLimiter(max_rate=100, time_period=60))
     out = [d.content async for d in limited.stream(messages=["m"], tools=[])]

@@ -209,6 +209,16 @@ def _is_valid_json_object(raw: str) -> bool:
 
 
 @runtime_checkable
+class StreamAssembler(Protocol):
+    """Accumulates provider deltas into a final :class:`AIMessage`. Each
+    provider supplies its own (OpenAI-wire vs Anthropic wire assemble
+    differently) via ``StreamingLLMProvider.new_stream_assembler``."""
+
+    def add(self, delta: LLMDelta) -> None: ...
+    def build(self, *, interrupted: bool = False) -> AIMessage: ...
+
+
+@runtime_checkable
 class StreamingLLMProvider(Protocol):
     """A provider that can yield :class:`LLMDelta` chunks. The router
     drives its idle-timeout over this; providers without it use the
@@ -222,6 +232,10 @@ class StreamingLLMProvider(Protocol):
         output_schema: StructuredOutputSpec | None = None,
     ) -> AsyncIterator[LLMDelta]:
         """Yield normalized :class:`LLMDelta` chunks from the provider."""
+
+    def new_stream_assembler(self) -> StreamAssembler:
+        """A fresh assembler for one stream drain (provider-specific)."""
+        ...
 
 
 def supports_streaming(provider: object) -> bool:

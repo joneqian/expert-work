@@ -28,6 +28,11 @@ class _StreamProvider:
             else:
                 yield item
 
+    def new_stream_assembler(self):
+        from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
+
+        return OpenAIStreamAssembler()
+
 
 def _handle(script: list, key: str = "glm:glm-5.2") -> ProviderHandle:
     return ProviderHandle(provider=_StreamProvider(script), key=key)
@@ -105,3 +110,73 @@ async def test_first_token_timeout_all_exhausted() -> None:
     router = LLMRouter(providers=[a, b], first_token_timeout_s=0.05, idle_timeout_s=0.5)
     with pytest.raises(AllProvidersExhaustedError):
         await router(messages=[], tools=[])
+
+
+@pytest.mark.asyncio
+async def test_structured_output_uses_non_streaming_path() -> None:
+    # output_schema set -> router must NOT drive the stream; it calls the
+    # provider's complete() path (structured output does not stream).
+    from langchain_core.messages import AIMessage
+
+    from expert_work.protocol import StructuredOutputSpec
+
+    class _Probe:
+        def __init__(self) -> None:
+            self.stream_calls = 0
+            self.complete_calls = 0
+
+        async def stream(self, *, messages, tools, output_schema=None):
+            self.stream_calls += 1
+            yield LLMDelta(content="SHOULD NOT STREAM")
+
+        async def complete(self, *, messages, tools, output_schema=None) -> AIMessage:
+            self.complete_calls += 1
+            return AIMessage(content='{"ok": true}', additional_kwargs={"parsed": {"ok": True}})
+
+        def new_stream_assembler(self):
+            from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
+
+            return OpenAIStreamAssembler()
+
+    probe = _Probe()
+    router = LLMRouter(
+        providers=[ProviderHandle(provider=probe, key="x")],
+        first_token_timeout_s=0.5,
+        idle_timeout_s=0.5,
+    )
+    spec = StructuredOutputSpec(schema={"type": "object"}, name="x")
+    msg = await router(messages=[], tools=[], output_schema=spec)
+    assert probe.stream_calls == 0
+    assert probe.complete_calls == 1
+    assert msg.additional_kwargs["parsed"] == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_drive_stream_uses_provider_assembler() -> None:
+    # A streaming provider that supplies its own assembler must have THAT
+    # assembler used by the router (not a hard-coded OpenAI one).
+    from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
+
+    used = {}
+
+    class _MarkAssembler(OpenAIStreamAssembler):
+        def build(self, *, interrupted: bool = False):
+            used["hit"] = True
+            return super().build(interrupted=interrupted)
+
+    class _P:
+        async def stream(self, *, messages, tools, output_schema=None):
+            yield LLMDelta(content="ok")
+            yield LLMDelta(finish_reason="stop")
+
+        def new_stream_assembler(self):
+            return _MarkAssembler()
+
+    router = LLMRouter(
+        providers=[ProviderHandle(provider=_P(), key="x")],
+        first_token_timeout_s=0.5,
+        idle_timeout_s=0.5,
+    )
+    msg = await router(messages=[], tools=[])
+    assert msg.content == "ok"
+    assert used.get("hit") is True
