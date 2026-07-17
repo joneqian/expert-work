@@ -280,7 +280,11 @@ async def test_cancel_mid_stream_runs_provider_cleanup() -> None:
     task = asyncio.create_task(router(messages=[], tools=[]))
     await asyncio.wait_for(reached.wait(), timeout=1)  # deterministic: now stalling
     task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    # wait_for cancels-and-awaits the inner __anext__, so the finally has run by now.
-    assert closed.is_set()
+    # Await completion via a call (a bare ``await task`` trips CodeQL's
+    # ineffectual-statement FP). Cancelling the router task throws
+    # CancelledError into the suspended ``it.__anext__()``, unwinding the
+    # provider generator's ``finally`` before the task settles; a propagated
+    # cancel leaves the task in the cancelled state.
+    await asyncio.wait({task})
+    assert task.cancelled()  # router propagated the cancel, did not swallow it
+    assert closed.is_set()  # provider stream cleanup ran — no leaked upstream
