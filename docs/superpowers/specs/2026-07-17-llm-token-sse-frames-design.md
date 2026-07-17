@@ -118,7 +118,7 @@ astream 循环不动:updates 帧照旧 publish + persist。token 帧不经 astre
 
 - **queue(`mode:queue`):** 返 202 JSON,无 SSE 消费者 → 无 token 帧。
 - **cache-hit:** graph 在 `builder.py:788` agent-node 短路,不进 router → 无 delta → 无 token 帧;`updates`(缓存消息)照发。
-- **structured output:** router `_invoke_provider` 对 `output_schema is not None` 走非流式 `_complete` → 无 delta → 无 token 帧。
+- **structured output(仅 schema 强制的重发不流,主调用照流):** 节点主 LLM 调用(`builder.py:795-798`)**不带 output_schema**(schema 在 `_finalize_structured_response` 的独立重发里强制,见 `builder.py:834` 注释"primary call NEVER carries the schema")→ 主候选 judge-off 时**照常流 token**;只有 schema 强制**重发**那次(`output_schema is not None` → router 走非流式 `_complete`)无 delta。故结构化 agent 首答会发 token(重发才不发)。
 - **judge-on agent:** 门控 `sink=None` → 无 token 帧,仅 `updates`(现状)。
 - **非流式 provider:** 无 delta → 无 token 帧。
 
