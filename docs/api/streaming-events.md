@@ -47,5 +47,5 @@ data: {"step": 0, "channel": "content", "text": "partial answer fragment"}
 
 Emitted for streaming-provider runs **without** a model-backed output judge.
 Not emitted (only step-level `updates`, exactly as before) for: `mode=queue`,
-cached responses, structured-output runs, non-streaming providers, and runs
-with the output judge enabled.
+cached responses, non-streaming providers, and runs with the output judge enabled.
+Structured-output runs DO emit `token` frames for the primary candidate (the schema is enforced only on a correction resend, which does not stream).
