@@ -538,7 +538,7 @@ async def test_run_agent_over_real_react_graph() -> None:
             *,
             messages: Sequence[BaseMessage],
             tools: Sequence[ToolSpec],
-            on_delta: "Callable[[LLMDelta], Awaitable[None]] | None" = None,
+            on_delta: Callable[[LLMDelta], Awaitable[None]] | None = None,
         ) -> AIMessage:
             del tools, on_delta
             return AIMessage(content=f"echo: {messages[-1].content}", id="ai-1")

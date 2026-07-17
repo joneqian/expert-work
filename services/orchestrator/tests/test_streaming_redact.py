@@ -1,7 +1,12 @@
 import pytest
 
 from expert_work.common.dlp import scan_and_redact
-from orchestrator.graph_builder.streaming_redact import HOLD_CHARS, StreamingRedactor, TokenSink, make_token_sink
+from orchestrator.graph_builder.streaming_redact import (
+    HOLD_CHARS,
+    StreamingRedactor,
+    TokenSink,
+    make_token_sink,
+)
 from orchestrator.llm.providers._streaming import LLMDelta
 
 
@@ -115,11 +120,16 @@ async def _noop_pub(f: dict) -> None:
 
 
 def test_make_token_sink_gates_off_when_judge_enabled() -> None:
-    assert make_token_sink(step=0, publish=_noop_pub, dlp=False, screen=False, judge_enabled=True) is None
+    assert (
+        make_token_sink(step=0, publish=_noop_pub, dlp=False, screen=False, judge_enabled=True)
+        is None
+    )
 
 
 def test_make_token_sink_none_without_publish() -> None:
-    assert make_token_sink(step=0, publish=None, dlp=False, screen=False, judge_enabled=False) is None
+    assert (
+        make_token_sink(step=0, publish=None, dlp=False, screen=False, judge_enabled=False) is None
+    )
 
 
 def test_make_token_sink_builds_when_enabled() -> None:

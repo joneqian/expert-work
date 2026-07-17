@@ -10,7 +10,8 @@ wiring without a network call.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -27,8 +28,15 @@ from orchestrator import (
 )
 
 
-async def _fake_llm(*, messages: Sequence[BaseMessage], tools: Sequence[ToolSpec]) -> AIMessage:
-    del messages, tools
+async def _fake_llm(
+    *,
+    messages: Sequence[BaseMessage],
+    tools: Sequence[ToolSpec],
+    on_delta: Callable[[Any], Awaitable[None]] | None = None,
+) -> AIMessage:
+    # ``on_delta`` (子项目 2) — the agent node now passes a token-stream sink on
+    # the streaming path; this stub accepts and ignores it (it emits no deltas).
+    del messages, tools, on_delta
     return AIMessage(content="stub agent reply", id="ai-stub")
 
 
