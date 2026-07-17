@@ -245,3 +245,42 @@ async def test_on_delta_not_called_on_structured_path() -> None:
     spec = StructuredOutputSpec(schema={"type": "object"}, name="x")
     await router(messages=[], tools=[], output_schema=spec, on_delta=on_delta)
     assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_runs_provider_cleanup() -> None:
+    # Cancelling the run while the router awaits the next token must throw into
+    # the provider stream's suspended __anext__ and run its cleanup (finally /
+    # httpx `async with` __aexit__) — no leaked upstream generation. This is
+    # deterministic: _next_delta awaits it.__anext__() under asyncio.wait_for,
+    # which cancels-and-awaits the inner task on cancellation.
+    reached = asyncio.Event()
+    closed = asyncio.Event()
+
+    class _Stalling:
+        async def stream(self, *, messages, tools, output_schema=None):
+            try:
+                yield LLMDelta(content="a")  # first token → enters Phase 2
+                reached.set()  # signal we are about to stall on the next token
+                await asyncio.sleep(30)  # router awaits __anext__ here
+                yield LLMDelta(content="b")  # never reached
+            finally:
+                closed.set()  # cancellation cleanup ran
+
+        def new_stream_assembler(self):
+            from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
+
+            return OpenAIStreamAssembler()
+
+    router = LLMRouter(
+        providers=[ProviderHandle(provider=_Stalling(), key="x")],
+        first_token_timeout_s=5,
+        idle_timeout_s=5,
+    )
+    task = asyncio.create_task(router(messages=[], tools=[]))
+    await asyncio.wait_for(reached.wait(), timeout=1)  # deterministic: now stalling
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # wait_for cancels-and-awaits the inner __anext__, so the finally has run by now.
+    assert closed.is_set()
