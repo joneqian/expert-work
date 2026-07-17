@@ -83,14 +83,20 @@ def feed(self, text: str) -> str:
 
 ```python
 def _advance_frozen(self) -> None:
-    new_frozen = max(self._frozen_raw, len(self._buf) - WINDOW)
-    if new_frozen > self._frozen_raw:
-        self._frozen_out += len(self._redact(self._buf[self._frozen_raw:new_frozen]))
-        self._frozen_raw = new_frozen
+    new_frozen = max(0, len(self._buf) - WINDOW)
+    if new_frozen <= self._frozen_raw:
+        return
+    added = len(self._redact(self._buf[self._frozen_raw:new_frozen]))
+    if self._frozen_out + added > self._emitted_out:
+        return  # 折叠守卫:不冻结尚未 emit 的字符(见下),本帧不推进
+    self._frozen_out += added
+    self._frozen_raw = new_frozen
 ```
 
 - 冻结点单调推进到 `end - WINDOW`。newly-frozen 片 `_buf[_frozen_raw:new_frozen]` 独立脱敏 == 全扫对应子串,前提是无 match straddle 两端:`new_frozen = end - WINDOW`,未成形区(末 HOLD)的 bounded match 起点 ≥ `end - HOLD - 19 > end - WINDOW = new_frozen` → 不 straddle;`_frozen_raw` 由归纳是合法冻结点(基:0)。email straddle → 既有残留。
-- 每 feed 的两次 `_redact`(tail + newly-frozen 片)长度均 ≤ `WINDOW + 单 delta` → **每 feed O(WINDOW),全程 O(n)**。
+- **折叠守卫(命门)**:`scan_and_redact` 把匹配跨度折成定长 `[redacted]`(11 字符),故 redacted-length 对 raw 前缀**非单调**——一个 PII 跨度在 emit frontier 之后完成时,`redact(_buf[:end-WINDOW])` 的字符数可**瞬时超过** `_emitted_out`。若此时仍推进,`_frozen_out > _emitted_out` → 下帧 `_emitted_out - _frozen_out < 0` → Python 负索引**回绕**取到 buffer 尾部 → 泄漏/错乱。守卫 `_frozen_out + added > _emitted_out` 时**本帧不推进**(折叠是局部瞬态,emission 越过该 PII 跨度后下一两帧即恢复推进)。这保证 `_frozen_out <= _emitted_out` 恒成立 → `feed`/`flush` 的切片 `lo = _emitted_out - _frozen_out >= 0`,**绝无负索引**。
+- 停滞有界:折叠跨度局限于末 WINDOW 内,emission 落后 buffer 仅 HOLD,故停滞至多数帧;`tail = _buf[_frozen_raw:]` ≤ ~`2·WINDOW`。
+- 每 feed 的两次 `_redact`(tail + newly-frozen 片)长度均有界(≤ ~`2·WINDOW + 单 delta`)→ **每 feed O(WINDOW),全程 O(n)**。
 
 ### flush
 
@@ -113,7 +119,7 @@ flush 释放 hold 内残余(不再扣 HOLD_CHARS),语义同旧 flush。
 
 1. **bounded 等价**:`redact(whole) = frozen_redacted ⊕ redact(tail)`,当且仅当无 bounded match straddle `_frozen_raw`。由核心不变式,冻结点始终 ≥ `L_max_bounded` behind 未成形区 → 成立。故任意分片下 join 输出 == 全扫。既有 `test_prefix_monotonic_chunked_equals_oneshot` / `test_max_clamp_boundary_retreat` 继续通过。
 2. **screen latch 不漏**:screen 扫 `_buf[end-WINDOW:]`。credential 的 min-match ≤ 39;当其最后一个 min-match 字符首次到达(该 feed 的 buffer 末尾),整个 min-match(≤39)落在末 WINDOW(128)内 → 当帧被抓 → latch。此刻其头位于 `≥ end-38 > emit frontier(end-64)` → 尚未 emit。**先抓后 emit**,靠既有 `HOLD_CHARS(64) > max_screen_min(39)` 不变式,不依赖归纳。
-3. **切片合法**:`_emitted_out - _frozen_out ≥ 0`(不变式);`boundary - _frozen_out ≤ full_red_len - _frozen_out = len(tail_red)`;`boundary ≥ _emitted_out` → `hi ≥ lo`。
+3. **切片合法(无负索引)**:折叠守卫保证 `_frozen_out ≤ _emitted_out` 恒成立 → `lo = _emitted_out - _frozen_out ≥ 0`;`hi = boundary - _frozen_out ≤ full_red_len - _frozen_out = len(tail_red)`;`boundary ≥ _emitted_out` → `hi ≥ lo`。redacted 长度因 `[redacted]` 折叠回缩时,`boundary` 的 `max(_emitted_out, …)` clamp 令切片退化为空串(不回退已 emit),既有 `test_max_clamp_boundary_retreat` 覆盖。
 4. **email no-worse**:email 无界 → 可 straddle 冻结点。若 email 头已 emit(地址长于 hold),既有全扫亦无法追溯(`_emitted_len` 越过),两者同泄漏头;email ≤ WINDOW 则全在窗内、redact 相同。残留包络一致。
 
 ## 测试
@@ -124,7 +130,8 @@ flush 释放 hold 内残余(不再扣 HOLD_CHARS),语义同旧 flush。
 2. **超长填充夹尾部 credential**:`"x"*300 + "sk-"+"a"*24`,screen=True,多 delta → `feed`+`flush` 全 `""`(latch 生效,证 screen 窗未漏)。
 3. **随机分片 fuzz**:一段含 card/id/phone 的 bounded 语料,多种切分点(逐字、定长块、随机块),每种 join == `scan_and_redact(whole).redacted`。(随机用固定 seed 或参数化切点,不引入不确定性。)
 4. **email no-worse**:一个 >WINDOW 的 email(超长本地部分),多 delta;断言与当前 full-scan 行为一致的残留(邮件头泄漏、`@` 后不新增泄漏)—— 记录为 provisional 契约的已知残留,非回归。
-5. **O(n) 特征**(可选,轻量):喂一条长文(如 50KB)分多 delta,断言 `_frozen_raw` 随进度前进且 `len(tail)` 有界(≤ WINDOW+delta);不做壁钟计时(脆),只断状态有界。
+5. **折叠守卫 / 负索引回归**:长安全前缀(>WINDOW)后,把 PII 跨度(card)完成点落在 emit frontier 附近(触发 redacted-length 瞬时折叠回缩),多 delta 喂入 → join == `scan_and_redact(whole).redacted` 且**输出无回绕垃圾**(断言不含 buffer 尾部才有的字符/不含 raw 数字)。此测在无守卫的实现下会因负索引取到 buffer 尾而失败。
+6. **O(n) 特征**:monkeypatch `streaming_redact.scan_and_redact` 与 `screen_output` 记录每次入参长度;喂一条长文(如 4400 字符,无 PII)分 50 字符 delta;断言 max 入参长度有界(`<= 3 * WINDOW`,远小于总长)→ 证每 feed 重扫量为常数、非随 n 增长。不做壁钟计时(脆)。
 
 `pytest` 全绿(`cd services/orchestrator && uv run python -m pytest tests/test_streaming_redact.py`)+ CI-scope mypy + ruff(全库含 tests)。
 
