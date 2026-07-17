@@ -292,3 +292,51 @@ async def test_event_store_optional_keeps_sse_working_without_it() -> None:
     )
     events = await _drain(bridge, record.run_id)
     assert any(e.event == "metadata" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_run_agent_token_sink_publishes_live_only_not_persisted() -> None:
+    """Token frames go to the bridge (live) but NOT the durable store — they are
+    provisional; the authoritative ``updates`` frame is what replays. Mirrors the
+    COMPACTION_SINK_KEY pattern (a node fires the injected sink mid-turn)."""
+    from orchestrator.graph_builder._config import TOKEN_SINK_KEY
+
+    @dataclass
+    class _TokenGraph:
+        async def astream(
+            self, _input: Any, config: Any = None, *, stream_mode: str = "updates"
+        ) -> AsyncIterator[Any]:
+            sink = (config.get("configurable") or {})[TOKEN_SINK_KEY]
+            await sink({"step": 0, "channel": "content", "text": "he"})
+            await sink({"step": 0, "channel": "content", "text": "llo"})
+            yield {"agent": {"step_count": 1}}
+
+        async def aget_state(self, _config: Any) -> Any:
+            from types import SimpleNamespace
+
+            return SimpleNamespace(values={})
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    store = InMemoryRunEventStore()
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_TokenGraph(),
+        graph_input={"messages": []},
+        config={},
+        event_store=store,
+    )
+
+    events = await _drain(bridge, record.run_id)
+    assert [e.event for e in events] == ["metadata", "token", "token", "updates"]
+    token_frames = [e.data for e in events if e.event == "token"]
+    assert token_frames == [
+        {"step": 0, "channel": "content", "text": "he"},
+        {"step": 0, "channel": "content", "text": "llo"},
+    ]
+    listed = await store.list(run_id=record.run_id)
+    assert [r.event_name for r in listed] == ["metadata", "updates"]  # token NOT persisted

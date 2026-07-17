@@ -104,6 +104,24 @@ async def test_client_error_before_first_token_no_fallback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delta_sink_reset_after_exception() -> None:
+    from orchestrator.llm import router as router_mod
+
+    err = _handle([LLMClientError("400")], key="glm:a")
+    router = LLMRouter(providers=[err], first_token_timeout_s=0.5, idle_timeout_s=0.5)
+
+    seen: list = []
+
+    async def on_delta(d: LLMDelta) -> None:
+        seen.append(d)
+
+    with pytest.raises(LLMClientError):
+        await router(messages=[], tools=[], on_delta=on_delta)
+
+    assert router_mod._delta_sink.get() is None
+
+
+@pytest.mark.asyncio
 async def test_first_token_timeout_all_exhausted() -> None:
     a = _handle([0.3, LLMDelta(content="x")], key="glm:a")
     b = _handle([0.3, LLMDelta(content="y")], key="glm:b")
@@ -180,3 +198,50 @@ async def test_drive_stream_uses_provider_assembler() -> None:
     msg = await router(messages=[], tools=[])
     assert msg.content == "ok"
     assert used.get("hit") is True
+
+
+@pytest.mark.asyncio
+async def test_on_delta_awaited_for_each_delta_on_streaming_path() -> None:
+    script = [LLMDelta(content="a"), LLMDelta(content="b"), LLMDelta(finish_reason="stop")]
+    router = LLMRouter(providers=[_handle(script)], first_token_timeout_s=0.5, idle_timeout_s=0.5)
+    seen: list[str] = []
+
+    async def on_delta(d: LLMDelta) -> None:
+        seen.append(d.content)
+
+    msg = await router(messages=[], tools=[], on_delta=on_delta)
+    assert msg.content == "ab"
+    assert seen == ["a", "b", ""]  # every delta, incl. the empty-content finish delta
+
+
+@pytest.mark.asyncio
+async def test_on_delta_not_called_on_structured_path() -> None:
+    from langchain_core.messages import AIMessage
+
+    from expert_work.protocol import StructuredOutputSpec
+
+    class _Probe:
+        async def stream(self, *, messages, tools, output_schema=None):
+            yield LLMDelta(content="SHOULD NOT STREAM")
+
+        async def complete(self, *, messages, tools, output_schema=None) -> AIMessage:
+            return AIMessage(content='{"ok": true}', additional_kwargs={"parsed": {"ok": True}})
+
+        def new_stream_assembler(self):
+            from orchestrator.llm.providers._streaming import OpenAIStreamAssembler
+
+            return OpenAIStreamAssembler()
+
+    seen: list = []
+
+    async def on_delta(d: LLMDelta) -> None:
+        seen.append(d)
+
+    router = LLMRouter(
+        providers=[ProviderHandle(provider=_Probe(), key="x")],
+        first_token_timeout_s=0.5,
+        idle_timeout_s=0.5,
+    )
+    spec = StructuredOutputSpec(schema={"type": "object"}, name="x")
+    await router(messages=[], tools=[], output_schema=spec, on_delta=on_delta)
+    assert seen == []

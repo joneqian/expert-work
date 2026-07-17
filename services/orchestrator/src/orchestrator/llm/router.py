@@ -40,7 +40,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -320,6 +321,16 @@ class AllProvidersExhaustedError(LLMError):
         self.last_exc = last_exc
 
 
+# 子项目 2 — the per-call token-delta sink. Set at __call__ entry (public
+# ``on_delta`` param) and read in ``_drive_stream``; a ContextVar avoids
+# threading the callback through the 6-deep private call chain and is
+# task-local, so concurrent runs never see each other's sink. The router stays
+# LangGraph-agnostic — it only ``await``s an opaque async callback.
+_delta_sink: ContextVar[Callable[[LLMDelta], Awaitable[None]] | None] = ContextVar(
+    "_llm_delta_sink", default=None
+)
+
+
 @dataclass
 class LLMRouter:
     """Try each :class:`ProviderHandle` in order; fall back on retryable errors.
@@ -347,6 +358,20 @@ class LLMRouter:
     idle_timeout_s: float | None = field(default=None)
 
     async def __call__(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+        on_delta: Callable[[LLMDelta], Awaitable[None]] | None = None,
+    ) -> AIMessage:
+        sink_token = _delta_sink.set(on_delta)
+        try:
+            return await self._dispatch(messages=messages, tools=tools, output_schema=output_schema)
+        finally:
+            _delta_sink.reset(sink_token)
+
+    async def _dispatch(
         self,
         *,
         messages: Sequence[BaseMessage],
@@ -624,6 +649,7 @@ class LLMRouter:
         output; an error is terminal (:class:`LLMStreamInterruptedError`,
         no fallback)."""
         it = stream.__aiter__()
+        sink = _delta_sink.get()
         first_progress = False
 
         # Phase 1 — wait for the first progress delta.
@@ -644,6 +670,8 @@ class LLMRouter:
                     f"first_token_timeout_s={self.first_token_timeout_s}"
                 ) from exc
             assembler.add(delta)
+            if sink is not None:
+                await sink(delta)
             first_progress = delta.has_progress
 
         # Phase 2 — consume the rest under the idle timeout.
@@ -666,6 +694,8 @@ class LLMRouter:
                     partial=assembler.build(interrupted=True),
                 ) from exc
             assembler.add(delta)
+            if sink is not None:
+                await sink(delta)
 
     async def _handle_unauthorized(
         self,

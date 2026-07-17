@@ -518,7 +518,7 @@ async def test_run_agent_over_real_react_graph() -> None:
     """run_agent must work against an actual ``build_react_graph`` +
     ``GraphRunner.compile`` graph, not just the scripted stub —
     confirms ``.astream`` chunks serialize cleanly end to end."""
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
     from langchain_core.messages import BaseMessage, HumanMessage
 
@@ -529,6 +529,7 @@ async def test_run_agent_over_real_react_graph() -> None:
         ToolSpec,
         build_react_graph,
     )
+    from orchestrator.llm.providers._streaming import LLMDelta
 
     @dataclass
     class _EchoLLM:
@@ -537,8 +538,9 @@ async def test_run_agent_over_real_react_graph() -> None:
             *,
             messages: Sequence[BaseMessage],
             tools: Sequence[ToolSpec],
+            on_delta: Callable[[LLMDelta], Awaitable[None]] | None = None,
         ) -> AIMessage:
-            del tools
+            del tools, on_delta
             return AIMessage(content=f"echo: {messages[-1].content}", id="ai-1")
 
     bridge = InMemoryStreamBridge()

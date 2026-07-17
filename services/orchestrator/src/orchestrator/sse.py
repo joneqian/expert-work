@@ -83,7 +83,7 @@ from expert_work.runtime.stream_bridge import (
     StreamBridge,
 )
 from orchestrator.errors import MaxStepsExceededError
-from orchestrator.graph_builder._config import AUDIT_LOGGER_KEY, COMPACTION_SINK_KEY
+from orchestrator.graph_builder._config import AUDIT_LOGGER_KEY, COMPACTION_SINK_KEY, TOKEN_SINK_KEY
 from orchestrator.run_retry import (
     MAX_RUN_RETRIES,
     is_transient_run_error,
@@ -366,8 +366,14 @@ async def run_agent(
         )
         event_seq += 1
 
+    async def _publish_token(frame: Any) -> None:
+        # Live-only: token frames are provisional; do NOT mirror to the event
+        # store (the authoritative ``updates`` frame is what replays).
+        await bridge.publish(run_id, "token", frame)
+
     # ``configurable`` was populated in the effective_config literal above.
     effective_config["configurable"][COMPACTION_SINK_KEY] = _publish_compaction
+    effective_config["configurable"][TOKEN_SINK_KEY] = _publish_token
     # Stream 9.4 (HA failover) — renew the ownership lease while executing so a
     # peer's orphan sweep can tell this live run from a crashed owner's. Spawned
     # after the → RUNNING claim; cancelled in ``finally``.
