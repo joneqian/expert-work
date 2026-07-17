@@ -41,6 +41,23 @@ if TYPE_CHECKING:
 #: defeat the hold.
 HOLD_CHARS = 64
 
+#: Target lag of the frozen pointer behind the buffer end (and thus the size of
+#: the suffix rescanned by DLP each feed). Governs per-feed rescan cost, not
+#: correctness: bounded-equivalence is upheld by the exact split-equality check
+#: in ``_advance_frozen``, and the screen latch by scanning the full unfrozen
+#: tail (``_buf[_frozen_raw:]``) — a credential's minimum match (<= 39) is fully
+#: inside that tail the feed it completes, because HOLD_CHARS (64) > 39 keeps
+#: _frozen_raw behind the credential's start until it is caught and latched.
+RESCAN_LOOKBACK = 64
+
+#: Frozen-pointer target lag: ``_advance_frozen`` tries to freeze up to
+#: ``end - WINDOW`` each feed (≈ the DLP rescan / tail size in steady state).
+#: Everything before a *verified-clean* frozen boundary is finalized and never
+#: rescanned again — this is what makes ``feed`` O(1) amortized (O(n) over the
+#: whole stream) instead of O(n) per delta. (Screen is NOT windowed — it scans
+#: the full unfrozen tail; see RESCAN_LOOKBACK above.)
+WINDOW = HOLD_CHARS + RESCAN_LOOKBACK
+
 
 class StreamingRedactor:
     """Incremental buffered-release redactor over one content channel.
@@ -56,11 +73,48 @@ class StreamingRedactor:
         self._dlp = dlp
         self._screen = screen
         self._buf = ""
-        self._emitted_len = 0
+        #: Redacted chars emitted so far (monotonic; = old ``_emitted_len``).
+        self._emitted_out = 0
+        #: Raw offset of the finalized boundary: ``_buf[:_frozen_raw]`` redaction
+        #: is settled and already emitted, so it is never rescanned again.
+        self._frozen_raw = 0
+        #: Redacted-char count of ``_buf[:_frozen_raw]``. Invariant (upheld by
+        #: the collapse guard in ``_advance_frozen``): ``_frozen_out <= _emitted_out``.
+        self._frozen_out = 0
         self._blocked = False
 
     def _redact(self, text: str) -> str:
         return scan_and_redact(text).redacted if self._dlp else text
+
+    def _advance_frozen(self, tail_red: str) -> None:
+        # Push the frozen boundary up to ``end - WINDOW`` so the rescanned tail
+        # stays bounded — but only if the buffer's redaction splits EXACTLY at
+        # new_frozen: redact(head) ++ redact(retained) == the full-context
+        # tail_red. This is load-bearing and NOT replaceable by a prefix test:
+        # new_frozen (a function of total buffer length) drifts backward into an
+        # EARLIER match as the buffer grows, and because ``[redacted]`` is a
+        # fixed token, a cut that forms a DIFFERENT collapsing match (e.g. an
+        # 18-char id-card's 16-digit prefix independently matches the card shape)
+        # produces the same ``[redacted]`` and would fool ``startswith``. Exact
+        # split-equality is the real cleanliness invariant; if it fails,
+        # new_frozen straddles a match — defer advancing this feed.
+        new_frozen = max(0, len(self._buf) - WINDOW)
+        if new_frozen <= self._frozen_raw:
+            return
+        head_red = self._redact(self._buf[self._frozen_raw : new_frozen])
+        retained_red = self._redact(self._buf[new_frozen:])
+        if head_red + retained_red != tail_red:
+            return
+        added = len(head_red)
+        # Collapse guard: a PII span completing just past the emission frontier
+        # makes ``redact`` shrink, so a clean-split frozen count can momentarily
+        # exceed what we've emitted; freezing it would drive
+        # ``_frozen_out > _emitted_out`` and a later negative slice index
+        # (Python wraps → tail leak). Defer until emission catches up.
+        if self._frozen_out + added > self._emitted_out:
+            return
+        self._frozen_out += added
+        self._frozen_raw = new_frozen
 
     def feed(self, text: str) -> str:
         if self._blocked:
@@ -68,24 +122,28 @@ class StreamingRedactor:
         self._buf += text
         if not text:
             return ""
-        if self._screen and screen_output(self._buf).blocked:
+        tail = self._buf[self._frozen_raw :]
+        if self._screen and screen_output(tail).blocked:
             self._blocked = True
             return ""
-        redacted = self._redact(self._buf)
-        boundary = max(self._emitted_len, len(redacted) - HOLD_CHARS)
-        out = redacted[self._emitted_len : boundary]
-        self._emitted_len = boundary
+        tail_red = self._redact(tail)
+        full_red_len = self._frozen_out + len(tail_red)
+        boundary = max(self._emitted_out, full_red_len - HOLD_CHARS)
+        out = tail_red[self._emitted_out - self._frozen_out : boundary - self._frozen_out]
+        self._emitted_out = boundary
+        self._advance_frozen(tail_red)
         return out
 
     def flush(self) -> str:
         if self._blocked:
             return ""
-        if self._screen and screen_output(self._buf).blocked:
+        tail = self._buf[self._frozen_raw :]
+        if self._screen and screen_output(tail).blocked:
             self._blocked = True
             return ""
-        redacted = self._redact(self._buf)
-        out = redacted[self._emitted_len :]
-        self._emitted_len = len(redacted)
+        tail_red = self._redact(tail)
+        out = tail_red[self._emitted_out - self._frozen_out :]
+        self._emitted_out = self._frozen_out + len(tail_red)
         return out
 
 
