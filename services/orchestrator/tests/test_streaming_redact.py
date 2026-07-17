@@ -194,3 +194,66 @@ def test_email_within_hold_is_redacted_streaming() -> None:
     out = "".join(r.feed(c) for c in text) + r.flush()
     assert "user@example.com" not in out  # 落窗 email 被脱敏
     assert out == scan_and_redact(text).redacted  # 逐字节等价全扫
+
+
+def test_rescan_work_is_bounded_not_quadratic(monkeypatch) -> None:
+    # monkeypatch 记录每次传给守卫的文本长度;喂长文,断言 max 入参有界(常数),
+    # 证每 feed 重扫量不随总长增长(O(n) 全程,非 O(n²))。
+    from orchestrator.graph_builder import streaming_redact as sr
+
+    max_len = 0
+    real_scan = sr.scan_and_redact
+    real_screen = sr.screen_output
+
+    def spy_scan(text):
+        nonlocal max_len
+        max_len = max(max_len, len(text))
+        return real_scan(text)
+
+    def spy_screen(text, **kw):
+        nonlocal max_len
+        max_len = max(max_len, len(text))
+        return real_screen(text, **kw)
+
+    monkeypatch.setattr(sr, "scan_and_redact", spy_scan)
+    monkeypatch.setattr(sr, "screen_output", spy_screen)
+
+    r = sr.StreamingRedactor(dlp=True, screen=True)
+    total = "abcdefghij " * 400  # 4400 chars, no PII
+    delta = 50
+    for i in range(0, len(total), delta):
+        r.feed(total[i : i + delta])
+    r.flush()
+    assert max_len <= 3 * sr.WINDOW  # 384 << 4400 → 每 feed 重扫为常数,非 O(n)
+
+
+def test_collapse_guard_no_negative_index_leak() -> None:
+    # PII 折叠(digits→[redacted])使 redacted-length 瞬时回缩;若冻结点 redacted-count
+    # 越过已 emit,下帧 lo=_emitted_out-_frozen_out<0 → Python 负索引回绕取 buffer 尾。
+    # 构造:安全前缀把 emit 前沿推到卡号完成点附近,分片完成卡号。
+    prefix = "y" * 130 + " your card number is "
+    r = StreamingRedactor(dlp=True, screen=False)
+    out = r.feed(prefix)
+    out += r.feed("4111 1111 1111 ")
+    out += r.feed("1111 tail-marker")
+    out += r.flush()
+    assert "4111" not in out  # 不泄漏原数字
+    assert out.count("tail-marker") == 1  # 无回绕重复
+    assert out == scan_and_redact(prefix + "4111 1111 1111 1111 tail-marker").redacted
+
+
+def test_clean_split_not_fooled_by_overlapping_match_shapes() -> None:
+    # 冻结洁净判据回归:18 位 id_card 的前 16 位数字独立命中 credit_card 形状,
+    # 两者都折成定长 "[redacted]"。若 _advance_frozen 用前缀判据(startswith),
+    # 冻结点会假阳性落进 id_card 中间 → _frozen_out 计数错 → 下游重复发射
+    # ("words"→"wordrds")。精确分割等价判据必须拒绝该 straddle。
+    # 长 padding 使 new_frozen(=len-WINDOW)随 buffer 增长恰好追进 id_card 区间。
+    corpus = (
+        "contact 13800138000 or card 4111 1111 1111 1111, "
+        "id 11010119900307123X, thanks. " + "padding words here. " * 20
+    )
+    expected = scan_and_redact(corpus).redacted
+    r = StreamingRedactor(dlp=True, screen=False)
+    out = "".join(r.feed(corpus[i : i + 7]) for i in range(0, len(corpus), 7)) + r.flush()
+    assert out == expected  # 无重复/无错位
+    assert "words here. padding words" in out  # 无 "wordrds" 类回绕垃圾
