@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 from expert_work.common.dlp import scan_and_redact
@@ -135,3 +137,60 @@ def test_make_token_sink_none_without_publish() -> None:
 def test_make_token_sink_builds_when_enabled() -> None:
     sink = make_token_sink(step=1, publish=_noop_pub, dlp=True, screen=True, judge_enabled=False)
     assert isinstance(sink, TokenSink)
+
+
+def test_card_straddling_long_prefix_still_redacted() -> None:
+    # 安全长前缀(>128)把发射前沿推得很靠前,再让一张卡号跨多个 delta 完成——
+    # 卡号字符落在"已越过发射前沿的旧 buffer 区"之后仍必须整体脱敏、不泄漏。
+    prefix = "safe filler text. " * 12  # 216 chars, no PII
+    r = StreamingRedactor(dlp=True, screen=False)
+    out = r.feed(prefix)
+    out += r.feed("account 4111 1111 ")
+    out += r.feed("1111 1111 end")
+    out += r.flush()
+    assert "4111" not in out
+    assert out == scan_and_redact(prefix + "account 4111 1111 1111 1111 end").redacted
+
+
+def test_random_split_equals_oneshot_bounded_corpus() -> None:
+    # 含 card / id / phone 的 bounded 语料;多种随机切分点,每种 join 都等于全扫。
+    corpus = (
+        "contact 13800138000 or card 4111 1111 1111 1111, "
+        "id 11010119900307123X, thanks. " + "padding words here. " * 20
+    )
+    expected = scan_and_redact(corpus).redacted
+    rng = random.Random(20260717)  # noqa: S311 固定 seed → test determinism
+    for _ in range(25):
+        r = StreamingRedactor(dlp=True, screen=False)
+        i = 0
+        out = ""
+        while i < len(corpus):
+            step = rng.randint(1, 17)
+            out += r.feed(corpus[i : i + step])
+            i += step
+        out += r.flush()
+        assert out == expected, "mismatch for this split; expected == oneshot redact"
+
+
+def test_screen_latches_on_credential_after_long_safe_prefix() -> None:
+    # 长安全填充(远超 WINDOW)之后才出现凭据:screen 窗必须仍抓到并全扣。
+    r = StreamingRedactor(dlp=False, screen=True)
+    out = r.feed("x" * 300)  # 已释放一部分安全前缀
+    key = "sk-" + "a" * 24  # 命中 _SECRET_PATTERNS
+    out += r.feed("here is the key " + key)
+    out += r.feed(" trailing")
+    out += r.flush()
+    assert key not in out  # 凭据不泄漏
+    # latch 后不再释放新内容(尾部 " trailing" 也被扣)
+    assert "trailing" not in out
+
+
+def test_email_within_hold_is_redacted_streaming() -> None:
+    # 短于 hold 窗的 email 在释放前已被完整缓冲 → 流式脱敏与全扫一致。
+    # (email 无界:长于 HOLD 的地址是"文档化的 provisional 残留"——由权威帧兜底,
+    #  且其部分头泄漏本就依赖分片边界,不作断言。此处只锁"落窗 email 仍脱敏"。)
+    text = "reach me at user@example.com anytime " + "z" * 80
+    r = StreamingRedactor(dlp=True, screen=False)
+    out = "".join(r.feed(c) for c in text) + r.flush()
+    assert "user@example.com" not in out  # 落窗 email 被脱敏
+    assert out == scan_and_redact(text).redacted  # 逐字节等价全扫
