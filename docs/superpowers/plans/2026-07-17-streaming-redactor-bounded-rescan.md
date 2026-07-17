@@ -94,20 +94,15 @@ def test_screen_latches_on_credential_after_long_safe_prefix() -> None:
     assert "trailing" not in out
 
 
-def test_long_email_residual_no_worse_than_full_scan() -> None:
-    # email 无界:超长本地部分的地址,分片流式与"全扫当前实现"的残留一致
-    # (记录既有 provisional 残留,非回归)。断言:流式 join 等于把同一分片喂给
-    # 当前实现的结果——用两个独立 redactor 对照,证行为一致。
-    text = "mail " + "a" * 200 + "@example.com done " + "z" * 80
-    r1 = StreamingRedactor(dlp=True, screen=False)
-    r2 = StreamingRedactor(dlp=True, screen=False)
-    # 两种不同分片都跑,断言各自 join 相等(等价性对分片不敏感的 bounded 部分成立;
-    # email 部分两路一致即证 no-worse 稳定)。
-    a = "".join(r1.feed(c) for c in text) + r1.flush()
-    chunks = [text[i : i + 13] for i in range(0, len(text), 13)]
-    b = "".join(r2.feed(c) for c in chunks) + r2.flush()
-    assert a == b
-    assert "@example.com" in a or "[redacted]" in a  # 尾部安全内容照常释放
+def test_email_within_hold_is_redacted_streaming() -> None:
+    # 短于 hold 窗的 email 在释放前已被完整缓冲 → 流式脱敏与全扫一致。
+    # (email 无界:长于 HOLD 的地址是"文档化的 provisional 残留"——由权威帧兜底,
+    #  且其部分头泄漏本就依赖分片边界,不作断言。此处只锁"落窗 email 仍脱敏"。)
+    text = "reach me at user@example.com anytime " + "z" * 80
+    r = StreamingRedactor(dlp=True, screen=False)
+    out = "".join(r.feed(c) for c in text) + r.flush()
+    assert "user@example.com" not in out          # 落窗 email 被脱敏
+    assert out == scan_and_redact(text).redacted   # 逐字节等价全扫
 ```
 
 - [ ] **Step 2: 运行,确认全部在当前实现上通过**
@@ -332,7 +327,7 @@ git commit -m "perf: StreamingRedactor 有界后缀重扫(O(n²)→O(n),bounded 
 - 常量 `RESCAN_LOOKBACK`/`WINDOW`、`HOLD_CHARS` 不动 → Task 2 Step 3(a)。✅
 - bounded 逐字节等价 → Task 1 straddle/fuzz 测 + 既有等价测。✅
 - screen latch 先抓后 emit → Task 1 `test_screen_latches_...`。✅
-- email no-worse → Task 1 `test_long_email_residual_...`。✅
+- email no-worse → Task 1 `test_email_within_hold_is_redacted_streaming`(落窗 email 仍脱敏;>HOLD 残留文档化不断言,因其分片依赖既有)。✅
 - O(n) 结构性证(非壁钟)→ Task 2 `test_rescan_work_is_bounded_not_quadratic`。✅
 - 公开接口 / 帧格式 / gate 不变 → Task 2 保留签名;既有 `TokenSink`/`make_token_sink` 测未改动仍绿(Step 5)。✅
 - 非目标(不改 HOLD/pattern/帧/内存回收)→ 计划未触及,符合。✅
