@@ -791,7 +791,7 @@ def build_react_graph(
             response: AIMessage = cache_hit_response
         else:
             _token_sink = make_token_sink(
-                step=step_count,
+                step=step_count + 1,
                 publish=token_sink_from_config(config),
                 dlp=output_dlp,
                 screen=output_screen,
