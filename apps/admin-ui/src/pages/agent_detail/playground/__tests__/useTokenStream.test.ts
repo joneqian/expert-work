@@ -91,4 +91,27 @@ describe("useTokenStream", () => {
     expect(result.current.liveByStep.size).toBe(0);
     expect(result.current.ttftMs).toBe(null);
   });
+
+  it("reschedules a new rAF for a push after a flush (typewriter keeps flowing)", () => {
+    const { result } = renderHook(() => useTokenStream());
+    act(() => result.current.reset());
+    act(() => result.current.push(tokenFrame(0, "a")));
+    expect(rafCbs.length).toBe(1);
+    act(() => flushRaf()); // flush clears the rAF handle
+    act(() => result.current.push(tokenFrame(0, "b")));
+    expect(rafCbs.length).toBe(1); // a NEW rAF was scheduled — handle reset, not stuck
+    act(() => flushRaf());
+    expect(result.current.liveByStep.get(0)).toBe("ab");
+  });
+
+  it("a stale queued flush after finalize does not clobber the finalized snapshot", () => {
+    const { result } = renderHook(() => useTokenStream());
+    act(() => result.current.reset());
+    act(() => result.current.push(tokenFrame(0, "partial"))); // schedules a flush (not yet run)
+    act(() => result.current.finalize()); // final flush + finalized=true
+    expect(result.current.finalized).toBe(true);
+    act(() => flushRaf()); // fire any stale queued callback
+    expect(result.current.finalized).toBe(true); // still finalized, not un-finalized
+    expect(result.current.liveByStep.get(0)).toBe("partial");
+  });
 });

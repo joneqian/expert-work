@@ -9,7 +9,7 @@
  * The authoritative `updates` frame remains the source of truth; a step's live
  * buffer is superseded at render time once its authoritative card exists.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SseEvent } from "../../../api/sessions";
 
@@ -105,6 +105,8 @@ export function useTokenStream(): TokenStreamController {
     cancel();
     setSnapshot({ liveByStep: new Map(bufRef.current), ttftMs: ttftRef.current, finalized: true });
   }, [cancel]);
+
+  useEffect(() => cancel, [cancel]);
 
   return { ...snapshot, push, reset, finalize };
 }
