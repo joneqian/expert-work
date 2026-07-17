@@ -1,5 +1,8 @@
+import pytest
+
 from expert_work.common.dlp import scan_and_redact
-from orchestrator.graph_builder.streaming_redact import HOLD_CHARS, StreamingRedactor
+from orchestrator.graph_builder.streaming_redact import HOLD_CHARS, StreamingRedactor, TokenSink, make_token_sink
+from orchestrator.llm.providers._streaming import LLMDelta
 
 
 def test_no_guards_passthrough_progressive() -> None:
@@ -47,3 +50,48 @@ def test_screen_off_does_not_block_credentials() -> None:
     key = "sk-" + "a" * 24
     out = r.feed("key " + key) + r.flush()
     assert key in out  # screen disabled → not withheld
+
+
+@pytest.mark.asyncio
+async def test_token_sink_publishes_content_frames() -> None:
+    frames: list[dict] = []
+
+    async def pub(f: dict) -> None:
+        frames.append(f)
+
+    sink = TokenSink(step=3, publish=pub, dlp=False, screen=False)
+    await sink(LLMDelta(content="A" * 100))
+    await sink.flush()
+    assert all(f["step"] == 3 and f["channel"] == "content" for f in frames)
+    assert "".join(f["text"] for f in frames) == "A" * 100
+
+
+@pytest.mark.asyncio
+async def test_token_sink_redacts_pii() -> None:
+    frames: list[dict] = []
+
+    async def pub(f: dict) -> None:
+        frames.append(f)
+
+    sink = TokenSink(step=0, publish=pub, dlp=True, screen=False)
+    await sink(LLMDelta(content="card 4111 1111 1111 1111 done " + "x" * 60))
+    await sink.flush()
+    joined = "".join(f["text"] for f in frames)
+    assert "4111" not in joined and "[redacted]" in joined
+
+
+async def _noop_pub(f: dict) -> None:
+    return None
+
+
+def test_make_token_sink_gates_off_when_judge_enabled() -> None:
+    assert make_token_sink(step=0, publish=_noop_pub, dlp=False, screen=False, judge_enabled=True) is None
+
+
+def test_make_token_sink_none_without_publish() -> None:
+    assert make_token_sink(step=0, publish=None, dlp=False, screen=False, judge_enabled=False) is None
+
+
+def test_make_token_sink_builds_when_enabled() -> None:
+    sink = make_token_sink(step=1, publish=_noop_pub, dlp=True, screen=True, judge_enabled=False)
+    assert isinstance(sink, TokenSink)

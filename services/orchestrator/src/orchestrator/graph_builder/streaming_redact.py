@@ -14,8 +14,14 @@ window; anything longer is covered by the authoritative frame.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
+
 from expert_work.common.dlp import scan_and_redact
 from expert_work.common.output_screen import screen_output
+
+if TYPE_CHECKING:
+    from orchestrator.llm.providers._streaming import LLMDelta
 
 #: Characters held back from the tail of the (redacted) buffer on each feed. Must
 #: be >= the longest realistic sensitive token so a pattern still forming is never
@@ -67,3 +73,52 @@ class StreamingRedactor:
         out = redacted[self._emitted_len:]
         self._emitted_len = len(redacted)
         return out
+
+
+#: Async callback that ships one token frame to the SSE bridge (injected by
+#: run_agent via ``TOKEN_SINK_KEY``; see graph_builder/_config.py).
+TokenPublish = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+class TokenSink:
+    """Per-run content-channel token emitter.
+
+    Wraps a :class:`StreamingRedactor`; each streamed ``LLMDelta``'s content is
+    redacted incrementally and the newly-stable text is published as a
+    ``{"step", "channel": "content", "text"}`` frame. ``flush`` emits the
+    buffered-release tail after the router returns.
+    """
+
+    def __init__(self, *, step: int, publish: TokenPublish, dlp: bool, screen: bool) -> None:
+        self._step = step
+        self._publish = publish
+        self._redactor = StreamingRedactor(dlp=dlp, screen=screen)
+
+    async def __call__(self, delta: LLMDelta) -> None:
+        safe = self._redactor.feed(delta.content)
+        if safe:
+            await self._publish({"step": self._step, "channel": "content", "text": safe})
+
+    async def flush(self) -> None:
+        tail = self._redactor.flush()
+        if tail:
+            await self._publish({"step": self._step, "channel": "content", "text": tail})
+
+
+def make_token_sink(
+    *,
+    step: int,
+    publish: TokenPublish | None,
+    dlp: bool,
+    screen: bool,
+    judge_enabled: bool,
+) -> TokenSink | None:
+    """Build a :class:`TokenSink`, or ``None`` when token streaming is gated off.
+
+    Gate: an LLM output judge (``judge_enabled``) can only decide on the complete
+    message, so its runs never token-stream; and without an injected ``publish``
+    sink there is nowhere to send frames.
+    """
+    if judge_enabled or publish is None:
+        return None
+    return TokenSink(step=step, publish=publish, dlp=dlp, screen=screen)
