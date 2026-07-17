@@ -41,13 +41,13 @@ if TYPE_CHECKING:
 #: defeat the hold.
 HOLD_CHARS = 64
 
-#: Look-back behind the emission hold that sizes the screen scan window. Must be
-#: >= every BLOCK guard's MAX minimum-match length (39, Google API key) so a
-#: credential's minimum match is fully inside the last WINDOW chars the feed it
-#: completes — caught and latched before its head crosses the emission frontier.
-#: (Bounded-equivalence correctness does NOT depend on this value — it is upheld
-#: by the exact split-equality check in ``_advance_frozen``, not by a no-straddle
-#: margin. This only sizes the screen window and the per-feed rescan cost.)
+#: Target lag of the frozen pointer behind the buffer end (and thus the size of
+#: the suffix rescanned by DLP each feed). Governs per-feed rescan cost, not
+#: correctness: bounded-equivalence is upheld by the exact split-equality check
+#: in ``_advance_frozen``, and the screen latch by scanning the full unfrozen
+#: tail (``_buf[_frozen_raw:]``) — a credential's minimum match (<= 39) is fully
+#: inside that tail the feed it completes, because HOLD_CHARS (64) > 39 keeps
+#: _frozen_raw behind the credential's start until it is caught and latched.
 RESCAN_LOOKBACK = 64
 
 #: Size of the raw-buffer suffix rescanned on each ``feed`` (the screen scan
@@ -83,9 +83,6 @@ class StreamingRedactor:
 
     def _redact(self, text: str) -> str:
         return scan_and_redact(text).redacted if self._dlp else text
-
-    def _window_start(self) -> int:
-        return max(0, len(self._buf) - WINDOW)
 
     def _advance_frozen(self, tail_red: str) -> None:
         # Push the frozen boundary up to ``end - WINDOW`` so the rescanned tail
@@ -123,10 +120,11 @@ class StreamingRedactor:
         self._buf += text
         if not text:
             return ""
-        if self._screen and screen_output(self._buf[self._window_start() :]).blocked:
+        tail = self._buf[self._frozen_raw :]
+        if self._screen and screen_output(tail).blocked:
             self._blocked = True
             return ""
-        tail_red = self._redact(self._buf[self._frozen_raw :])
+        tail_red = self._redact(tail)
         full_red_len = self._frozen_out + len(tail_red)
         boundary = max(self._emitted_out, full_red_len - HOLD_CHARS)
         out = tail_red[self._emitted_out - self._frozen_out : boundary - self._frozen_out]
@@ -137,10 +135,11 @@ class StreamingRedactor:
     def flush(self) -> str:
         if self._blocked:
             return ""
-        if self._screen and screen_output(self._buf[self._window_start() :]).blocked:
+        tail = self._buf[self._frozen_raw :]
+        if self._screen and screen_output(tail).blocked:
             self._blocked = True
             return ""
-        tail_red = self._redact(self._buf[self._frozen_raw :])
+        tail_red = self._redact(tail)
         out = tail_red[self._emitted_out - self._frozen_out :]
         self._emitted_out = self._frozen_out + len(tail_red)
         return out

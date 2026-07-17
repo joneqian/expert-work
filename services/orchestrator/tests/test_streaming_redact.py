@@ -257,3 +257,17 @@ def test_clean_split_not_fooled_by_overlapping_match_shapes() -> None:
     out = "".join(r.feed(corpus[i : i + 7]) for i in range(0, len(corpus), 7)) + r.flush()
     assert out == expected  # 无重复/无错位
     assert "words here. padding words" in out  # 无 "wordrds" 类回绕垃圾
+
+
+def test_screen_latch_survives_large_single_delta() -> None:
+    # A single large delta carrying a credential followed by >HOLD safe chars:
+    # a fixed-size screen window would miss the credential (its start falls
+    # outside the window) while emission advances past it -> leak. Screening the
+    # full unfrozen tail catches it — this is the exact divergence a bounded
+    # fixed-window screen scan introduces vs the whole-buffer scan.
+    r = StreamingRedactor(dlp=False, screen=True)
+    key = "AIza" + "B" * 35  # Google API key shape, matches _SECRET_PATTERNS
+    out = r.feed("x" * 200)  # safe prefix, emission caught up
+    out += r.feed(" " + key + " " + "z" * 90)  # one big delta: key + long tail
+    out += r.flush()
+    assert key not in out  # credential never emitted
