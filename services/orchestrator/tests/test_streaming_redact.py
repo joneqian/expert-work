@@ -52,6 +52,36 @@ def test_screen_off_does_not_block_credentials() -> None:
     assert key in out  # screen disabled → not withheld
 
 
+def test_max_clamp_boundary_retreat() -> None:
+    # Leading safe filler pushes emission past HOLD_CHARS (a non-empty
+    # prefix comes out), THEN a second feed completes a card pattern that
+    # was only partially formed — the redacted text's length barely grows
+    # (raw digits collapse into "[redacted]"), exercising the
+    # max(_emitted_len, ...) clamp so the boundary never retreats below what
+    # was already emitted.
+    full_input = "x" * 70 + " card 4111 1111 1111 " + "1111 done"
+    r = StreamingRedactor(dlp=True, screen=False)
+    prefix1 = r.feed("x" * 70 + " card 4111 1111 1111 ")
+    assert prefix1 != ""
+    prefix2 = r.feed("1111 done")
+    tail = r.flush()
+    full = prefix1 + prefix2 + tail
+    assert "4111" not in full  # raw digits never leaked across fragments
+    assert full == scan_and_redact(full_input).redacted
+
+
+def test_dlp_and_screen_both_enabled() -> None:
+    r = StreamingRedactor(dlp=True, screen=True)
+    out = r.feed("my card is 4111 1111 1111 1111 thanks") + r.flush()
+    assert "4111" not in out and "[redacted]" in out  # PII redacted
+    assert out != ""  # not blocked
+
+    r2 = StreamingRedactor(dlp=True, screen=True)
+    key = "sk-" + "a" * 24
+    out2 = r2.feed("here is the key " + key) + r2.flush()
+    assert out2 == ""  # credential trips the screen → all output withheld
+
+
 @pytest.mark.asyncio
 async def test_token_sink_publishes_content_frames() -> None:
     frames: list[dict] = []

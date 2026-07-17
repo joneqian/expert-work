@@ -9,7 +9,10 @@ with a look-back hold so a pattern split across deltas is never partially emitte
 Token frames are provisional: the authoritative ``updates`` frame (full guards on
 the complete message) is the source of truth. This redactor is best-effort on the
 preview — the fixed-shape DLP patterns (card/id/phone) fit fully inside the hold
-window; anything longer is covered by the authoritative frame.
+window; anything longer is covered by the authoritative frame. The residual case
+is email: the pattern is unbounded, so an address longer than HOLD_CHARS can still
+leak a partial head in the provisional preview — the authoritative frame is the
+backstop for that case.
 """
 
 from __future__ import annotations
@@ -23,10 +26,19 @@ from expert_work.common.output_screen import screen_output
 if TYPE_CHECKING:
     from orchestrator.llm.providers._streaming import LLMDelta
 
-#: Characters held back from the tail of the (redacted) buffer on each feed. Must
-#: be >= the longest realistic sensitive token so a pattern still forming is never
-#: released raw: fixed-shape DLP patterns (card 19 / id 18 / phone 11) and typical
-#: emails all fit inside 64.
+#: Characters held back from the tail of the (redacted) buffer on each feed.
+#: Two-sided invariant — HOLD_CHARS must be:
+#:   1. >= every BLOCK guard's (``screen_output``) MINIMUM regex-match length,
+#:      else a partial credential head could cross the emission boundary and
+#:      escape before the screen latch trips.
+#:   2. >= every fixed-shape DLP (``scan_and_redact``) pattern's MAXIMUM
+#:      match length, so a pattern still completing is always still inside
+#:      the hold and never partially redacted.
+#: Holds today: screen minimums top out at 39 (Google API key `AIza…{35}`;
+#: sk-…{20,}=23, AKIA…=20, xox…=15, PEM=27); DLP fixed-shape maxes top out at
+#: 19 (card 19 / id 18 / phone 11 — email is unbounded, see module docstring).
+#: A future guard pattern with a larger minimum-match-length would silently
+#: defeat the hold.
 HOLD_CHARS = 64
 
 
@@ -51,8 +63,10 @@ class StreamingRedactor:
         return scan_and_redact(text).redacted if self._dlp else text
 
     def feed(self, text: str) -> str:
+        if self._blocked:
+            return ""
         self._buf += text
-        if self._blocked or not text:
+        if not text:
             return ""
         if self._screen and screen_output(self._buf).blocked:
             self._blocked = True
