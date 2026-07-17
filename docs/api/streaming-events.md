@@ -27,11 +27,21 @@ as it is generated:
 ```
 event: token
 data: {"step": 0, "channel": "content", "text": "partial answer fragment"}
+event: token
+data: {"step": 0, "channel": "reasoning", "text": "let me think about..."}
+event: token
+data: {"step": 0, "channel": "tool_args", "tool_index": 0, "name": "search_web"}
 ```
 
 - `step` — the agent step index the fragment belongs to.
-- `channel` — always `"content"` (the answer text). Other channels are reserved.
-- `text` — an already-redacted fragment of the answer.
+- `channel` — one of `"content"` (answer text), `"reasoning"` (the model's
+  thinking, for reasoning-capable models), or `"tool_args"` (a tool call is
+  being made).
+- `content` / `reasoning` frames carry `text` — an already-redacted fragment.
+- `tool_args` frames carry `tool_index` (which parallel tool call) and `name`
+  (the tool being called), emitted once when the name first appears. The tool
+  **arguments are not streamed**; they arrive complete on the authoritative
+  `updates` frame.
 
 **`token` frames are provisional.** Treat them as a live typewriter preview only:
 

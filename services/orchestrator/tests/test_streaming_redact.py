@@ -272,3 +272,84 @@ def test_screen_latch_survives_large_single_delta() -> None:
     out += r.feed(" " + key + " " + "z" * 90)  # one big delta: key + long tail
     out += r.flush()
     assert key not in out  # credential never emitted
+
+
+@pytest.mark.asyncio
+async def test_token_sink_publishes_reasoning_frames() -> None:
+    frames: list[dict] = []
+
+    async def pub(f: dict) -> None:
+        frames.append(f)
+
+    sink = TokenSink(step=2, publish=pub, dlp=False, screen=False)
+    await sink(LLMDelta(reasoning="R" * 100))
+    await sink.flush()
+    rf = [f for f in frames if f["channel"] == "reasoning"]
+    assert rf and all(f["step"] == 2 for f in rf)
+    assert "".join(f["text"] for f in rf) == "R" * 100
+
+
+@pytest.mark.asyncio
+async def test_token_sink_redacts_reasoning_pii() -> None:
+    frames: list[dict] = []
+
+    async def pub(f: dict) -> None:
+        frames.append(f)
+
+    sink = TokenSink(step=0, publish=pub, dlp=True, screen=False)
+    await sink(LLMDelta(reasoning="card 4111 1111 1111 1111 hmm " + "y" * 60))
+    await sink.flush()
+    joined = "".join(f["text"] for f in frames if f["channel"] == "reasoning")
+    assert "4111" not in joined and "[redacted]" in joined
+
+
+@pytest.mark.asyncio
+async def test_content_and_reasoning_streams_isolated() -> None:
+    # Each text channel has its OWN StreamingRedactor — a card's digits in the
+    # content stream and a different card in the reasoning stream each redact
+    # independently; if they shared one redactor the interleaved feeds would
+    # corrupt each other's buffered-release state.
+    frames: list[dict] = []
+
+    async def pub(f: dict) -> None:
+        frames.append(f)
+
+    sink = TokenSink(step=0, publish=pub, dlp=True, screen=False)
+    await sink(LLMDelta(content="4111 1111 ", reasoning="9999 8888 "))
+    await sink(LLMDelta(content="1111 1111", reasoning="7777 6666"))
+    await sink.flush()
+    content = "".join(f["text"] for f in frames if f["channel"] == "content")
+    reasoning = "".join(f["text"] for f in frames if f["channel"] == "reasoning")
+    assert content == "[redacted]" and reasoning == "[redacted]"
+    assert "4111" not in content and "9999" not in reasoning
+
+
+@pytest.mark.asyncio
+async def test_token_sink_emits_tool_name_once_per_index() -> None:
+    from orchestrator.llm.providers._streaming import ToolCallChunk
+
+    frames: list[dict] = []
+
+    async def pub(f: dict) -> None:
+        frames.append(f)
+
+    sink = TokenSink(step=1, publish=pub, dlp=False, screen=False)
+    # name arrives on the first fragment for index 0; later fragments carry args only
+    await sink(
+        LLMDelta(
+            tool_calls=(ToolCallChunk(index=0, id="c0", name="search_web", args_fragment='{"q":'),)
+        )
+    )
+    await sink(LLMDelta(tool_calls=(ToolCallChunk(index=0, args_fragment='"hi"}'),)))
+    # a second parallel tool at index 1
+    await sink(
+        LLMDelta(
+            tool_calls=(ToolCallChunk(index=1, id="c1", name="read_file", args_fragment="{}"),)
+        )
+    )
+    await sink.flush()
+    tool_frames = [f for f in frames if f["channel"] == "tool_args"]
+    assert tool_frames == [
+        {"step": 1, "channel": "tool_args", "tool_index": 0, "name": "search_web"},
+        {"step": 1, "channel": "tool_args", "tool_index": 1, "name": "read_file"},
+    ]
