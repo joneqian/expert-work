@@ -842,6 +842,9 @@ export interface TranslationKeys {
     retry_attempt: string;
     state_section: string;
     tl_step: string;
+    streaming_badge: string;
+    interrupted_badge: string;
+    ttft: string;
     tl_finish: string;
     tl_tool_failed: string;
     tl_final_answer: string;
@@ -3405,6 +3408,9 @@ const en: TranslationKeys = {
     retry_attempt: "attempt {{n}} · {{cls}} · backoff {{s}}s",
     state_section: "Run state",
     tl_step: "Step {{n}}",
+    streaming_badge: "streaming…",
+    interrupted_badge: "interrupted",
+    ttft: "TTFT {{d}}",
     tl_finish: "finish: {{reason}}",
     tl_tool_failed: "Tool failed → retry",
     tl_final_answer: "Final answer",

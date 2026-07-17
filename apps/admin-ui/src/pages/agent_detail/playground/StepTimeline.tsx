@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import type { AgentStep, AuxNodeItem, MarkerItem, TimelineItem } from "../../../api/timeline";
 import { ToolCallCard } from "../../../components/ToolTimeline";
 import { fmtDuration } from "./duration_format";
+import { StreamingStepCard } from "./StreamingStepCard";
 
 // Semantic colors as CSS vars with wireframe-matching hex fallbacks — same
 // `var(--ew-*, #hex)` convention Batch 1/2 established (ToolTimeline.tsx /
@@ -26,6 +27,12 @@ const INFO = "var(--ew-text-info, #4c8dff)";
 
 export interface StepTimelineProps {
   items: readonly TimelineItem[];
+  /** Live token buffers by step (子项目 3a); absent for history/non-streaming turns. */
+  liveByStep?: ReadonlyMap<number, string>;
+  /** TTFT to show on the synthetic streaming card. */
+  ttftMs?: number | null;
+  /** Run ended — orphan live steps (no authoritative card) render as interrupted. */
+  finalized?: boolean;
 }
 
 /** Renders `fmtDuration(ms)` with the `tl_duration` aria-label — used for the
@@ -42,8 +49,17 @@ function DurationBadge({ ms, style }: { ms: number | null; style?: CSSProperties
   );
 }
 
-export function StepTimeline({ items }: StepTimelineProps) {
-  if (items.length === 0) return null;
+export function StepTimeline({ items, liveByStep, ttftMs = null, finalized = false }: StepTimelineProps) {
+  // Steps that already have an authoritative card — their live buffer is superseded.
+  const settled = new Set<number>();
+  for (const it of items) {
+    if (it.kind === "agent" && it.stepCount !== null) settled.add(it.stepCount);
+  }
+  const liveCards = [...(liveByStep ?? new Map<number, string>())]
+    .filter(([step]) => !settled.has(step))
+    .sort(([a], [b]) => a - b);
+
+  if (items.length === 0 && liveCards.length === 0) return null;
 
   return (
     <div>
@@ -74,6 +90,15 @@ export function StepTimeline({ items }: StepTimelineProps) {
               return <AuxNodeRow key={item.seq} item={item} />;
           }
         })}
+        {liveCards.map(([step, text]) => (
+          <StreamingStepCard
+            key={`live-${step}`}
+            step={step}
+            text={text}
+            interrupted={finalized}
+            ttftMs={ttftMs}
+          />
+        ))}
       </div>
       <Legend />
     </div>

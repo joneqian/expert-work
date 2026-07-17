@@ -103,6 +103,7 @@ import { traceBannerModel } from "./playground/trace_banner";
 import { TraceView } from "./playground/TraceView";
 import { labelPurpose } from "./playground/trace_purpose";
 import { TurnMeta } from "./playground/TurnMeta";
+import { useTokenStream } from "./playground/useTokenStream";
 import { PlanPanel } from "../run_detail/PlanPanel";
 import {
   readModel,
@@ -237,6 +238,12 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [historyLoads, setHistoryLoads] = useState<Record<string, HistoryLoad>>(
     {},
   );
+
+  // 流式打字机(子项目 3a)— live token buffer for the running turn's step
+  // cards; ``streamTurnId`` marks which turn currently owns that buffer (only
+  // that turn's TurnCard receives the live props — history turns never do).
+  const tokenStream = useTokenStream();
+  const [streamTurnId, setStreamTurnId] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -607,6 +614,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     setInput("");
     setAttachments([]);
 
+    tokenStream.reset();
+    setStreamTurnId(turnId);
+
     const ac = new AbortController();
     abortRef.current = ac;
     const frames: SseEvent[] = [];
@@ -615,6 +625,10 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       for await (const frame of streamRun(threadId, body, {
         signal: ac.signal,
       })) {
+        if (frame.event === "token") {
+          tokenStream.push(frame);
+          continue;
+        }
         frames.push(frame);
         // #5 — a dedicated ``approval`` event surfaces the gate deterministically
         // (no dependence on the terminal ``end`` frame or a post-stream poll).
@@ -642,6 +656,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         updateTurn({ status: "error", error: message });
       }
     } finally {
+      tokenStream.finalize();
       setRunning(false);
       abortRef.current = null;
     }
@@ -665,6 +680,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     turns.length,
     t,
     detectApproval,
+    tokenStream,
   ]);
 
   // #5 — decide a turn's pending approval, then stream the continuation run
@@ -696,6 +712,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         setRunning(false);
         return;
       }
+      tokenStream.reset();
+      setStreamTurnId(turnId);
+
       const ac = new AbortController();
       abortRef.current = ac;
       const frames: SseEvent[] = [];
@@ -703,6 +722,10 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         for await (const frame of streamRunEvents(threadId, continuationRunId, {
           signal: ac.signal,
         })) {
+          if (frame.event === "token") {
+            tokenStream.push(frame);
+            continue;
+          }
           frames.push(frame);
           setTurns((prev) =>
             prev.map((tn) =>
@@ -720,6 +743,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           patchTurn(turnId, { status: "done" });
         }
       } finally {
+        tokenStream.finalize();
         setRunning(false);
         abortRef.current = null;
       }
@@ -731,7 +755,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         void detectApproval(turnId, threadId, continuationRunId);
       }
     },
-    [thread, patchTurn, detectApproval],
+    [thread, patchTurn, detectApproval, tokenStream],
   );
 
   // Export a turn's full event stream as JSON for offline analysis. Prefer the
@@ -1512,6 +1536,13 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               onExport={handleExport}
               exporting={exportingId === turn.id}
               isSystemAdmin={isSystemAdmin}
+              liveByStep={
+                turn.id === streamTurnId ? tokenStream.liveByStep : undefined
+              }
+              ttftMs={turn.id === streamTurnId ? tokenStream.ttftMs : null}
+              finalized={
+                turn.id === streamTurnId ? tokenStream.finalized : false
+              }
             />
           ))}
         </div>
@@ -1823,6 +1854,9 @@ function TurnCard({
   readOnly = false,
   loadState = "done",
   fallbackAnswer,
+  liveByStep,
+  ttftMs = null,
+  finalized = false,
 }: {
   turn: Turn;
   /** The turn's index in the transcript — sent as feedback ``turn_seq``. */
@@ -1855,6 +1889,12 @@ function TurnCard({
   loadState?: "pending" | "loading" | "done" | "error";
   /** Assistant text shown before this historical turn's events replay. */
   fallbackAnswer?: string;
+  /** 流式打字机(子项目 3a)— live token buffers by step, forwarded to
+   *  ``StepTimeline``. Only the currently-streaming live turn receives these
+   *  (undefined/default elsewhere — history turns never stream). */
+  liveByStep?: ReadonlyMap<number, string>;
+  ttftMs?: number | null;
+  finalized?: boolean;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
@@ -2387,7 +2427,12 @@ function TurnCard({
                     onQuery={setTlQuery}
                     count={timelineCount}
                   />
-                  <StepTimeline items={visibleTimeline} />
+                  <StepTimeline
+                    items={visibleTimeline}
+                    liveByStep={liveByStep}
+                    ttftMs={ttftMs}
+                    finalized={finalized}
+                  />
                 </>
               ) : eventView === "exact" ? (
                 labeledTrace ? (
