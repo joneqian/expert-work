@@ -9,13 +9,16 @@ scripted sequence of ``AIMessage`` values.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from langchain_core.messages import AIMessage, BaseMessage
 
 from expert_work.protocol import StructuredOutputSpec
 from orchestrator.tools.registry import ToolSpec
+
+if TYPE_CHECKING:
+    from orchestrator.llm.providers._streaming import LLMDelta
 
 
 @runtime_checkable
@@ -33,6 +36,7 @@ class LLMCaller(Protocol):
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
         output_schema: StructuredOutputSpec | None = None,
+        on_delta: "Callable[[LLMDelta], Awaitable[None]] | None" = None,
     ) -> AIMessage:
         """Call the LLM with the current message history and tool catalogue;
         return the next ``AIMessage`` (with ``tool_calls`` set if the model
@@ -42,4 +46,9 @@ class LLMCaller(Protocol):
         response; on success the validated dict rides on
         ``additional_kwargs["parsed"]``. ``None`` (the default) is the
         plain unstructured call — implementations without structured
-        support simply ignore the parameter."""
+        support simply ignore the parameter.
+
+        ``on_delta`` (子项目 2) is an optional async callback invoked once per
+        streamed ``LLMDelta`` on the streaming path (never on the
+        non-streaming / structured path); ``None`` (default) is the
+        pre-existing behaviour."""
