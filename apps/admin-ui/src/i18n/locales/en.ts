@@ -845,6 +845,8 @@ export interface TranslationKeys {
     streaming_badge: string;
     interrupted_badge: string;
     ttft: string;
+    streaming_reasoning_label: string;
+    reasoning_summary: string;
     tl_finish: string;
     tl_tool_failed: string;
     tl_final_answer: string;
@@ -3411,6 +3413,8 @@ const en: TranslationKeys = {
     streaming_badge: "streaming…",
     interrupted_badge: "interrupted",
     ttft: "TTFT {{d}}",
+    streaming_reasoning_label: "Thinking…",
+    reasoning_summary: "Thought for {{d}}",
     tl_finish: "finish: {{reason}}",
     tl_tool_failed: "Tool failed → retry",
     tl_final_answer: "Final answer",

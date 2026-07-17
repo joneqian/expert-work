@@ -15,6 +15,7 @@ import type { AgentStep, AuxNodeItem, MarkerItem, TimelineItem } from "../../../
 import { ToolCallCard } from "../../../components/ToolTimeline";
 import { fmtDuration } from "./duration_format";
 import { StreamingStepCard } from "./StreamingStepCard";
+import type { LiveStep } from "./useTokenStream";
 
 // Semantic colors as CSS vars with wireframe-matching hex fallbacks — same
 // `var(--ew-*, #hex)` convention Batch 1/2 established (ToolTimeline.tsx /
@@ -27,8 +28,8 @@ const INFO = "var(--ew-text-info, #4c8dff)";
 
 export interface StepTimelineProps {
   items: readonly TimelineItem[];
-  /** Live token buffers by step (子项目 3a); absent for history/non-streaming turns. */
-  liveByStep?: ReadonlyMap<number, string>;
+  /** Live token buffers by step (子项目 3a content + 3b reasoning/tool); absent for history/non-streaming turns. */
+  liveByStep?: ReadonlyMap<number, LiveStep>;
   /** TTFT to show on the synthetic streaming card. */
   ttftMs?: number | null;
   /** Run ended — orphan live steps (no authoritative card) render as interrupted. */
@@ -55,7 +56,7 @@ export function StepTimeline({ items, liveByStep, ttftMs = null, finalized = fal
   for (const it of items) {
     if (it.kind === "agent" && it.stepCount !== null) settled.add(it.stepCount);
   }
-  const liveCards = [...(liveByStep ?? new Map<number, string>())]
+  const liveCards = [...(liveByStep ?? new Map<number, LiveStep>())]
     .filter(([step]) => !settled.has(step))
     .sort(([a], [b]) => a - b);
 
@@ -90,11 +91,11 @@ export function StepTimeline({ items, liveByStep, ttftMs = null, finalized = fal
               return <AuxNodeRow key={item.seq} item={item} />;
           }
         })}
-        {liveCards.map(([step, text]) => (
+        {liveCards.map(([step, live]) => (
           <StreamingStepCard
             key={`live-${step}`}
             step={step}
-            text={text}
+            live={live}
             interrupted={finalized}
             ttftMs={ttftMs}
           />

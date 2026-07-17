@@ -911,6 +911,8 @@ const zhCN: TranslationKeys = {
     streaming_badge: "流式中…",
     interrupted_badge: "已中断",
     ttft: "首字 {{d}}",
+    streaming_reasoning_label: "思考中…",
+    reasoning_summary: "思考 {{d}}",
     tl_finish: "finish: {{reason}}",
     tl_tool_failed: "工具失败 → 重试",
     tl_final_answer: "最终答复",

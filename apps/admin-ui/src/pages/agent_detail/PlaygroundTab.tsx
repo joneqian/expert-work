@@ -97,6 +97,7 @@ import { fmtDuration } from "./playground/duration_format";
 import { buildHistoryTurns, type HistoryTurn } from "./playground/history_turns";
 import { RunStatusBanner } from "./playground/RunStatusBanner";
 import { StepTimeline } from "./playground/StepTimeline";
+import type { LiveStep } from "./playground/useTokenStream";
 import { TimelineFilterBar } from "./playground/TimelineFilterBar";
 import { timelineBannerModel } from "./playground/timeline_banner";
 import { traceBannerModel } from "./playground/trace_banner";
@@ -1892,7 +1893,7 @@ function TurnCard({
   /** 流式打字机(子项目 3a)— live token buffers by step, forwarded to
    *  ``StepTimeline``. Only the currently-streaming live turn receives these
    *  (undefined/default elsewhere — history turns never stream). */
-  liveByStep?: ReadonlyMap<number, string>;
+  liveByStep?: ReadonlyMap<number, LiveStep>;
   ttftMs?: number | null;
   finalized?: boolean;
 }) {

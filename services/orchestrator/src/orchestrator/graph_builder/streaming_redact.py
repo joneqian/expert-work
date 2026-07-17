@@ -153,28 +153,50 @@ TokenPublish = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class TokenSink:
-    """Per-run content-channel token emitter.
+    """Per-run multi-channel token emitter (子项目 2 content + 3b reasoning/tool_args).
 
-    Wraps a :class:`StreamingRedactor`; each streamed ``LLMDelta``'s content is
-    redacted incrementally and the newly-stable text is published as a
-    ``{"step", "channel": "content", "text"}`` frame. ``flush`` emits the
-    buffered-release tail after the router returns.
+    One :class:`StreamingRedactor` per *text* channel (content, reasoning —
+    independent buffered-release streams); tool-call *names* are emitted once
+    per ``index`` when first seen. Each streamed ``LLMDelta`` publishes the
+    newly-stable redacted text of each text channel; ``flush`` releases the
+    buffered-release tails after the router returns. Tool *arguments* are NOT
+    streamed — they reach the client via the authoritative ``updates`` frame
+    (name-only, 子项目 3b decision), so there is no argument-redaction path.
     """
 
     def __init__(self, *, step: int, publish: TokenPublish, dlp: bool, screen: bool) -> None:
         self._step = step
         self._publish = publish
-        self._redactor = StreamingRedactor(dlp=dlp, screen=screen)
+        self._content = StreamingRedactor(dlp=dlp, screen=screen)
+        self._reasoning = StreamingRedactor(dlp=dlp, screen=screen)
+        self._tool_names: dict[int, str] = {}
 
     async def __call__(self, delta: LLMDelta) -> None:
-        safe = self._redactor.feed(delta.content)
+        safe = self._content.feed(delta.content)
         if safe:
             await self._publish({"step": self._step, "channel": "content", "text": safe})
+        rsafe = self._reasoning.feed(delta.reasoning)
+        if rsafe:
+            await self._publish({"step": self._step, "channel": "reasoning", "text": rsafe})
+        for tc in delta.tool_calls:
+            if tc.name and tc.index not in self._tool_names:
+                self._tool_names[tc.index] = tc.name
+                await self._publish(
+                    {
+                        "step": self._step,
+                        "channel": "tool_args",
+                        "tool_index": tc.index,
+                        "name": tc.name,
+                    }
+                )
 
     async def flush(self) -> None:
-        tail = self._redactor.flush()
+        tail = self._content.flush()
         if tail:
             await self._publish({"step": self._step, "channel": "content", "text": tail})
+        rtail = self._reasoning.flush()
+        if rtail:
+            await self._publish({"step": self._step, "channel": "reasoning", "text": rtail})
 
 
 def make_token_sink(

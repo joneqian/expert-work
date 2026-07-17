@@ -131,13 +131,49 @@ describe("StepTimeline", () => {
   });
 });
 
-describe("StepTimeline live streaming (3a)", () => {
-  it("renders a synthetic streaming card for a live step with no authoritative card", () => {
-    render(<StepTimeline items={[]} liveByStep={new Map([[2, "typing…"]])} ttftMs={300} finalized={false} />);
+describe("StepTimeline live streaming (3a content + 3b reasoning/tool)", () => {
+  function mkLive(p: Partial<import("../useTokenStream").LiveStep> = {}) {
+    return { content: "", reasoning: "", toolNames: new Map<number, string>(), reasoningMs: null, ...p };
+  }
+
+  it("renders a synthetic streaming card for a live content step with no authoritative card", () => {
+    render(
+      <StepTimeline
+        items={[]}
+        liveByStep={new Map([[2, mkLive({ content: "typing…" })]])}
+        ttftMs={300}
+        finalized={false}
+      />,
+    );
     const card = screen.getByTestId("streaming-step-card");
     expect(card).toHaveAttribute("data-step", "2");
     expect(card).toHaveTextContent("typing…");
     expect(screen.getByTestId("streaming-badge")).toBeInTheDocument();
+  });
+
+  it("renders a synthetic card for a reasoning-only live step (no content)", () => {
+    render(
+      <StepTimeline
+        items={[]}
+        liveByStep={new Map([[0, mkLive({ reasoning: "thinking hard" })]])}
+        ttftMs={null}
+        finalized={false}
+      />,
+    );
+    expect(screen.getByTestId("reasoning-region")).toBeInTheDocument();
+    expect(screen.getByText("thinking hard")).toBeInTheDocument();
+  });
+
+  it("renders a synthetic card for a tool-only live step (tool name chip)", () => {
+    render(
+      <StepTimeline
+        items={[]}
+        liveByStep={new Map([[0, mkLive({ toolNames: new Map([[0, "search_web"]]) })]])}
+        ttftMs={null}
+        finalized={false}
+      />,
+    );
+    expect(screen.getByTestId("tool-chip")).toHaveTextContent("search_web");
   });
 
   it("suppresses the streaming card once the authoritative step card exists (reconcile)", () => {
@@ -145,7 +181,7 @@ describe("StepTimeline live streaming (3a)", () => {
     render(
       <StepTimeline
         items={[agentStep]}
-        liveByStep={new Map([[1, "stale live text"]])}
+        liveByStep={new Map([[1, mkLive({ content: "stale live text" })]])}
         ttftMs={null}
         finalized={false}
       />,
@@ -155,7 +191,14 @@ describe("StepTimeline live streaming (3a)", () => {
   });
 
   it("marks an orphan live step interrupted when finalized", () => {
-    render(<StepTimeline items={[]} liveByStep={new Map([[0, "half"]])} ttftMs={null} finalized={true} />);
+    render(
+      <StepTimeline
+        items={[]}
+        liveByStep={new Map([[0, mkLive({ content: "half" })]])}
+        ttftMs={null}
+        finalized={true}
+      />,
+    );
     expect(screen.getByTestId("interrupted-badge")).toBeInTheDocument();
     expect(screen.queryByTestId("streaming-badge")).toBeNull();
   });
