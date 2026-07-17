@@ -130,3 +130,39 @@ describe("StepTimeline", () => {
     expect(screen.getByText("3.2s")).toBeInTheDocument();
   });
 });
+
+describe("StepTimeline live streaming (3a)", () => {
+  it("renders a synthetic streaming card for a live step with no authoritative card", () => {
+    render(<StepTimeline items={[]} liveByStep={new Map([[2, "typing…"]])} ttftMs={300} finalized={false} />);
+    const card = screen.getByTestId("streaming-step-card");
+    expect(card).toHaveAttribute("data-step", "2");
+    expect(card).toHaveTextContent("typing…");
+    expect(screen.getByTestId("streaming-badge")).toBeInTheDocument();
+  });
+
+  it("suppresses the streaming card once the authoritative step card exists (reconcile)", () => {
+    // agentStep has stepCount: 1 → a live buffer for step 1 must NOT render a synthetic card.
+    render(
+      <StepTimeline
+        items={[agentStep]}
+        liveByStep={new Map([[1, "stale live text"]])}
+        ttftMs={null}
+        finalized={false}
+      />,
+    );
+    expect(screen.queryByTestId("streaming-step-card")).toBeNull();
+    expect(screen.queryByText("stale live text")).toBeNull();
+  });
+
+  it("marks an orphan live step interrupted when finalized", () => {
+    render(<StepTimeline items={[]} liveByStep={new Map([[0, "half"]])} ttftMs={null} finalized={true} />);
+    expect(screen.getByTestId("interrupted-badge")).toBeInTheDocument();
+    expect(screen.queryByTestId("streaming-badge")).toBeNull();
+  });
+
+  it("renders nothing extra when there are no live steps (backward compatible)", () => {
+    render(<StepTimeline items={[agentStep]} />);
+    expect(screen.queryByTestId("streaming-step-card")).toBeNull();
+    expect(screen.getByTestId("step-timeline")).toBeInTheDocument();
+  });
+});
