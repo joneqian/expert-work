@@ -140,8 +140,9 @@ def test_make_token_sink_builds_when_enabled() -> None:
 
 
 def test_card_straddling_long_prefix_still_redacted() -> None:
-    # 安全长前缀(>128)把发射前沿推得很靠前,再让一张卡号跨多个 delta 完成——
-    # 卡号字符落在"已越过发射前沿的旧 buffer 区"之后仍必须整体脱敏、不泄漏。
+    # 安全长前缀(>WINDOW=128)推动冻结指针前进、发射前沿(end-HOLD)靠前,
+    # 再让一张卡号跨多个 delta 完成——卡号字符落在"已越过冻结/发射区"之后仍必须
+    # 整体脱敏、不泄漏(验冻结指针推进后 straddle 的卡号不漏)。
     prefix = "safe filler text. " * 12  # 216 chars, no PII
     r = StreamingRedactor(dlp=True, screen=False)
     out = r.feed(prefix)

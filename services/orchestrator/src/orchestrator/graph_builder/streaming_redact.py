@@ -50,10 +50,12 @@ HOLD_CHARS = 64
 #: _frozen_raw behind the credential's start until it is caught and latched.
 RESCAN_LOOKBACK = 64
 
-#: Size of the raw-buffer suffix rescanned on each ``feed`` (the screen scan
-#: window and the frozen-pointer target lag). Everything before a *verified-clean*
-#: frozen boundary is finalized and never rescanned again — this is what makes
-#: ``feed`` O(1) amortized (O(n) over the whole stream) instead of O(n) per delta.
+#: Frozen-pointer target lag: ``_advance_frozen`` tries to freeze up to
+#: ``end - WINDOW`` each feed (≈ the DLP rescan / tail size in steady state).
+#: Everything before a *verified-clean* frozen boundary is finalized and never
+#: rescanned again — this is what makes ``feed`` O(1) amortized (O(n) over the
+#: whole stream) instead of O(n) per delta. (Screen is NOT windowed — it scans
+#: the full unfrozen tail; see RESCAN_LOOKBACK above.)
 WINDOW = HOLD_CHARS + RESCAN_LOOKBACK
 
 
