@@ -30,6 +30,15 @@ COMPACTION_SINK_KEY = "compaction_event_sink"
 #: The compaction sink's shape — awaited with the event payload dict.
 CompactionEventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
+#: 子项目 2 — config key under which run_agent injects the async token-frame sink
+#: (mirrors COMPACTION_SINK_KEY). The agent node lifts it out via
+#: ``token_sink_from_config`` and feeds it to a TokenSink.
+TOKEN_SINK_KEY = "token_event_sink"  # noqa: S105 — a config dict key name, not a credential
+
+#: An async callable that ships one token frame ``{step, channel, text}`` to the
+#: SSE bridge.
+TokenEventSink = Callable[[dict[str, Any]], Awaitable[None]]
+
 
 def configurable_uuid(config: RunnableConfig, key: str) -> UUID | None:
     """Parse ``config['configurable'][key]`` as a UUID, or ``None``.
@@ -104,3 +113,14 @@ def compaction_sink_from_config(config: RunnableConfig) -> CompactionEventSink |
         # cast the confirmed-callable sink to its declared shape.
         return cast(CompactionEventSink, sink)
     return None
+
+
+def token_sink_from_config(config: RunnableConfig) -> TokenEventSink | None:
+    """Lift the run's token-frame sink out of ``config`` (子项目 2).
+
+    ``None`` when run_agent injected no sink (e.g. a non-streaming execution
+    path) — the node then simply does not token-stream.
+    """
+    configurable = config.get("configurable") or {}
+    sink = configurable.get(TOKEN_SINK_KEY)
+    return sink if callable(sink) else None

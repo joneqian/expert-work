@@ -127,10 +127,12 @@ from orchestrator.graph_builder._config import (
     audit_logger_from_config,
     cancellation_token,
     compaction_sink_from_config,
+    token_sink_from_config,
 )
 from orchestrator.graph_builder.memory import MemoryNode, PreCompactionFlush
 from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
+from orchestrator.graph_builder.streaming_redact import make_token_sink
 from orchestrator.llm import LLMCaller
 from orchestrator.llm.structured_output import correction_message, validate_structured_output
 from orchestrator.output_judge import ActionJudge, OutputJudge
@@ -788,14 +790,33 @@ def build_react_graph(
         if cache_hit_response is not None:
             response: AIMessage = cache_hit_response
         else:
+            _token_sink = make_token_sink(
+                step=step_count,
+                publish=token_sink_from_config(config),
+                dlp=output_dlp,
+                screen=output_screen,
+                judge_enabled=output_judge is not None,
+            )
             # Wrap the LLM call so a cancel mid-call interrupts the
             # in-flight await rather than waiting it out (E.15).
             # 10.1 — one ``expert_work.orchestrator.llm_call`` child span per
             # provider call, attached under the session root span.
             with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "llm_call"):
-                response = await token.run_cancellable(
-                    active_caller(messages=messages, tools=tools)
-                )
+                if _token_sink is not None:
+                    # Only pass ``on_delta`` when a sink is actually wired
+                    # (子项目 2 streaming path) — omitting the kwarg otherwise
+                    # keeps every non-streaming ``LLMCaller`` implementation
+                    # (including fixtures predating the ``on_delta`` addition
+                    # to the Protocol) byte-identical to before this change.
+                    response = await token.run_cancellable(
+                        active_caller(messages=messages, tools=tools, on_delta=_token_sink)
+                    )
+                else:
+                    response = await token.run_cancellable(
+                        active_caller(messages=messages, tools=tools)
+                    )
+            if _token_sink is not None:
+                await _token_sink.flush()
 
         # Budget-exhausted turn must terminate: no tools were bound so the model
         # shouldn't emit tool_calls, but strip any it returns anyway (defends
