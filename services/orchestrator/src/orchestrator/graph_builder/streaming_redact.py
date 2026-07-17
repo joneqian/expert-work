@@ -59,7 +59,7 @@ class StreamingRedactor:
             return ""
         redacted = self._redact(self._buf)
         boundary = max(self._emitted_len, len(redacted) - HOLD_CHARS)
-        out = redacted[self._emitted_len:boundary]
+        out = redacted[self._emitted_len : boundary]
         self._emitted_len = boundary
         return out
 
@@ -70,7 +70,7 @@ class StreamingRedactor:
             self._blocked = True
             return ""
         redacted = self._redact(self._buf)
-        out = redacted[self._emitted_len:]
+        out = redacted[self._emitted_len :]
         self._emitted_len = len(redacted)
         return out
 

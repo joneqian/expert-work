@@ -326,7 +326,7 @@ class AllProvidersExhaustedError(LLMError):
 # threading the callback through the 6-deep private call chain and is
 # task-local, so concurrent runs never see each other's sink. The router stays
 # LangGraph-agnostic — it only ``await``s an opaque async callback.
-_delta_sink: ContextVar["Callable[[LLMDelta], Awaitable[None]] | None"] = ContextVar(
+_delta_sink: ContextVar[Callable[[LLMDelta], Awaitable[None]] | None] = ContextVar(
     "_llm_delta_sink", default=None
 )
 
@@ -367,9 +367,7 @@ class LLMRouter:
     ) -> AIMessage:
         sink_token = _delta_sink.set(on_delta)
         try:
-            return await self._dispatch(
-                messages=messages, tools=tools, output_schema=output_schema
-            )
+            return await self._dispatch(messages=messages, tools=tools, output_schema=output_schema)
         finally:
             _delta_sink.reset(sink_token)
 

@@ -36,7 +36,7 @@ class LLMCaller(Protocol):
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
         output_schema: StructuredOutputSpec | None = None,
-        on_delta: "Callable[[LLMDelta], Awaitable[None]] | None" = None,
+        on_delta: Callable[[LLMDelta], Awaitable[None]] | None = None,
     ) -> AIMessage:
         """Call the LLM with the current message history and tool catalogue;
         return the next ``AIMessage`` (with ``tool_calls`` set if the model
