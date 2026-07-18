@@ -463,6 +463,14 @@ class OpenAIProvider:
     #: payload (``_thinking_payload``), merged into the request body.
     #: ``None`` (every untouched manifest) keeps the body byte-identical.
     thinking_payload: dict[str, Any] | None = None
+    #: glm-only (2026-07-18) — vendor request params merged into ``extra_body``
+    #: ONLY on the streaming path. glm's ``tool_stream: true`` makes it emit
+    #: tool-call args incrementally instead of one silent batch, so the router's
+    #: idle timer resets per fragment (else a large tool-call composes in
+    #: silence past ``idle_timeout_s`` → spurious ``stream_idle_timeout``). Kept
+    #: OFF the non-streaming ``complete`` path (structured output) where glm may
+    #: reject it. ``None`` (every other agent/provider) → request byte-identical.
+    stream_extra_body: dict[str, Any] | None = None
     #: Stream HX-13 (Mini-ADR HX-J4) — set after the allowed_tools
     #: constraint is rejected once: this provider instance falls back to
     #: the application tier for its remaining lifetime (restart retries).
@@ -515,6 +523,12 @@ class OpenAIProvider:
             "response_format": response_format,
         }
 
+    def _apply_stream_extra_body(self, request: dict[str, Any]) -> None:
+        """Merge :attr:`stream_extra_body` into a prepared request's
+        ``extra_body`` (stream path only; a no-op when ``None``)."""
+        if self.stream_extra_body is not None:
+            request["extra_body"] = {**(request["extra_body"] or {}), **self.stream_extra_body}
+
     async def complete(
         self,
         *,
@@ -551,6 +565,7 @@ class OpenAIProvider:
         request = await self._prepare_request(
             messages=messages, tools=tools, output_schema=output_schema, use_allowed=use_allowed
         )
+        self._apply_stream_extra_body(request)
         try:
             async for chunk in self.client.stream_chat_completions(**request):
                 yield delta_from_openai_chunk(chunk)
@@ -566,6 +581,7 @@ class OpenAIProvider:
         retry = await self._prepare_request(
             messages=messages, tools=tools, output_schema=output_schema, use_allowed=False
         )
+        self._apply_stream_extra_body(retry)
         async for chunk in self.client.stream_chat_completions(**retry):
             yield delta_from_openai_chunk(chunk)
 
