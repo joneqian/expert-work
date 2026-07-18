@@ -30,7 +30,8 @@ beforeAll(() => {
         // no ratio_impact — exercises the omitted-impact branch
         flag_label: "Flag",
         flag_brief: "A boolean flag",
-        // no flag_impact, no flag_default — exercises both omitted
+        // no flag_impact — exercises the omitted-impact branch
+        flag_default: "true",
       },
     },
     true,
@@ -145,8 +146,13 @@ describe("PolicyFieldList", () => {
     expect(screen.queryByText("Impact")).not.toBeInTheDocument();
   });
 
-  it("omits the default badge entirely when the def's i18n subtree has no _default key and the value is at default", () => {
+  it("suppresses the badge for switch fields at default, even when the def's i18n subtree defines a _default key", () => {
     renderList([SWITCH_DEF], {});
+    expect(document.querySelector(".ant-tag")).not.toBeInTheDocument();
+  });
+
+  it("suppresses the badge for switch fields once diverged from default too", () => {
+    renderList([SWITCH_DEF], { flag: true });
     expect(document.querySelector(".ant-tag")).not.toBeInTheDocument();
   });
 });

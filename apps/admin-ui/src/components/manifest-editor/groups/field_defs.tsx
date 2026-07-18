@@ -79,11 +79,14 @@ export function PolicyFieldList({
         const impactKey = `${def.i18nKey}_impact`;
         const label = t(`${def.i18nKey}_label`);
 
-        const badgeValue = atDefault
-          ? i18n.exists(defaultKey)
-            ? t(defaultKey)
-            : undefined
-          : String(raw);
+        const badgeValue =
+          def.kind === "switch"
+            ? undefined
+            : atDefault
+              ? i18n.exists(defaultKey)
+                ? t(defaultKey)
+                : undefined
+              : String(raw);
         const impact = i18n.exists(impactKey) ? t(impactKey) : undefined;
 
         const control =
@@ -100,7 +103,7 @@ export function PolicyFieldList({
             />
           ) : (
             <InputNumber
-              min={def.min ?? (def.kind === "percent" ? 0 : undefined)}
+              min={def.min ?? (def.kind === "percent" ? 0.05 : undefined)}
               max={def.max ?? (def.kind === "percent" ? 1 : undefined)}
               step={def.kind === "percent" ? 0.05 : undefined}
               value={numericValue(raw, def.effectiveDefault)}

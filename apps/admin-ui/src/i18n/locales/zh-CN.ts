@@ -649,7 +649,7 @@ const zhCN: TranslationKeys = {
     pr_threshold_pct_label: "触发阈值(窗口占比)",
     pr_threshold_pct_brief: "估算提示词达到 上下文窗口×此值 才修剪,低于时零改动",
     pr_threshold_pct_impact:
-      "与滑动窗口/压缩共用同一比例形制(各自独立配置)。调低=更早修剪更省;调高=更保真但更依赖后两道门。范围 0–1。",
+      "与滑动窗口/压缩共用同一比例形制(各自独立配置)。调低=更早修剪更省;调高=更保真但更依赖后两道门。范围 0.05–1。",
     pr_threshold_pct_default: "0.7",
     pr_recent_kept_label: "保留最近工具结果数",
     pr_recent_kept_brief: "最近 N 条工具结果保持完整,更早的才塌成引用",
@@ -664,7 +664,7 @@ const zhCN: TranslationKeys = {
     wm_threshold_pct_label: "触发阈值(窗口占比)",
     wm_threshold_pct_brief: "估算提示词达到 上下文窗口×此值 才裁剪,低于时零改动",
     wm_threshold_pct_impact:
-      "与结果修剪/压缩共用同一比例形制(各自独立配置)。调低=更早裁剪更省;调高=更保真但更依赖压缩这道门。范围 0–1。",
+      "与结果修剪/压缩共用同一比例形制(各自独立配置)。调低=更早裁剪更省;调高=更保真但更依赖压缩这道门。范围 0.05–1。",
     wm_threshold_pct_default: "0.7",
     wm_max_recent_turns_label: "保留最近轮数",
     wm_max_recent_turns_brief: "窗口保留的最近用户轮数",
@@ -684,7 +684,7 @@ const zhCN: TranslationKeys = {
     cc_threshold_pct_label: "触发阈值(窗口占比)",
     cc_threshold_pct_brief: "估算提示词达到 上下文窗口×此值 才压缩,低于时零改动",
     cc_threshold_pct_impact:
-      "与结果修剪/滑动窗口共用同一比例形制(各自独立配置)。调低=更早压缩更省;调高=更保真但风险更高(这是最后一道门,再往后没有兜底)。范围 0–1。",
+      "与结果修剪/滑动窗口共用同一比例形制(各自独立配置)。调低=更早压缩更省;调高=更保真但风险更高(这是最后一道门,再往后没有兜底)。范围 0.05–1。",
     cc_threshold_pct_default: "0.7",
     cc_head_keep_label: "保留头部条数",
     cc_head_keep_brief: "摘要时原样保留最前 N 条非系统消息",

@@ -3268,7 +3268,7 @@ const en: TranslationKeys = {
     pr_threshold_pct_brief:
       "Prune only once the estimated prompt reaches context window × this value; below it, zero changes",
     pr_threshold_pct_impact:
-      "Shares the same ratio format as the sliding window / compression gates (each configured independently). Lower = prunes earlier, cheaper; higher = more faithful but relies more on the two later gates. Range 0–1.",
+      "Shares the same ratio format as the sliding window / compression gates (each configured independently). Lower = prunes earlier, cheaper; higher = more faithful but relies more on the two later gates. Range 0.05–1.",
     pr_threshold_pct_default: "0.7",
     pr_recent_kept_label: "Recent tool results kept",
     pr_recent_kept_brief:
@@ -3286,7 +3286,7 @@ const en: TranslationKeys = {
     wm_threshold_pct_brief:
       "Trim only once the estimated prompt reaches context window × this value; below it, zero changes",
     wm_threshold_pct_impact:
-      "Shares the same ratio format as tool-result prune / compression (each configured independently). Lower = trims earlier, cheaper; higher = more faithful but relies more on the compression gate after it. Range 0–1.",
+      "Shares the same ratio format as tool-result prune / compression (each configured independently). Lower = trims earlier, cheaper; higher = more faithful but relies more on the compression gate after it. Range 0.05–1.",
     wm_threshold_pct_default: "0.7",
     wm_max_recent_turns_label: "Recent turns kept",
     wm_max_recent_turns_brief:
@@ -3310,7 +3310,7 @@ const en: TranslationKeys = {
     cc_threshold_pct_brief:
       "Compress only once the estimated prompt reaches context window × this value; below it, zero changes",
     cc_threshold_pct_impact:
-      "Shares the same ratio format as tool-result prune / sliding window (each configured independently). Lower = compresses earlier, cheaper; higher = more faithful but riskier, since this is the last gate — no later gate to fall back on. Range 0–1.",
+      "Shares the same ratio format as tool-result prune / sliding window (each configured independently). Lower = compresses earlier, cheaper; higher = more faithful but riskier, since this is the last gate — no later gate to fall back on. Range 0.05–1.",
     cc_threshold_pct_default: "0.7",
     cc_head_keep_label: "Head entries kept",
     cc_head_keep_brief:
