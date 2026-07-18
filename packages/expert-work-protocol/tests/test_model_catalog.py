@@ -23,10 +23,18 @@ def test_entries_are_model_entry_with_required_fields() -> None:
             assert isinstance(e.embeddings, bool)
 
 
-def test_deepseek_chat_present_and_not_vision() -> None:
-    names = {e.name: e for e in models_for_provider("deepseek")}
-    assert "deepseek-chat" in names
-    assert names["deepseek-chat"].vision is False
+def test_deepseek_legacy_aliases_deprecated_but_resolvable() -> None:
+    # deepseek-chat / deepseek-reasoner are the retired V3-era aliases (vendor
+    # retirement 2026-07-24): dropped from the dropdown but still resolvable via
+    # catalog_entry so in-flight manifests keep working through the transition.
+    dropdown = {e.name for e in models_for_provider("deepseek")}
+    assert "deepseek-chat" not in dropdown
+    assert "deepseek-reasoner" not in dropdown
+    # The current versioned models are what the dropdown offers.
+    assert {"deepseek-v4-pro", "deepseek-v4-flash"} <= dropdown
+    for alias in ("deepseek-chat", "deepseek-reasoner"):
+        entry = catalog_entry("deepseek", alias)
+        assert entry is not None and entry.deprecated is True and entry.vision is False
 
 
 def test_models_for_provider_excludes_deprecated() -> None:
@@ -68,6 +76,41 @@ def test_anthropic_capability_bits() -> None:
 def test_catalog_entry_off_catalog_returns_none() -> None:
     assert catalog_entry("anthropic", "claude-imaginary-9") is None
     assert catalog_entry("nonexistent-provider", "x") is None
+
+
+def test_current_context_windows() -> None:
+    """Lock in the context windows verified against each vendor's official docs
+    (2026-07). These feed ``_resolved_context_window`` → the compression /
+    working-window thresholds (``0.7 x window``), so a stale-low value silently
+    over-compresses long runs. Re-verify against vendor docs when a value here
+    changes."""
+    expected = {
+        # Flagships confirmed 1M against official docs (Anthropic 1M GA on 4.8;
+        # OpenAI GPT-5.5 API window; DeepSeek V4; GLM-5.2 bigmodel; Qwen 3.7).
+        ("anthropic", "claude-opus-4-8"): 1_000_000,
+        ("anthropic", "claude-sonnet-4-6"): 1_000_000,
+        ("anthropic", "claude-haiku-4-5"): 200_000,
+        ("openai", "gpt-5.5"): 1_000_000,
+        ("openai", "gpt-5.5-pro"): 1_000_000,
+        ("openai", "gpt-5.4-mini"): 400_000,
+        ("deepseek", "deepseek-v4-pro"): 1_000_000,
+        ("deepseek", "deepseek-v4-flash"): 1_000_000,
+        ("glm", "glm-5.2"): 1_000_000,
+        ("glm", "glm-5.1"): 200_000,
+        ("glm", "glm-4.7"): 200_000,
+        ("glm", "glm-4.6"): 200_000,
+        ("kimi", "kimi-k2.6"): 256_000,
+        ("kimi", "kimi-k2.5"): 256_000,
+        ("qwen", "qwen3.7-max"): 1_000_000,
+        ("qwen", "qwen3.6-plus"): 1_000_000,
+        ("doubao", "doubao-seed-2-1-pro-260628"): 256_000,
+    }
+    for (provider, name), window in expected.items():
+        entry = catalog_entry(provider, name)
+        assert entry is not None, f"{provider}/{name} missing from catalog"
+        assert entry.context_window == window, (
+            f"{provider}/{name}: catalog {entry.context_window} != verified {window}"
+        )
 
 
 def test_cross_vendor_thinking_shapes() -> None:

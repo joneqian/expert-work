@@ -10,7 +10,7 @@ provider's official docs — do NOT carry stale names. Mark retired models
 ``deprecated=True`` so they stay referenceable but drop out of the dropdown
 (``models_for_provider``).
 
-Last verified: 2026-06 against each provider's official API docs.
+Last verified: 2026-07 against each provider's official API docs.
 """
 
 from __future__ import annotations
@@ -76,15 +76,19 @@ class ModelEntry(BaseModel):
 #: Provider → its models. Verify names/capabilities against official docs when
 #: editing (Mini-ADR S-4).
 MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
-    # Anthropic — docs.anthropic.com/en/docs/about-claude/models/overview (2026-06)
+    # Anthropic — docs.anthropic.com/en/docs/about-claude/models/overview (2026-07)
     # IDs use dateless format since 4.6 generation. claude-opus-4-8 is flagship.
+    # Opus 4.8 / Sonnet 4.6 carry a 1M context window that is GA (on by default,
+    # no beta header) since the 4.8 generation — 4.6/4.7 gated it behind the
+    # context-1m beta; our client sends no 1M header and still gets 1M. Haiku 4.5
+    # stays 200K.
     "anthropic": (
         # CM-9: opus-4-8 dropped sampling params (4.7+ removal); haiku has
-        # no effort support — verified against the Anthropic docs 2026-06.
+        # no effort support — verified against the Anthropic docs 2026-07.
         ModelEntry(
             name="claude-opus-4-8",
             vision=True,
-            context_window=200_000,
+            context_window=1_000_000,
             thinking="effort",
             thinking_default=True,
             sampling=False,
@@ -93,22 +97,24 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(
             name="claude-sonnet-4-6",
             vision=True,
-            context_window=200_000,
+            context_window=1_000_000,
             thinking="effort",
             thinking_default=True,
             tool_disclosure="native_search",
         ),
         ModelEntry(name="claude-haiku-4-5", vision=True, context_window=200_000),
     ),
-    # OpenAI — platform.openai.com/docs/models (2026-06)
+    # OpenAI — platform.openai.com/docs/models (2026-07)
     # GPT-5.5 / GPT-5.5 Pro (2026-04-24) are the current production flagships and
-    # support vision; gpt-5.4-mini stays for low-latency/cost. gpt-4o family is
-    # retired from the API but kept deprecated so existing manifests resolve.
+    # support vision, both with a 1M API context window (>272K input is
+    # long-context priced but the window itself is 1M); gpt-5.4-mini (400K) stays
+    # for low-latency/cost. gpt-4o family is retired from the API but kept
+    # deprecated so existing manifests resolve.
     "openai": (
         ModelEntry(
             name="gpt-5.5",
             vision=True,
-            context_window=128_000,
+            context_window=1_000_000,
             thinking="effort",
             thinking_default=True,
             tool_disclosure="allowed_tools",
@@ -116,7 +122,7 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(
             name="gpt-5.5-pro",
             vision=True,
-            context_window=128_000,
+            context_window=1_000_000,
             thinking="effort",
             thinking_default=True,
             tool_disclosure="allowed_tools",
@@ -124,7 +130,7 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(
             name="gpt-5.4-mini",
             vision=True,
-            context_window=128_000,
+            context_window=400_000,
             thinking="effort",
             thinking_default=True,
             tool_disclosure="allowed_tools",
@@ -133,11 +139,13 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(name="gpt-4o", vision=True, context_window=128_000, deprecated=True),
         ModelEntry(name="gpt-4o-mini", vision=True, context_window=128_000, deprecated=True),
     ),
-    # DeepSeek — api-docs.deepseek.com (2026-06)
+    # DeepSeek — api-docs.deepseek.com (2026-07)
     # deepseek-v4-pro / deepseek-v4-flash are current (1M context, dual mode).
-    # deepseek-chat / deepseek-reasoner map to deepseek-v4-flash; scheduled for
-    # retirement 2026-07-24 — kept non-deprecated until then so manifests still
-    # route correctly, but operators should migrate to versioned names.
+    # deepseek-chat / deepseek-reasoner are the retired legacy aliases (map to
+    # deepseek-v4-flash non-thinking / thinking; vendor retirement 2026-07-24) —
+    # marked deprecated so they drop out of the dropdown but existing manifests
+    # still resolve during the transition. Their published 64K window is the old
+    # V3-era value (V4 is 1M); left as-is since they are on the way out.
     "deepseek": (
         ModelEntry(
             name="deepseek-v4-pro",
@@ -153,13 +161,14 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             thinking="effort",
             thinking_default=True,
         ),
-        ModelEntry(name="deepseek-chat", vision=False, context_window=64_000),
-        ModelEntry(name="deepseek-reasoner", vision=False, context_window=64_000),
+        ModelEntry(name="deepseek-chat", vision=False, context_window=64_000, deprecated=True),
+        ModelEntry(name="deepseek-reasoner", vision=False, context_window=64_000, deprecated=True),
     ),
-    # Kimi (Moonshot AI) — platform.moonshot.cn/docs (2026-06)
+    # Kimi (Moonshot AI) — platform.moonshot.cn/docs (2026-07)
     # kimi-k2.6 (2026-04-20) is natively multimodal — text + image + video via
-    # the MoonViT encoder — with a 256K context; k2.5 also accepts images. The
-    # moonshot-v1 series is text-only and being phased out (kept deprecated).
+    # the MoonViT encoder — with a 256K context; k2.5 also accepts images and is
+    # 256K too (K2.6's gain over K2.5 is stability at length, not window size).
+    # The moonshot-v1 series is text-only and being phased out (kept deprecated).
     "kimi": (
         ModelEntry(
             name="kimi-k2.6",
@@ -171,23 +180,24 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(
             name="kimi-k2.5",
             vision=True,
-            context_window=128_000,
+            context_window=256_000,
             thinking="toggle",
             thinking_default=True,
         ),
         ModelEntry(name="moonshot-v1-128k", vision=False, context_window=128_000, deprecated=True),
         ModelEntry(name="moonshot-v1-32k", vision=False, context_window=32_000, deprecated=True),
     ),
-    # Zhipu GLM — docs.bigmodel.cn (2026-06)
-    # glm-5.2 (200K ctx, deep-thinking) is the current text flagship; glm-5.1
-    # glm-4.7 (355B MoE, 200K) and glm-4.6 (200K) are current text models. Vision
-    # goes through glm-4.6v (128K) and glm-4.5v. The older glm-4*-plus line is
-    # kept deprecated so existing manifests resolve.
+    # Zhipu GLM — open.bigmodel.cn (2026-07)
+    # glm-5.2 (1M ctx per the bigmodel platform's own model list — plain model
+    # id, no [1m] suffix; deep-thinking) is the current text flagship. glm-5.1
+    # (200K), glm-4.7 (355B MoE, 200K) and glm-4.6 (200K) are current text
+    # models. Vision goes through glm-4.6v (128K) and glm-4.5v. The older
+    # glm-4*-plus line is kept deprecated so existing manifests resolve.
     "glm": (
         ModelEntry(
             name="glm-5.2",
             vision=False,
-            context_window=200_000,
+            context_window=1_000_000,
             thinking="toggle",
             thinking_default=True,
         ),

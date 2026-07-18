@@ -35,8 +35,10 @@ def test_lists_only_configured_enabled_providers_with_models() -> None:
     assert provs == {"deepseek"}
     ds = next(r for r in data["providers"] if r["provider"] == "deepseek")
     names = {m["name"]: m for m in ds["models"]}
-    assert "deepseek-chat" in names
-    assert names["deepseek-chat"]["vision"] is False
+    # Serves the current versioned models (deprecated legacy aliases excluded).
+    assert "deepseek-v4-flash" in names
+    assert names["deepseek-v4-flash"]["vision"] is False
+    assert "deepseek-chat" not in names
 
 
 def test_empty_when_no_provider_configured() -> None:
