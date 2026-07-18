@@ -26,7 +26,25 @@ import { GroupNav } from "./GroupNav";
 import { SettingsSearch } from "./SettingsSearch";
 import { CONFIG_GROUPS } from "./groups";
 import { RunBudgetSection } from "./groups/RunBudgetSection";
+import { ContextGatesSection } from "./groups/ContextGatesSection";
 import type { McpPickerSource } from "./widgets/McpToolPicker";
+
+/** Curated group panes — a statically-empty ``CONFIG_GROUPS`` entry
+ * (``sections: []``) whose pane is a hand-written component instead of
+ * FormView's registered-sections pathway. Keyed by group id; a group absent
+ * here (sandbox/observability, pending Phase 2) falls through to the
+ * generic "pending" hint below. */
+interface CuratedPaneProps {
+  formData: unknown;
+  onChange: (data: unknown) => void;
+}
+const CURATED_GROUP_PANES: Record<
+  string,
+  (props: CuratedPaneProps) => ReactNode
+> = {
+  budget: RunBudgetSection,
+  context: ContextGatesSection,
+};
 
 /** A caller-supplied node rendered ABOVE the registered groups in the tree —
  * e.g. an Agent template's marketplace-metadata form. Its content is kept
@@ -221,16 +239,20 @@ export function ManifestEditor({
   // leading tab renders nothing on its own — e.g. "basic" once its only
   // section is merged. Its node must be unreachable, or clicking it would
   // show FormView with an empty sections array (a blank pane). Groups that
-  // are statically empty to begin with (context/sandbox/observability,
-  // pending Phase 2) are untouched — they keep showing with the pending hint.
-  // "budget" is also statically empty (``sections: []``) but is special-cased
-  // below to render RunBudgetSection instead (Task 6 pilot).
+  // are statically empty to begin with (sandbox/observability, pending
+  // Phase 2) are untouched — they keep showing with the pending hint.
+  // "budget"/"context" are also statically empty (``sections: []``) but are
+  // special-cased below via ``CURATED_GROUP_PANES`` to render a hand-written
+  // component instead (Task 6 / Task 3 pilots).
   const hiddenGroups = CONFIG_GROUPS.filter(
     (g) =>
       g.sections.length > 0 &&
       g.sections.every((s) => mergedSections.has(s)),
   ).map((g) => g.id);
   const activeConfigGroup = CONFIG_GROUPS.find((g) => g.id === group);
+  const CuratedPane = activeConfigGroup
+    ? CURATED_GROUP_PANES[activeConfigGroup.id]
+    : undefined;
 
   const pane = schemaError ? (
     <Alert
@@ -251,8 +273,8 @@ export function ManifestEditor({
     </div>
   ) : yamlActive ? (
     <YamlView value={yamlText} onChange={handleYamlChange} />
-  ) : activeConfigGroup?.id === "budget" ? (
-    <RunBudgetSection formData={manifestObject} onChange={handleFormChange} />
+  ) : CuratedPane ? (
+    <CuratedPane formData={manifestObject} onChange={handleFormChange} />
   ) : activeConfigGroup && activeConfigGroup.sections.length === 0 ? (
     <div data-testid="cfg-pane-pending" style={{ padding: 24 }}>
       <Alert

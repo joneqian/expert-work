@@ -618,6 +618,90 @@ export interface TranslationKeys {
     idle_timeout_impact: string;
     idle_timeout_default: string;
   };
+  // Task 3 — "Context & Compression" group (ContextGatesSection). 18 knobs
+  // across the four PolicySpec sub-blocks the three context gates read
+  // (tool_result_prune / working_memory / context_compression) plus the
+  // sibling tool_output_budget master switch. Prefixes mirror
+  // ContextGatesFields' camelCase field names (pr_/wm_/cc_/budget_).
+  context_gates: {
+    group_intro: string;
+    panel_tool_result_prune: string;
+    panel_working_memory: string;
+    panel_context_compression: string;
+    panel_tool_output_budget: string;
+    pr_enabled_label: string;
+    pr_enabled_brief: string;
+    pr_enabled_impact: string;
+    pr_enabled_default: string;
+    pr_threshold_pct_label: string;
+    pr_threshold_pct_brief: string;
+    pr_threshold_pct_impact: string;
+    pr_threshold_pct_default: string;
+    pr_recent_kept_label: string;
+    pr_recent_kept_brief: string;
+    pr_recent_kept_impact: string;
+    pr_recent_kept_default: string;
+    wm_enabled_label: string;
+    wm_enabled_brief: string;
+    wm_enabled_impact: string;
+    wm_enabled_default: string;
+    wm_threshold_pct_label: string;
+    wm_threshold_pct_brief: string;
+    wm_threshold_pct_impact: string;
+    wm_threshold_pct_default: string;
+    wm_max_recent_turns_label: string;
+    wm_max_recent_turns_brief: string;
+    wm_max_recent_turns_impact: string;
+    wm_max_recent_turns_default: string;
+    wm_keep_first_turn_label: string;
+    wm_keep_first_turn_brief: string;
+    wm_keep_first_turn_impact: string;
+    wm_keep_first_turn_default: string;
+    cc_enabled_label: string;
+    cc_enabled_brief: string;
+    cc_enabled_impact: string;
+    cc_enabled_default: string;
+    cc_threshold_pct_label: string;
+    cc_threshold_pct_brief: string;
+    cc_threshold_pct_impact: string;
+    cc_threshold_pct_default: string;
+    cc_head_keep_label: string;
+    cc_head_keep_brief: string;
+    cc_head_keep_impact: string;
+    cc_head_keep_default: string;
+    cc_tail_keep_label: string;
+    cc_tail_keep_brief: string;
+    cc_tail_keep_impact: string;
+    cc_tail_keep_default: string;
+    cc_flush_before_compaction_label: string;
+    cc_flush_before_compaction_brief: string;
+    cc_flush_before_compaction_impact: string;
+    cc_flush_before_compaction_default: string;
+    cc_max_passes_label: string;
+    cc_max_passes_brief: string;
+    cc_max_passes_impact: string;
+    cc_max_passes_default: string;
+    cc_max_turns_label: string;
+    cc_max_turns_brief: string;
+    cc_max_turns_impact: string;
+    cc_max_turns_default: string;
+    cc_max_tokens_label: string;
+    cc_max_tokens_brief: string;
+    cc_max_tokens_impact: string;
+    cc_max_tokens_default: string;
+    cc_pressure_feedback_label: string;
+    cc_pressure_feedback_brief: string;
+    cc_pressure_feedback_impact: string;
+    cc_pressure_feedback_default: string;
+    cc_pressure_warn_pct_label: string;
+    cc_pressure_warn_pct_brief: string;
+    cc_pressure_warn_pct_impact: string;
+    cc_pressure_warn_pct_default: string;
+    budget_enabled_label: string;
+    budget_enabled_brief: string;
+    budget_enabled_impact: string;
+    budget_enabled_default: string;
+  };
   model_select: {
     provider_label: string;
     provider_placeholder: string;
@@ -3166,6 +3250,121 @@ const en: TranslationKeys = {
     idle_timeout_impact:
       "Once the first token has arrived, a gap between subsequent tokens longer than this ends the turn early with whatever output was generated so far (the model went silent mid-stream). Distinct from the first-token timeout (stream_deadline_s). 0 = off (dev / long-batch use only); non-streaming providers ignore this.",
     idle_timeout_default: "45",
+  },
+  context_gates: {
+    group_intro:
+      "Three gates step in, in order, whenever the estimated prompt exceeds context window × threshold: ① tool-result prune (cheapest — collapses old tool results into references) → ② sliding window (no LLM call — trims old turns) → ③ context compression (LLM summarizes the middle). Most mild overflows are resolved by the first two; the threshold's denominator is the model's real window (from the model catalog).",
+    panel_tool_result_prune: "① Tool-result prune",
+    panel_working_memory: "② Sliding window",
+    panel_context_compression: "③ Context compression",
+    panel_tool_output_budget: "④ Tool-output budget",
+    pr_enabled_label: "Enable tool-result prune",
+    pr_enabled_brief:
+      "Above the threshold, collapse old tool results into a one-line reference",
+    pr_enabled_impact:
+      "The cheapest, least lossy of the three gates: every turn and all reasoning is kept — only tool results beyond the most recent N are swapped for a reference (losslessly recoverable, since it's already externalized to the workspace). Affects only this send's view; history is never rewritten. Turning it off means mild overflows fall to the sliding window / compression sooner.",
+    pr_enabled_default: "true",
+    pr_threshold_pct_label: "Trigger threshold (% of window)",
+    pr_threshold_pct_brief:
+      "Prune only once the estimated prompt reaches context window × this value; below it, zero changes",
+    pr_threshold_pct_impact:
+      "Shares the same ratio format as the sliding window / compression gates (each configured independently). Lower = prunes earlier, cheaper; higher = more faithful but relies more on the two later gates. Range 0–1.",
+    pr_threshold_pct_default: "0.7",
+    pr_recent_kept_label: "Recent tool results kept",
+    pr_recent_kept_brief:
+      "The most recent N tool results stay intact; older ones collapse to a reference",
+    pr_recent_kept_impact:
+      "Higher = the model sees more intact results but a larger context; 0 = every result collapses to a reference once over threshold.",
+    pr_recent_kept_default: "4",
+    wm_enabled_label: "Enable sliding window",
+    wm_enabled_brief:
+      "Above the threshold, trim to the first turn + the most recent N turns, no LLM call needed",
+    wm_enabled_impact:
+      "Cuts only at user-message boundaries — never splits a tool-call pair. Most mild overflows are resolved here, saving the summarization LLM call compression would need. Affects only this turn's view; the next turn re-trims from the full history.",
+    wm_enabled_default: "true",
+    wm_threshold_pct_label: "Trigger threshold (% of window)",
+    wm_threshold_pct_brief:
+      "Trim only once the estimated prompt reaches context window × this value; below it, zero changes",
+    wm_threshold_pct_impact:
+      "Shares the same ratio format as tool-result prune / compression (each configured independently). Lower = trims earlier, cheaper; higher = more faithful but relies more on the compression gate after it. Range 0–1.",
+    wm_threshold_pct_default: "0.7",
+    wm_max_recent_turns_label: "Recent turns kept",
+    wm_max_recent_turns_brief:
+      "How many of the most recent user turns the window keeps",
+    wm_max_recent_turns_impact:
+      "Lower = cheaper but drops more mid-conversation context (the dropped middle isn't summarized — that's compression's job); for long multi-turn sessions, ≥10 is recommended.",
+    wm_max_recent_turns_default: "20",
+    wm_keep_first_turn_label: "Keep first turn",
+    wm_keep_first_turn_brief:
+      "Always keep the very first turn when trimming (the task-goal anchor)",
+    wm_keep_first_turn_impact:
+      "Turning it off risks losing the original task description in a long session; generally not recommended.",
+    wm_keep_first_turn_default: "true",
+    cc_enabled_label: "Enable context compression",
+    cc_enabled_brief:
+      "Above the threshold, use an LLM to summarize the middle of the conversation into one background summary",
+    cc_enabled_impact:
+      "The last of the three gates. Keeps the first N and last M entries as-is, replacing the middle with a 〈context-summary〉; the dropped middle is flushed into long-term memory first (if that's on). If this is off and the first two gates aren't enough, a very large context will fail outright.",
+    cc_enabled_default: "true",
+    cc_threshold_pct_label: "Trigger threshold (% of window)",
+    cc_threshold_pct_brief:
+      "Compress only once the estimated prompt reaches context window × this value; below it, zero changes",
+    cc_threshold_pct_impact:
+      "Shares the same ratio format as tool-result prune / sliding window (each configured independently). Lower = compresses earlier, cheaper; higher = more faithful but riskier, since this is the last gate — no later gate to fall back on. Range 0–1.",
+    cc_threshold_pct_default: "0.7",
+    cc_head_keep_label: "Head entries kept",
+    cc_head_keep_brief:
+      "Keep the first N non-system messages untouched when summarizing",
+    cc_head_keep_impact:
+      "Includes the memory-injection anchor; if set to 0 while memory injection is on, the runtime auto-raises it to 1.",
+    cc_head_keep_default: "4",
+    cc_tail_keep_label: "Tail entries kept",
+    cc_tail_keep_brief:
+      "Keep the most recent M entries untouched when summarizing",
+    cc_tail_keep_impact:
+      "The tail is the current working context — too small a value loses recent detail.",
+    cc_tail_keep_default: "6",
+    cc_flush_before_compaction_label: "Flush to memory before compacting",
+    cc_flush_before_compaction_brief:
+      "Before the dropped middle is discarded, write its key points to long-term memory first",
+    cc_flush_before_compaction_impact:
+      "Only takes effect when long-term-memory write-back is on, otherwise it's a no-op. Keeps key decisions from being lost across repeated compressions.",
+    cc_flush_before_compaction_default: "true",
+    cc_max_passes_label: "Max compression passes",
+    cc_max_passes_brief:
+      "If still over threshold after repeated compression, retry at most N more times",
+    cc_max_passes_impact:
+      "If still over threshold after exhausting these passes, the run fails with a context-overflow error (no silent fallback). A transient summarization-LLM failure skips that pass and retries; only 3 consecutive failures fail the run.",
+    cc_max_passes_default: "3",
+    cc_max_turns_label: "Coarse turn cap",
+    cc_max_turns_brief:
+      "Hard-truncate every call to the most recent N turns (the old trim layer); empty = off",
+    cc_max_turns_impact:
+      "An older mechanism that predates the three gates, off (empty) by default. Once set, it truncates unconditionally on every call — usually unnecessary; prefer the ratio-based gates above.",
+    cc_max_turns_default: "Empty (off)",
+    cc_max_tokens_label: "Coarse token cap",
+    cc_max_tokens_brief: "Same idea, truncated by token count; empty = off",
+    cc_max_tokens_impact:
+      "Same as the turn cap — once set it takes effect unconditionally, so generally leave it empty.",
+    cc_max_tokens_default: "Empty (off)",
+    cc_pressure_feedback_label: "Pressure-feedback nudge",
+    cc_pressure_feedback_brief:
+      "Near the window ceiling, append a budget reminder to the model",
+    cc_pressure_feedback_impact:
+      "Once usage reaches window × warn %, a reminder is appended to the last message (the system prompt is untouched, so prefix caching stays valid), nudging the model to self-trim. Below the threshold, zero changes.",
+    cc_pressure_feedback_default: "true",
+    cc_pressure_warn_pct_label: "Pressure warn %",
+    cc_pressure_warn_pct_brief:
+      "The window percentage that triggers the budget reminder",
+    cc_pressure_warn_pct_impact:
+      "Should be lower than the compression threshold to actually give the model a head start (default 0.75 vs. compression's 0.7 — note the warning currently fires LATER than compression; lower it if you want an earlier nudge).",
+    cc_pressure_warn_pct_default: "0.75",
+    budget_enabled_label: "Enable tool-output budget",
+    budget_enabled_brief:
+      "This agent's master switch for large tool-output externalization / persistence / pruning",
+    budget_enabled_impact:
+      "Effective = platform switch AND this switch (if the platform switch is off, turning this on has no effect). Once off, large outputs are no longer externalized to the workspace — an oversized result can only be truncated. Early bash/exec/http/mcp overflow externalization is unaffected by this switch.",
+    budget_enabled_default: "true",
   },
   model_select: {
     provider_label: "Provider",
