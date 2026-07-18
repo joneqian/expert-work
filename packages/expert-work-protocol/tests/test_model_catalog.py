@@ -99,6 +99,7 @@ def test_current_context_windows() -> None:
         ("glm", "glm-5.1"): 200_000,
         ("glm", "glm-4.7"): 200_000,
         ("glm", "glm-4.6"): 200_000,
+        ("kimi", "kimi-k3"): 1_000_000,
         ("kimi", "kimi-k2.6"): 256_000,
         ("kimi", "kimi-k2.5"): 256_000,
         ("qwen", "qwen3.7-max"): 1_000_000,
@@ -111,6 +112,22 @@ def test_current_context_windows() -> None:
         assert entry.context_window == window, (
             f"{provider}/{name}: catalog {entry.context_window} != verified {window}"
         )
+
+
+def test_kimi_k3_capability_bits() -> None:
+    # kimi-k3: native vision, 1M context, and thinking is None — K3 is always
+    # thinking and only accepts reasoning_effort=max today, so no thinking field
+    # is sent (always-thinking → None; the compat build gate then rejects a
+    # manifest that sets effort / thinking_enabled). See the catalog comment.
+    k3 = catalog_entry("kimi", "kimi-k3")
+    assert k3 is not None
+    assert k3.vision is True
+    assert k3.context_window == 1_000_000
+    assert k3.thinking is None
+    assert k3.thinking_default is False
+    assert k3.deprecated is False
+    # It is the current flagship — selectable in the dropdown.
+    assert "kimi-k3" in {e.name for e in models_for_provider("kimi")}
 
 
 def test_cross_vendor_thinking_shapes() -> None:
