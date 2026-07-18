@@ -1089,17 +1089,20 @@ describe("security group (spec.sandbox.network egress + policies.tool_use_enforc
     expect(next.spec?.sandbox?.network).toEqual({ egress: "direct" });
   });
 
-  it("explicit undefined deletes egress, dropping an emptied network block", () => {
+  it("explicit undefined deletes egress but keeps the emptied network block (backend requires it)", () => {
+    // SandboxSpec.network is a REQUIRED pydantic field with no default —
+    // dropping the block from an existing sandbox makes the manifest 422 on
+    // deploy. An emptied block must survive as ``network: {}`` (valid: all
+    // NetworkSpec fields are defaulted).
     const base: AgentManifest = {
       spec: { sandbox: { network: { egress: "direct" } } },
     };
     const cleared = patchSecurity(base, { egress: undefined });
-    expect(cleared.spec?.sandbox?.network).toBeUndefined();
-    // network was sandbox's only key, so sandbox itself is dropped too.
-    expect(cleared.spec?.sandbox).toBeUndefined();
+    expect(cleared.spec?.sandbox?.network).toEqual({});
+    expect(cleared.spec?.sandbox).toEqual({ network: {} });
   });
 
-  it("does not drop sandbox when network empties but unknown keys remain", () => {
+  it("keeps network as {} when it empties while unknown sandbox keys remain", () => {
     const base: AgentManifest = {
       spec: {
         sandbox: {
@@ -1109,8 +1112,14 @@ describe("security group (spec.sandbox.network egress + policies.tool_use_enforc
       },
     };
     const cleared = patchSecurity(base, { egress: undefined });
-    expect(cleared.spec?.sandbox?.network).toBeUndefined();
+    expect(cleared.spec?.sandbox?.network).toEqual({});
     expect(cleared.spec?.sandbox?.runtime).toBe("gvisor");
+  });
+
+  it("does not materialize an absent sandbox when the network patch nets out empty", () => {
+    const base: AgentManifest = { spec: {} };
+    const cleared = patchSecurity(base, { egress: undefined });
+    expect(cleared.spec?.sandbox).toBeUndefined();
   });
 
   it("clearing one network field preserves siblings (allowlist/denylist)", () => {
