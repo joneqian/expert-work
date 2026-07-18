@@ -731,6 +731,42 @@ const zhCN: TranslationKeys = {
       "实际生效 = 平台开关 AND 本开关(平台关则此处开也无效)。关闭后大输出不再外置到工作区,超长结果只能靠截断。早期的 bash/exec/http/mcp 溢出外置不受此开关影响。",
     budget_enabled_default: "true",
   },
+  security_gates: {
+    group_intro:
+      "沙箱内代码与工具的对外网络策略,三层判定:出网模式 → 黑名单(优先)→ 白名单。",
+    panel_network: "①网络出网",
+    panel_enforce: "②工具强制",
+    egress_label: "出网模式",
+    egress_brief: "沙箱对外网络总闸:proxy=经凭据代理(默认)/direct=直连/none=断网",
+    egress_impact:
+      "none 下沙箱内一切外呼不可用;direct 绕过代理凭据注入与集中审计,一般不建议;proxy 经凭据代理出网、全审计。",
+    egress_default: "proxy",
+    egress_opt_proxy: "经凭据代理(默认)",
+    egress_opt_direct: "直连",
+    egress_opt_none: "断网",
+    allowlist_label: "域名白名单",
+    allowlist_brief:
+      "非空=只允许这些域名;留空=放行公网(SSRF/内网探测仍拦截,全审计)",
+    allowlist_impact:
+      "精确域或子域匹配。不允许通配 ['*'](提交校验会拒)。与黑名单同在时黑名单优先。",
+    allowlist_default: "留空(放行公网)",
+    denylist_label: "域名黑名单",
+    denylist_brief: "无论白名单/默认放行,强制拦截这些域名",
+    denylist_impact:
+      "优先级高于白名单;精确域或子域匹配。适合\"放行公网但屏蔽个别坏目标\"。",
+    denylist_default: "留空",
+    enforce_label: "工具调用强制",
+    enforce_brief:
+      "向系统提示词追加强制块:必须用工具获取实时事实、立即行动、禁止编造工具输出",
+    enforce_impact:
+      "auto(默认)=除 Claude/GPT 等可靠自发调用工具的模型家族外全部启用——新接入弱模型免改配置即获强制;on/off=无视模型强制开/关。",
+    enforce_default: "auto",
+    enforce_opt_auto: "自动(默认)",
+    enforce_opt_on: "强制开启",
+    enforce_opt_off: "强制关闭",
+    dict_note:
+      "速率限制 / PII / 安全策略暂为自由字典(后端 schema 未定型),请在 YAML 视图编辑。",
+  },
   model_select: {
     provider_label: "提供方",
     provider_placeholder: "选择已配置密钥的提供方",
@@ -903,9 +939,6 @@ const zhCN: TranslationKeys = {
     trajectory_recording: "记录对话留档",
     trajectory_recording_help:
       "开启后,每次完整对话会被保存下来,用于质量评测和模型优化。\n如果对话内容不能留存,就关掉。\n默认开启。\n示例:开启",
-    tool_budget: "工具结果预算",
-    tool_budget_help:
-      "开启后,过大或累积的工具结果会被外化到工作区并从上下文剪枝,使长任务保持在模型窗口内。\n关掉则该 Agent 的每条工具结果都原样留在上下文。\n默认开启;平台开关可将其强制关闭(生效 = 平台 AND Agent)。\n示例:开启",
     section_knowledge: "知识库(RAG)",
     section_knowledge_help:
       "Agent 可以检索的知识库,用来给回答找依据。\n选已有的库,或输入名称。\n示例:hr-policies、eng-handbook",

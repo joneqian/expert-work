@@ -67,6 +67,18 @@ export interface AgentManifest {
     };
     memory?: { long_term?: LongTermFields | null; [k: string]: unknown } | null;
     tools?: ToolEntry[];
+    // Sandbox egress policy (NetworkSpec) — nested two levels under spec.
+    // ``sandbox`` itself commonly carries unrelated unknown keys authored in
+    // YAML (runtime/image/resources/filesystem) that must survive untouched.
+    sandbox?: {
+      network?: {
+        egress?: string;
+        allowlist?: string[];
+        denylist?: string[];
+        [k: string]: unknown;
+      };
+      [k: string]: unknown;
+    };
     routing?: RoutingFields | null;
     // Stream J.6 Path B — VL fallback for a text-only main model (ask_image).
     vision?: {
@@ -88,6 +100,10 @@ export interface AgentManifest {
       max_no_progress?: number;
       // Stream L.L7 — record completed runs to ObjectStore (privacy toggle).
       trajectory_recording?: boolean;
+      // Tool-call-rate uplift — whether to append the tool-use enforcement
+      // block to the system prompt. "auto" (default) enables it for every
+      // model except the families that reliably self-initiate tool calls.
+      tool_use_enforcement?: string;
       // Phase 3 — per-agent master switch for the tool-output-budget feature
       // (externalization + persist + prune). Block absent = enabled.
       tool_output_budget?: { enabled?: boolean; [k: string]: unknown };
@@ -746,27 +762,6 @@ export function patchContextGates(
   });
 }
 
-// ---- tool-output budget (policies.tool_output_budget.enabled) ----
-// Per-agent master switch for the whole tool-output-budget feature
-// (externalization + persist + prune). Block absent = enabled (the platform
-// switch governs the ceiling: effective = platform AND agent). ``on`` drops the
-// block (back to default-on, clean YAML); ``off`` writes ``{enabled:false}``.
-export const readToolBudgetOn = (m: unknown): boolean =>
-  (specOf(m).policies?.tool_output_budget?.enabled ?? true) !== false;
-
-export function setToolBudgetOn(m: unknown, on: boolean): AgentManifest {
-  const policies = specOf(m).policies ?? {};
-  if (on) {
-    const { tool_output_budget: _dropped, ...rest } = policies;
-    return patchSpec(m, {
-      policies: Object.keys(rest).length > 0 ? rest : undefined,
-    });
-  }
-  return patchSpec(m, {
-    policies: { ...policies, tool_output_budget: { enabled: false } },
-  });
-}
-
 // ---- dynamic workers (spawn_worker) ----
 // Whether the agent's LLM may spawn ephemeral workers at run time. The block is
 // absent by default and that means ENABLED (the platform switch governs the
@@ -919,3 +914,72 @@ export const setActionScreenOnError = (
 
 export const setOutputDlp = (m: unknown, v: "redact" | "off"): AgentManifest =>
   patchDefenses(m, { output_dlp: v === "off" ? undefined : v });
+
+// ---- security group (spec.sandbox.network egress + policies.tool_use_enforcement) ----
+// Curated "安全" group over two independent locations: the sandbox egress
+// policy (NetworkSpec, nested two levels under spec.sandbox.network) and the
+// tool-use-enforcement knob (a scalar sibling of the other ``policies``
+// fields). Readers return the raw stored value (``undefined`` when unset —
+// the backend Pydantic defaults apply). ``patchSecurity`` only touches the
+// block(s)/key(s) whose fields are present in ``patch`` (never materializes
+// an untouched block), deletes a key whose patch value is ``undefined``, and
+// drops the ``network`` block when patching empties it — dropping ``sandbox``
+// itself only when that also empties it AND it carries no other (unknown)
+// keys, since ``sandbox`` commonly carries unrelated YAML-authored keys
+// (runtime/image/resources/filesystem) that must survive untouched. Arrays
+// are copied on write so the stored manifest never aliases the caller's array.
+export interface SecurityFields {
+  egress?: string;
+  allowlist?: string[];
+  denylist?: string[];
+  toolUseEnforcement?: string;
+}
+
+export const readSecurity = (m: unknown): SecurityFields => {
+  const network = specOf(m).sandbox?.network ?? {};
+  return {
+    egress: network.egress,
+    allowlist: network.allowlist,
+    denylist: network.denylist,
+    toolUseEnforcement: specOf(m).policies?.tool_use_enforcement,
+  };
+};
+
+export function patchSecurity(
+  m: unknown,
+  patch: Partial<SecurityFields>,
+): AgentManifest {
+  const spec = specOf(m);
+  const updates: Record<string, unknown> = {};
+
+  const networkPatch: Record<string, unknown> = {};
+  if ("egress" in patch) networkPatch.egress = patch.egress;
+  if ("allowlist" in patch) {
+    networkPatch.allowlist =
+      patch.allowlist === undefined ? undefined : [...patch.allowlist];
+  }
+  if ("denylist" in patch) {
+    networkPatch.denylist =
+      patch.denylist === undefined ? undefined : [...patch.denylist];
+  }
+  if (Object.keys(networkPatch).length > 0) {
+    const sandbox = spec.sandbox ?? {};
+    const mergedNetwork = mergeBlock(
+      sandbox.network as Record<string, unknown> | undefined,
+      networkPatch,
+    );
+    const mergedSandbox: Record<string, unknown> = { ...sandbox };
+    if (mergedNetwork === undefined) delete mergedSandbox.network;
+    else mergedSandbox.network = mergedNetwork;
+    updates.sandbox =
+      Object.keys(mergedSandbox).length > 0 ? mergedSandbox : undefined;
+  }
+
+  if ("toolUseEnforcement" in patch) {
+    updates.policies = mergeBlock(spec.policies ?? undefined, {
+      tool_use_enforcement: patch.toolUseEnforcement,
+    });
+  }
+
+  return patchSpec(m, updates);
+}

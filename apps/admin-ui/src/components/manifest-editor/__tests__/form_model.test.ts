@@ -49,10 +49,8 @@ import {
   setReconcileWrites,
   setRecallMode,
   readApprovalTimeout,
-  readToolBudgetOn,
   readTrajectoryRecording,
   setApprovalTimeout,
-  setToolBudgetOn,
   setTrajectoryRecording,
   readFallback,
   setFallback,
@@ -76,6 +74,8 @@ import {
   patchRunBudget,
   readContextGates,
   patchContextGates,
+  readSecurity,
+  patchSecurity,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -293,21 +293,6 @@ describe("form_model writers preserve siblings", () => {
 
     const noTrace = setTrajectoryRecording(seed, false);
     expect(noTrace.spec?.policies?.trajectory_recording).toBe(false);
-
-    // Phase 3 — tool-output budget: default on; off writes {enabled:false};
-    // back on drops the block (clean YAML) while keeping the approval gate.
-    expect(readToolBudgetOn(seed)).toBe(true);
-    const budgetOff = setToolBudgetOn(withGate, false);
-    expect(budgetOff.spec?.policies?.tool_output_budget?.enabled).toBe(false);
-    expect(readToolBudgetOn(budgetOff)).toBe(false);
-    expect(budgetOff.spec?.policies?.approval_required_tools).toEqual([
-      "exec_python",
-    ]);
-    const budgetOn = setToolBudgetOn(budgetOff, true);
-    expect(budgetOn.spec?.policies?.tool_output_budget).toBeUndefined();
-    expect(budgetOn.spec?.policies?.approval_required_tools).toEqual([
-      "exec_python",
-    ]);
 
     const withTimeout = setApprovalTimeout(withGate, 3600);
     expect(withTimeout.spec?.policies?.approval_timeout_s).toBe(3600);
@@ -1053,6 +1038,170 @@ describe("context gates (policies.context_compression / working_memory / tool_re
       prThresholdPct: undefined,
       prRecentKept: undefined,
       budgetEnabled: undefined,
+    });
+  });
+});
+
+describe("security group (spec.sandbox.network egress + policies.tool_use_enforcement)", () => {
+  it("egress round-trips through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchSecurity(m, { egress: "none" });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("network:");
+    expect(yaml).toContain("egress: none");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readSecurity(roundTripped).egress).toBe("none");
+  });
+
+  it("allowlist array round-trips through YAML without aliasing the input array", () => {
+    const m: AgentManifest = { spec: {} };
+    const input = ["example.com", "api.example.com"];
+    const next = patchSecurity(m, { allowlist: input });
+    // Mutating the caller's array afterwards must not affect the stored manifest.
+    input.push("evil.example.com");
+    expect(next.spec?.sandbox?.network?.allowlist).toEqual([
+      "example.com",
+      "api.example.com",
+    ]);
+    const yaml = dumpYaml(next);
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readSecurity(roundTripped).allowlist).toEqual([
+      "example.com",
+      "api.example.com",
+    ]);
+  });
+
+  it("preserves sandbox's unrelated unknown keys (runtime, resources) when patching egress", () => {
+    const base: AgentManifest = {
+      spec: {
+        sandbox: {
+          runtime: "gvisor",
+          resources: { cpu: "1.0", memory: "512Mi" },
+        },
+      },
+    };
+    const next = patchSecurity(base, { egress: "direct" });
+    expect(next.spec?.sandbox?.runtime).toBe("gvisor");
+    expect(next.spec?.sandbox?.resources).toEqual({
+      cpu: "1.0",
+      memory: "512Mi",
+    });
+    expect(next.spec?.sandbox?.network).toEqual({ egress: "direct" });
+  });
+
+  it("explicit undefined deletes egress, dropping an emptied network block", () => {
+    const base: AgentManifest = {
+      spec: { sandbox: { network: { egress: "direct" } } },
+    };
+    const cleared = patchSecurity(base, { egress: undefined });
+    expect(cleared.spec?.sandbox?.network).toBeUndefined();
+    // network was sandbox's only key, so sandbox itself is dropped too.
+    expect(cleared.spec?.sandbox).toBeUndefined();
+  });
+
+  it("does not drop sandbox when network empties but unknown keys remain", () => {
+    const base: AgentManifest = {
+      spec: {
+        sandbox: {
+          runtime: "gvisor",
+          network: { egress: "direct" },
+        },
+      },
+    };
+    const cleared = patchSecurity(base, { egress: undefined });
+    expect(cleared.spec?.sandbox?.network).toBeUndefined();
+    expect(cleared.spec?.sandbox?.runtime).toBe("gvisor");
+  });
+
+  it("clearing one network field preserves siblings (allowlist/denylist)", () => {
+    const base: AgentManifest = {
+      spec: {
+        sandbox: {
+          network: {
+            egress: "proxy",
+            allowlist: ["example.com"],
+            denylist: ["bad.example.com"],
+          },
+        },
+      },
+    };
+    const next = patchSecurity(base, { egress: undefined });
+    expect(next.spec?.sandbox?.network).toEqual({
+      allowlist: ["example.com"],
+      denylist: ["bad.example.com"],
+    });
+  });
+
+  it("does not materialize an absent sandbox block when patch only touches tool_use_enforcement", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchSecurity(base, { toolUseEnforcement: "on" });
+    expect(next.spec?.sandbox).toBeUndefined();
+    expect(next.spec?.policies?.tool_use_enforcement).toBe("on");
+  });
+
+  it("tool_use_enforcement coexists with PR2's four policies sub-blocks without disturbing them", () => {
+    const base: AgentManifest = {
+      spec: {
+        policies: {
+          approval_required_tools: ["exec_python"],
+          max_no_progress: 3,
+          context_compression: { enabled: false },
+          working_memory: { enabled: true },
+          tool_result_prune: { enabled: true },
+          tool_output_budget: { enabled: false },
+        },
+      },
+    };
+    const next = patchSecurity(base, { toolUseEnforcement: "off" });
+    expect(next.spec?.policies?.tool_use_enforcement).toBe("off");
+    expect(next.spec?.policies?.approval_required_tools).toEqual([
+      "exec_python",
+    ]);
+    expect(next.spec?.policies?.max_no_progress).toBe(3);
+    expect(next.spec?.policies?.context_compression).toEqual({
+      enabled: false,
+    });
+    expect(next.spec?.policies?.working_memory).toEqual({ enabled: true });
+    expect(next.spec?.policies?.tool_result_prune).toEqual({ enabled: true });
+    expect(next.spec?.policies?.tool_output_budget).toEqual({
+      enabled: false,
+    });
+    // readRunBudget / readContextGates over the same manifest stay unaffected.
+    expect(readRunBudget(next).maxNoProgress).toBe(3);
+    expect(readContextGates(next).ccEnabled).toBe(false);
+    expect(readContextGates(next).wmEnabled).toBe(true);
+  });
+
+  it("explicit undefined deletes tool_use_enforcement, dropping policies if emptied", () => {
+    const base: AgentManifest = {
+      spec: { policies: { tool_use_enforcement: "on" } },
+    };
+    const cleared = patchSecurity(base, { toolUseEnforcement: undefined });
+    expect(cleared.spec?.policies).toBeUndefined();
+  });
+
+  it("an empty patch does not materialize sandbox or policies at all", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchSecurity(base, {});
+    expect(next.spec?.sandbox).toBeUndefined();
+    expect(next.spec?.policies).toBeUndefined();
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m: AgentManifest = {
+      spec: { sandbox: { runtime: "gvisor", network: { egress: "proxy" } } },
+    };
+    const snapshot = JSON.stringify(m);
+    patchSecurity(m, { egress: "none", toolUseEnforcement: "on" });
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("readSecurity returns undefined for every field on an empty manifest", () => {
+    expect(readSecurity({})).toEqual({
+      egress: undefined,
+      allowlist: undefined,
+      denylist: undefined,
+      toolUseEnforcement: undefined,
     });
   });
 });
