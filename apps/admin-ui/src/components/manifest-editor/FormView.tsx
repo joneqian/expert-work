@@ -55,7 +55,6 @@ import {
   readReflectionEvaluator,
   readReflectionEvaluatorOn,
   readRecallMode,
-  readRunDeadline,
   readSystemPrompt,
   readTools,
   readTopK,
@@ -85,7 +84,6 @@ import {
   setReconcileWrites,
   setRecallMode,
   setReflectionEvaluator,
-  setRunDeadline,
   setSystemPrompt,
   setTool,
   setTopK,
@@ -119,8 +117,15 @@ export type FormSection =
 interface FormViewProps {
   formData: unknown;
   onChange: (data: unknown) => void;
-  /** Which field group to render. Defaults to ``basic`` for stand-alone use. */
+  /** Which field group to render. Defaults to ``basic`` for stand-alone use.
+   *  Ignored when ``sections`` is supplied. */
   section?: FormSection;
+  /** Stack-render several sections in one pane — the group-nav + detail-pane
+   *  layout's "capabilities" group (tools/mcp/knowledge/skills/subagents) is
+   *  the main user. Each section is wrapped in a ``data-section-id`` anchor
+   *  div with a small sub-section title (the section's own ``manifest_editor
+   *  .tab_<section>`` label). Takes precedence over ``section`` when given. */
+  sections?: readonly FormSection[];
   /** Where the MCP tab sources servers — ``catalog`` for a platform template,
    *  ``available`` (default) for a tenant agent. */
   mcpSource?: McpPickerSource;
@@ -155,6 +160,7 @@ export function FormView({
   formData,
   onChange,
   section = "basic",
+  sections,
   mcpSource = "available",
   bare = false,
 }: FormViewProps) {
@@ -189,7 +195,7 @@ export function FormView({
     onChange(setApprovalTools(formData, next));
   };
 
-  const sections: Record<FormSection, ReactNode> = {
+  const sectionsRecord: Record<FormSection, ReactNode> = {
     basic: (
       <section data-testid="af-basic" style={SECTION}>
         {!bare && <Heading>{t("agent_form.section_basic")}</Heading>}
@@ -637,6 +643,9 @@ export function FormView({
       </section>
     ),
 
+    // The run-deadline control that used to live here moved to the "budget"
+    // group's RunBudgetSection (Task 6 pilot) — policies.run_deadline_s is
+    // now edited alongside the other run-budget/timeout knobs.
     governance: (
       <>
         <section data-testid="af-approval" style={SECTION}>
@@ -682,26 +691,6 @@ export function FormView({
             />
             <Text type="secondary">{t("agent_form.dynamic_workers_hint")}</Text>
           </label>
-        </section>
-
-        <section data-testid="af-run-deadline" style={SECTION}>
-          <Heading>
-            {t("agent_form.section_run_deadline")}
-            <FieldHelp
-              text={t("agent_form.section_run_deadline_help")}
-              testId="af-run-deadline"
-            />
-          </Heading>
-          <Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-            {t("agent_form.run_deadline_hint")}
-          </Text>
-          <InputNumber
-            min={0}
-            max={86400}
-            value={readRunDeadline(formData)}
-            aria-label={t("agent_form.section_run_deadline")}
-            onChange={(v) => onChange(setRunDeadline(formData, v ?? 0))}
-          />
         </section>
 
         <Collapse
@@ -990,7 +979,20 @@ export function FormView({
 
   return (
     <div data-testid="manifest-form-view" style={{ maxWidth: 760 }}>
-      {sections[section]}
+      {sections
+        ? sections.map((s) => (
+            <div key={s} data-section-id={s}>
+              <Text
+                strong
+                type="secondary"
+                style={{ display: "block", fontSize: 13, margin: "0 0 8px" }}
+              >
+                {t(`manifest_editor.tab_${s}`)}
+              </Text>
+              {sectionsRecord[s]}
+            </div>
+          ))
+        : sectionsRecord[section]}
     </div>
   );
 }

@@ -577,6 +577,46 @@ export interface TranslationKeys {
     schema_load_failed: string;
     invalid_yaml_title: string;
     invalid_yaml_hint: string;
+    search_placeholder: string;
+    group_basic: string;
+    group_model: string;
+    group_prompt: string;
+    group_capabilities: string;
+    group_memory: string;
+    group_budget: string;
+    group_context: string;
+    group_security: string;
+    group_sandbox: string;
+    group_observability: string;
+    group_pending_hint: string;
+    field_impact_label: string;
+    field_default_badge: string;
+  };
+  // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Five
+  // FieldRow-rendered knobs living in three manifest locations
+  // (workflow.max_iterations / policies.max_no_progress+run_deadline_s /
+  // top-level spec.stream_deadline_s+idle_timeout_s).
+  run_budget: {
+    max_iterations_label: string;
+    max_iterations_brief: string;
+    max_iterations_impact: string;
+    max_iterations_default: string;
+    max_no_progress_label: string;
+    max_no_progress_brief: string;
+    max_no_progress_impact: string;
+    max_no_progress_default: string;
+    run_deadline_label: string;
+    run_deadline_brief: string;
+    run_deadline_impact: string;
+    run_deadline_default: string;
+    stream_deadline_label: string;
+    stream_deadline_brief: string;
+    stream_deadline_impact: string;
+    stream_deadline_default: string;
+    idle_timeout_label: string;
+    idle_timeout_brief: string;
+    idle_timeout_impact: string;
+    idle_timeout_default: string;
   };
   model_select: {
     provider_label: string;
@@ -3083,6 +3123,52 @@ const en: TranslationKeys = {
     invalid_yaml_title: "Can't switch to Form",
     invalid_yaml_hint:
       "The YAML is invalid or doesn't match the manifest schema. Fix it here first.",
+    search_placeholder: "Search settings…",
+    group_basic: "Basic",
+    group_model: "Model & Routing",
+    group_prompt: "Prompt & Output",
+    group_capabilities: "Capabilities",
+    group_memory: "Memory",
+    group_budget: "Run Budget & Timeouts",
+    group_context: "Context & Compression",
+    group_security: "Security & Defenses",
+    group_sandbox: "Sandbox & Resources",
+    group_observability: "Triggers & Observability",
+    group_pending_hint:
+      "Settings in this group will be visualized in a later release — edit them via YAML for now.",
+    field_impact_label: "Impact",
+    field_default_badge: "Default {{value}}",
+  },
+  run_budget: {
+    max_iterations_label: "Max steps",
+    max_iterations_brief: "Max think+act steps a single run may execute",
+    max_iterations_impact:
+      "Once exceeded, the run is forced to wrap up: the model must summarize directly and stop calling tools, so the output may be incomplete. Raise it for research or long multi-tool tasks (heavy tasks typically need 40-60); lower it to control cost. A sub-worker's actual step budget = min(this value, the platform's worker ceiling).",
+    max_iterations_default: "30",
+    max_no_progress_label: "No-progress stop",
+    max_no_progress_brief:
+      "Stop early after N consecutive steps with no real progress; 0 = off",
+    max_no_progress_impact:
+      "Keeps the model from spinning in place and burning through steps; too low a value risks cutting off a legitimate retry. 3–5 is a reasonable starting range.",
+    max_no_progress_default: "0 (off)",
+    run_deadline_label: "Run wall-clock cap",
+    run_deadline_brief:
+      "Wall-clock cap (seconds) on the whole run, including sub-agents; 0 = falls back to the platform floor (default 1h)",
+    run_deadline_impact:
+      "How long a single run may take (seconds), including any sub-agents it spawns; when exceeded the run is aborted, guarding against runaway runs and cost. 0 is not truly unlimited — it falls back to the platform's wall-clock floor (currently 3600s / 1h, ops-configurable). Set an explicit value here for precise control or a longer run.",
+    run_deadline_default: "0",
+    stream_deadline_label: "First-token timeout",
+    stream_deadline_brief:
+      "Max wait (seconds) for the first token of a single LLM call; 0 = off",
+    stream_deadline_impact:
+      "Caps how long a single LLM call may wait before its first token arrives; a timeout raises LLMStreamStaleError so the router falls back to the next provider instead of stalling the whole run. Defaults to 180s to cover heavy generations like long report sections. Distinct from the inter-token idle timeout (idle_timeout_s, which only starts counting after the first token). 0 = off (dev / long-batch use only).",
+    stream_deadline_default: "180",
+    idle_timeout_label: "Inter-token idle timeout",
+    idle_timeout_brief:
+      "Max gap (seconds) between tokens of a single streaming LLM call; 0 = off",
+    idle_timeout_impact:
+      "Once the first token has arrived, a gap between subsequent tokens longer than this ends the turn early with whatever output was generated so far (the model went silent mid-stream). Distinct from the first-token timeout (stream_deadline_s). 0 = off (dev / long-batch use only); non-streaming providers ignore this.",
+    idle_timeout_default: "45",
   },
   model_select: {
     provider_label: "Provider",

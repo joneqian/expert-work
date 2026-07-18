@@ -1,10 +1,12 @@
 /**
- * Manifest model-select E2E — Stream S PR D.
+ * Manifest model-select E2E — Stream S PR D, selectors migrated to the
+ * group-nav + detail-pane layout (agent-config-page redesign PR1).
  *
- * Proves an admin can pick a provider + model through the curated Form tab's
- * linked model picker (``<ModelSelect>``), that choosing a vision-capable
- * model flips the vision indicator to its supported state, and that the open
- * Create-Agent modal (with the picker mounted) passes the axe a11y check.
+ * Proves an admin can pick a provider + model through the curated Form's
+ * linked model picker (``<ModelSelect>``) under the "Model" group, that
+ * choosing a vision-capable model flips the vision indicator to its
+ * supported state, and that the open Create-Agent modal (with the picker
+ * mounted) passes the axe a11y check.
  *
  * The editor fetches ``GET /v1/agents/schema`` and the picker fetches
  * ``GET /v1/model-catalog`` (both enveloped) on mount, so we stub both. The
@@ -113,10 +115,10 @@ test("pick a provider + model via the form turns vision on", async ({
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("create-agent-modal")).toBeVisible();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
-  // The model controls live under the "Model" tab now (the form is split into
-  // one tab per section). The reflection-evaluator section reuses <ModelSelect>,
-  // so this tab has two ``model-select-*`` instances — scope to af-model.
-  await page.getByTestId("manifest-tab-model").click();
+  // The model controls live under the "Model" group in the left tree now.
+  // The reflection-evaluator section reuses <ModelSelect>, so this group has
+  // two ``model-select-*`` instances — scope to af-model.
+  await page.getByTestId("cfg-nav-model").click();
   const model = page.getByTestId("af-model");
   await expect(model.getByTestId("model-select-field")).toBeVisible();
 
@@ -154,8 +156,8 @@ test("the reflection-evaluator section exposes its own model picker", async ({
 }) => {
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
-  // The reflection-evaluator section lives under the "Model" tab.
-  await page.getByTestId("manifest-tab-model").click();
+  // The reflection-evaluator section lives under the "Model" group.
+  await page.getByTestId("cfg-nav-model").click();
   const evaluator = page.getByTestId("af-reflection-evaluator");
   await expect(evaluator).toBeVisible();
   // Empty by default (reflection reuses the agent's own model) — no clear link.
@@ -170,7 +172,7 @@ test("create modal with model picker passes axe (serious + critical)", async ({
 }) => {
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-editor-create")).toBeVisible();
-  await page.getByTestId("manifest-tab-model").click();
+  await page.getByTestId("cfg-nav-model").click();
   await expect(
     page.getByTestId("af-model").getByTestId("model-select-field"),
   ).toBeVisible();

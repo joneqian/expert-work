@@ -1,5 +1,6 @@
 /**
- * Agent-form MCP picker E2E — Stream V-G.
+ * Agent-form MCP picker E2E — Stream V-G, selectors migrated to the
+ * group-nav + detail-pane layout (agent-config-page redesign PR1).
  *
  * Proves an admin can:
  *   (a) open the Create-Agent modal, enable the MCP toggle, see the
@@ -181,9 +182,10 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   await nameInput.clear();
   await nameInput.fill("mcp-agent");
 
-  // MCP lives under its own "MCP" tab now — no separate enable checkbox; the
-  // server list shows directly and selecting a server enables MCP.
-  await page.getByTestId("manifest-tab-mcp").click();
+  // MCP is one of the stacked sections under the "Capabilities" group now —
+  // no separate enable checkbox; the server list shows directly and
+  // selecting a server enables MCP.
+  await page.getByTestId("cfg-nav-capabilities").click();
 
   // The McpToolPicker mounts and fetches /v1/mcp-servers/available.
   await expect(page.getByTestId("af-mcp-server-github")).toBeVisible();
@@ -229,8 +231,9 @@ test("(b) create modal with MCP picker passes axe (serious + critical)", async (
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
 
-  // MCP lives under its own "MCP" tab now (no separate enable checkbox).
-  await page.getByTestId("manifest-tab-mcp").click();
+  // MCP is one of the stacked sections under the "Capabilities" group now
+  // (no separate enable checkbox).
+  await page.getByTestId("cfg-nav-capabilities").click();
 
   // Wait for the picker to load so axe sees the full DOM.
   await expect(page.getByTestId("af-mcp-server-github")).toBeVisible();

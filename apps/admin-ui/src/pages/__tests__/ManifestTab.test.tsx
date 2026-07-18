@@ -98,10 +98,10 @@ describe("ManifestTab", () => {
     expect(screen.queryByTestId("manifest-edit-btn")).not.toBeInTheDocument();
   });
 
-  it("exposes the raw YAML escape-hatch tab", async () => {
+  it("exposes the raw YAML escape-hatch toggle", async () => {
     render(<ManifestTab detail={sampleDetail} onSaved={onSaved} />);
     await screen.findByTestId("manifest-editor-edit");
-    expect(screen.getByTestId("manifest-tab-yaml")).toBeInTheDocument();
+    expect(screen.getByTestId("cfg-yaml-toggle")).toBeInTheDocument();
   });
 
   it("saves edits via updateAgent and stays on the editor", async () => {
@@ -109,8 +109,8 @@ describe("ManifestTab", () => {
     updateAgentMock.mockResolvedValue(sampleDetail);
     render(<ManifestTab detail={sampleDetail} onSaved={onSaved} />);
     await screen.findByTestId("manifest-editor-edit");
-    // edit via the YAML tab for a deterministic buffer
-    await user.click(screen.getByTestId("manifest-tab-yaml"));
+    // edit via the YAML toggle for a deterministic buffer
+    await user.click(screen.getByTestId("cfg-yaml-toggle"));
     const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
     await user.clear(ta);
     await user.type(ta, "edited: yaml");
@@ -137,7 +137,7 @@ describe("ManifestTab", () => {
     const user = userEvent.setup();
     render(<ManifestTab detail={sampleDetail} onSaved={onSaved} />);
     await screen.findByTestId("manifest-editor-edit");
-    await user.click(screen.getByTestId("manifest-tab-yaml"));
+    await user.click(screen.getByTestId("cfg-yaml-toggle"));
     const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
     await user.clear(ta);
     await user.type(ta, "edited: yaml");

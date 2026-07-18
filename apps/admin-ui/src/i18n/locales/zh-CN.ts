@@ -591,6 +591,48 @@ const zhCN: TranslationKeys = {
     schema_load_failed: "加载配置清单结构失败",
     invalid_yaml_title: "无法切换到表单",
     invalid_yaml_hint: "当前 YAML 不合法或不符合配置清单结构，请先在此修正。",
+    search_placeholder: "搜索设置…",
+    group_basic: "基础",
+    group_model: "模型与路由",
+    group_prompt: "提示词与输出",
+    group_capabilities: "能力",
+    group_memory: "记忆",
+    group_budget: "运行预算与超时",
+    group_context: "上下文与压缩",
+    group_security: "安全与防护",
+    group_sandbox: "沙箱与资源",
+    group_observability: "触发器与可观测",
+    group_pending_hint: "本组设置将在后续版本可视化,当前请用 YAML 编辑",
+    field_impact_label: "影响说明",
+    field_default_badge: "默认 {{value}}",
+  },
+  run_budget: {
+    max_iterations_label: "最大步数",
+    max_iterations_brief: "一次运行最多执行的思考+动作步数",
+    max_iterations_impact:
+      "超限后强制收尾:模型被要求直接总结、不再调用工具,产出可能不完整。调大适合研究/多工具长任务(参考:重任务 40-60),调小控制成本。子 worker 实际步数 = min(本值, 平台 worker 上限)",
+    max_iterations_default: "30",
+    max_no_progress_label: "无进展停机",
+    max_no_progress_brief: "连续 N 步无实质进展即提前收尾,0 = 关闭",
+    max_no_progress_impact:
+      "防模型原地打转烧步数;过小可能误伤合法重试。建议 3-5",
+    max_no_progress_default: "0(关闭)",
+    run_deadline_label: "运行墙钟上限",
+    run_deadline_brief:
+      "整次运行(含子 agent)的秒数上限,0 = 用平台地板(默认 1 小时)",
+    run_deadline_impact:
+      "一次运行最多跑多久(秒),包含它调起的子 agent;超时即中止,防止失控长跑、费用爆掉。0 并非真正不限制——会套用平台地板(当前默认 3600 秒/1 小时,由运维配置);要精确控制或延长运行时长,请显式设置本值。",
+    run_deadline_default: "0",
+    stream_deadline_label: "首 token 超时",
+    stream_deadline_brief: "LLM 单次调用的首 token 等待上限(秒),0 = 关闭",
+    stream_deadline_impact:
+      "从发起一次 LLM 调用到收到第一个 token 的最长等待;超时按 LLMStreamStaleError 处理,路由器会切到回退链而非卡住整个运行。默认 180 秒,覆盖长报告生成等重活场景。区别于 token 间隔超时(idle_timeout_s,首 token 之后才计时)。0 = 关闭(仅建议开发/长批处理场景使用)。",
+    stream_deadline_default: "180",
+    idle_timeout_label: "token 间隔超时",
+    idle_timeout_brief: "LLM 单次调用的 token 间隔上限(秒),0 = 关闭",
+    idle_timeout_impact:
+      "首个 token 到达后,若相邻两个 token 的间隔超过此值,视为模型中途卡住/沉默,提前结束本轮并保留已生成的部分输出。区别于首 token 超时(stream_deadline_s)。0 = 关闭该计时器(仅建议开发/长批处理场景使用);非流式 provider 不受影响。",
+    idle_timeout_default: "45",
   },
   model_select: {
     provider_label: "提供方",
