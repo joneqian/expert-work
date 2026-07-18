@@ -119,8 +119,15 @@ export type FormSection =
 interface FormViewProps {
   formData: unknown;
   onChange: (data: unknown) => void;
-  /** Which field group to render. Defaults to ``basic`` for stand-alone use. */
+  /** Which field group to render. Defaults to ``basic`` for stand-alone use.
+   *  Ignored when ``sections`` is supplied. */
   section?: FormSection;
+  /** Stack-render several sections in one pane — the group-nav + detail-pane
+   *  layout's "capabilities" group (tools/mcp/knowledge/skills/subagents) is
+   *  the main user. Each section is wrapped in a ``data-section-id`` anchor
+   *  div with a small sub-section title (the section's own ``manifest_editor
+   *  .tab_<section>`` label). Takes precedence over ``section`` when given. */
+  sections?: readonly FormSection[];
   /** Where the MCP tab sources servers — ``catalog`` for a platform template,
    *  ``available`` (default) for a tenant agent. */
   mcpSource?: McpPickerSource;
@@ -155,6 +162,7 @@ export function FormView({
   formData,
   onChange,
   section = "basic",
+  sections,
   mcpSource = "available",
   bare = false,
 }: FormViewProps) {
@@ -189,7 +197,7 @@ export function FormView({
     onChange(setApprovalTools(formData, next));
   };
 
-  const sections: Record<FormSection, ReactNode> = {
+  const sectionsRecord: Record<FormSection, ReactNode> = {
     basic: (
       <section data-testid="af-basic" style={SECTION}>
         {!bare && <Heading>{t("agent_form.section_basic")}</Heading>}
@@ -990,7 +998,20 @@ export function FormView({
 
   return (
     <div data-testid="manifest-form-view" style={{ maxWidth: 760 }}>
-      {sections[section]}
+      {sections
+        ? sections.map((s) => (
+            <div key={s} data-section-id={s}>
+              <Text
+                strong
+                type="secondary"
+                style={{ display: "block", fontSize: 13, margin: "0 0 8px" }}
+              >
+                {t(`manifest_editor.tab_${s}`)}
+              </Text>
+              {sectionsRecord[s]}
+            </div>
+          ))
+        : sectionsRecord[section]}
     </div>
   );
 }

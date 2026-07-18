@@ -587,6 +587,7 @@ export interface TranslationKeys {
     group_security: string;
     group_sandbox: string;
     group_observability: string;
+    group_pending_hint: string;
   };
   model_select: {
     provider_label: string;
@@ -3103,6 +3104,8 @@ const en: TranslationKeys = {
     group_security: "Security & Defenses",
     group_sandbox: "Sandbox & Resources",
     group_observability: "Triggers & Observability",
+    group_pending_hint:
+      "Settings in this group will be visualized in a later release — edit them via YAML for now.",
   },
   model_select: {
     provider_label: "Provider",

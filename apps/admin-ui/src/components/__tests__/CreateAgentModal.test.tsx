@@ -112,7 +112,7 @@ describe("CreateAgentModal", () => {
     const user = userEvent.setup();
     render(<CreateAgentModal open onClose={onClose} onCreated={onCreated} />);
     await screen.findByTestId("manifest-editor-create");
-    await user.click(screen.getByTestId("manifest-tab-yaml"));
+    await user.click(screen.getByTestId("cfg-yaml-toggle"));
     const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
     await waitFor(() => expect(ta.value).toContain("provider: deepseek"));
   });

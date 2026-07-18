@@ -601,6 +601,7 @@ const zhCN: TranslationKeys = {
     group_security: "安全与防护",
     group_sandbox: "沙箱与资源",
     group_observability: "触发器与可观测",
+    group_pending_hint: "本组设置将在后续版本可视化,当前请用 YAML 编辑",
   },
   model_select: {
     provider_label: "提供方",
