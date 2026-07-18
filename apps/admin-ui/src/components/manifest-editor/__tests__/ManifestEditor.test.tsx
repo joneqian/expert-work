@@ -361,4 +361,108 @@ describe("ManifestEditor", () => {
       "ant-menu-item-selected",
     );
   });
+
+  it("mounts the group search box in the top bar", async () => {
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    expect(screen.getByTestId("cfg-search")).toBeInTheDocument();
+  });
+
+  it("selecting a group via search while YAML is invalid keeps the tree highlight unchanged and stays on YAML with the error shown", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-yaml-toggle"));
+
+    const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
+    await user.clear(ta);
+    await user.type(ta, "metadata:\n  notname: x");
+
+    const searchInput = screen
+      .getByTestId("cfg-search")
+      .querySelector("input") as HTMLInputElement;
+    await user.type(searchInput, "mcp");
+    const item = await screen.findByText(
+      (_content, el) =>
+        el?.classList.contains("ant-select-item-option-content") === true &&
+        el.textContent === en.manifest_editor.group_capabilities,
+    );
+    await user.click(item);
+
+    expect(screen.getByTestId("manifest-switch-error")).toBeInTheDocument();
+    expect(screen.getByTestId("monaco-stub")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("manifest-form-view"),
+    ).not.toBeInTheDocument();
+    // The highlight must not move to the searched-for node — same guard
+    // as clicking the group node directly (see the test above).
+    expect(screen.getByTestId("cfg-nav-basic")).toHaveClass(
+      "ant-menu-item-selected",
+    );
+    expect(screen.getByTestId("cfg-nav-capabilities")).not.toHaveClass(
+      "ant-menu-item-selected",
+    );
+  });
+
+  it("selecting a group via search while YAML is valid exits YAML mode and lands on the picked group", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+
+    const searchInput = screen
+      .getByTestId("cfg-search")
+      .querySelector("input") as HTMLInputElement;
+    await user.type(searchInput, "mcp");
+    const item = await screen.findByText(
+      (_content, el) =>
+        el?.classList.contains("ant-select-item-option-content") === true &&
+        el.textContent === en.manifest_editor.group_capabilities,
+    );
+    await user.click(item);
+
+    expect(screen.getByTestId("af-tools")).toBeInTheDocument();
+    expect(screen.getByTestId("cfg-nav-capabilities")).toHaveClass(
+      "ant-menu-item-selected",
+    );
+  });
+
+  it("excludes a fully-merged-away (hidden) group from search results", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor
+        mode="create"
+        initialYaml={SEED}
+        onChange={vi.fn()}
+        leadingTabs={[
+          {
+            value: "meta",
+            label: "Basic info",
+            content: <div data-testid="meta-form">meta</div>,
+            mergeSection: "basic",
+          },
+        ]}
+      />,
+    );
+    await screen.findByTestId("meta-form");
+    expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
+
+    const searchInput = screen
+      .getByTestId("cfg-search")
+      .querySelector("input") as HTMLInputElement;
+    // "name" is one of the "basic" group's search keywords — it would
+    // otherwise match, but the group's node is hidden (merged away), so it
+    // must never be offered as a search result either.
+    await user.type(searchInput, "name");
+    expect(
+      screen.queryByText(en.manifest_editor.group_basic, {
+        selector: ".ant-select-item-option-content",
+      }),
+    ).not.toBeInTheDocument();
+  });
 });

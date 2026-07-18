@@ -9,6 +9,11 @@ export interface ConfigGroup {
   keywords: readonly string[];
 }
 
+/** A minimal translate function shape — matches ``useTranslation()``'s
+ * ``t`` structurally without importing react-i18next here, so this module
+ * stays React-free and independently testable. */
+export type Translate = (key: string) => string;
+
 export const CONFIG_GROUPS: readonly ConfigGroup[] = [
   { id: "basic", labelKey: "manifest_editor.group_basic", sections: ["basic"], keywords: ["名称", "版本", "描述", "name", "version", "extends"] },
   { id: "model", labelKey: "manifest_editor.group_model", sections: ["model"], keywords: ["模型", "回退", "路由", "思考", "model", "fallback", "thinking", "vision"] },
@@ -21,3 +26,29 @@ export const CONFIG_GROUPS: readonly ConfigGroup[] = [
   { id: "sandbox", labelKey: "manifest_editor.group_sandbox", sections: [], keywords: ["沙箱", "资源", "镜像", "sandbox", "cpu", "image"] },
   { id: "observability", labelKey: "manifest_editor.group_observability", sections: [], keywords: ["触发器", "可观测", "trigger", "trace", "log"] },
 ];
+
+/**
+ * Group-level search over ``CONFIG_GROUPS`` — a group matches when the
+ * query is a lowercase substring of its i18n-resolved label OR of any of
+ * its ``keywords``. An empty/whitespace-only query matches nothing (the
+ * caller shows no dropdown rather than the full group list).
+ *
+ * Pure: the caller supplies ``t`` (e.g. ``useTranslation()``'s ``t``) so
+ * this module has no React/i18next dependency and can be unit-tested
+ * directly.
+ */
+export function searchGroups(q: string, t: Translate): ConfigGroup[] {
+  const query = q.trim().toLowerCase();
+  if (query === "") {
+    return [];
+  }
+  return CONFIG_GROUPS.filter((group) => {
+    const label = t(group.labelKey).toLowerCase();
+    if (label.includes(query)) {
+      return true;
+    }
+    return group.keywords.some((keyword) =>
+      keyword.toLowerCase().includes(query),
+    );
+  });
+}

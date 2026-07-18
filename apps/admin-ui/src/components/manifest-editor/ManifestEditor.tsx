@@ -23,6 +23,7 @@ import { normalizeForSubmit } from "./form_model";
 import { FormView, type FormSection } from "./FormView";
 import { YamlView } from "./YamlView";
 import { GroupNav } from "./GroupNav";
+import { SettingsSearch } from "./SettingsSearch";
 import { CONFIG_GROUPS } from "./groups";
 import type { McpPickerSource } from "./widgets/McpToolPicker";
 
@@ -292,9 +293,12 @@ export function ManifestEditor({
             style={{
               display: "flex",
               justifyContent: "flex-end",
+              alignItems: "center",
+              gap: 12,
               marginBottom: 12,
             }}
           >
+            <SettingsSearch onPick={handleGroupSelect} exclude={hiddenGroups} />
             <Button
               type={yamlActive ? "primary" : "default"}
               size="small"

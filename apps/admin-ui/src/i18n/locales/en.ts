@@ -577,6 +577,7 @@ export interface TranslationKeys {
     schema_load_failed: string;
     invalid_yaml_title: string;
     invalid_yaml_hint: string;
+    search_placeholder: string;
     group_basic: string;
     group_model: string;
     group_prompt: string;
@@ -3094,6 +3095,7 @@ const en: TranslationKeys = {
     invalid_yaml_title: "Can't switch to Form",
     invalid_yaml_hint:
       "The YAML is invalid or doesn't match the manifest schema. Fix it here first.",
+    search_placeholder: "Search settings…",
     group_basic: "Basic",
     group_model: "Model & Routing",
     group_prompt: "Prompt & Output",

@@ -591,6 +591,7 @@ const zhCN: TranslationKeys = {
     schema_load_failed: "加载配置清单结构失败",
     invalid_yaml_title: "无法切换到表单",
     invalid_yaml_hint: "当前 YAML 不合法或不符合配置清单结构，请先在此修正。",
+    search_placeholder: "搜索设置…",
     group_basic: "基础",
     group_model: "模型与路由",
     group_prompt: "提示词与输出",
