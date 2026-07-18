@@ -597,10 +597,13 @@ class Settings(BaseSettings):
     dynamic_worker_max_per_run: int = Field(default=16, gt=0, le=256)
     #: Per-worker ReAct iteration cap (worker workflow.max_iterations is
     #: clamped to this). 8 was tight vs comparable frameworks' subagent budgets
-    #: (deer-flow children 50-150, hermes-agent 45); 16 gives a delegated worker
-    #: room to research + synthesise without starving, still well under the
-    #: parent's budget and the ``le=64`` runaway ceiling.
-    dynamic_worker_max_iterations: int = Field(default=16, gt=0, le=64)
+    #: (deer-flow children 50-150, hermes-agent 45); 16 still starved real
+    #: delegated tasks — a production research+build worker hit the cap and was
+    #: force-wrapped with a truncated result (2026-07-18). 32 gives a worker room
+    #: to research + synthesise, still at/under a typical parent budget
+    #: (default 30) and the ``le=64`` runaway ceiling; the effective cap remains
+    #: ``min(parent's max_iterations, this)``.
+    dynamic_worker_max_iterations: int = Field(default=32, gt=0, le=64)
     #: Tool-name allowlist a spawned worker may inherit from its parent
     #: (intersected with the parent's tools). Empty = inherit the parent's
     #: tools verbatim (still a subset of what the parent itself had).
