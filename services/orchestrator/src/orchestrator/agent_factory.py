@@ -558,15 +558,24 @@ async def build_agent(
     provider, an un-assemblable ``tools:`` entry, …).
     """
     env = tool_env or ToolEnv()
-    # Stream J.6 — Path A and Path B are mutually exclusive. A ``vision:``
-    # block on a manifest whose main model already accepts images would
-    # leave the route ambiguous; refuse to build (the guard runs before
-    # any router work so the manifest defect is the surfaced error).
-    if spec.spec.vision is not None and spec.spec.model.supports_vision:
-        raise AgentFactoryError(
-            "manifest declares 'vision' block but model.supports_vision is true; "
-            "Path A (content blocks) and Path B (ask_image) are mutually exclusive"
+    # Stream J.6 — Path A (native content blocks) and Path B (the ``ask_image``
+    # VL helper) are mutually exclusive. When the main model is natively
+    # multimodal, Path A is strictly better, so prefer it and IGNORE the
+    # ``vision:`` block rather than refusing to build. The block is commonly a
+    # leftover from a text-only model — e.g. the manifest editor flips
+    # ``supports_vision`` on when a vision-capable model is selected, leaving an
+    # earlier Path B block behind. ``vision_block`` (not ``spec.spec.vision``) is
+    # the effective Path B config from here on; the warning keeps the dropped VL
+    # config from being silent.
+    vision_block = spec.spec.vision
+    if vision_block is not None and spec.spec.model.supports_vision:
+        logger.warning(
+            "agent_factory.vision_block_ignored model=%s — main model is natively "
+            "multimodal (supports_vision=true); ignoring the manifest 'vision' block "
+            "(Path B ask_image) in favour of native image input (Path A)",
+            spec.spec.model.name,
         )
+        vision_block = None
     # Stream HX-1 (Mini-ADR HX-A1) — one shared tiktoken-backed estimator
     # for every context gate (dynamic-context trim, working window,
     # compressor) plus the token-usage drift counter.
@@ -617,7 +626,7 @@ async def build_agent(
     # router shares the agent's wall-clock cap so a hung VL provider doesn't
     # outlive an otherwise-cancelled run.
     vl_caller: LLMCaller | None = None
-    if spec.spec.vision is not None:
+    if vision_block is not None:
         # Vision (esp. reasoning VL) is far slower than chat, so floor the VL
         # deadline above the chat default and align the provider httpx timeout
         # to it — otherwise the 60s httpx default fires first on a legitimately
@@ -629,7 +638,7 @@ async def build_agent(
             float(max(manifest_dl, _VL_STREAM_DEADLINE_FLOOR_S)) if manifest_dl > 0 else None
         )
         vl_caller = await build_llm_router(
-            spec.spec.vision.model,
+            vision_block.model,
             secret_store=secret_store,
             around_llm_chain=chains.around_llm_call,
             image_resolver=env.image_resolver,
@@ -639,7 +648,7 @@ async def build_agent(
             idle_timeout_s=_chat_idle_timeout_s(spec.spec.idle_timeout_s),
             provider_timeout_s=vl_deadline_s,
             # Mini-ADR J-33 — VL fallback chain (J.6.补强-4).
-            extra_fallbacks=list(spec.spec.vision.fallbacks),
+            extra_fallbacks=list(vision_block.fallbacks),
             provider_key_resolver=provider_key_resolver,
             ignore_api_key_ref=True,  # Stream Y-2 (manifest-sourced VL model)
         )
@@ -722,7 +731,9 @@ async def build_agent(
         # Stream J.5 — a ``knowledge:`` block activates the knowledge_search tool.
         knowledge=spec.spec.knowledge,
         # Stream J.6 Path B — a ``vision:`` block activates the ask_image tool.
-        vision=spec.spec.vision,
+        # ``vision_block`` is ``None`` when the main model is natively multimodal
+        # (Path A wins), so ask_image is not wired in that case.
+        vision=vision_block,
         vl_caller=vl_caller,
         # Stream HX-12 — feeds the small-deferred-pool escape hatch.
         context_window=_resolved_context_window(spec.spec.model),
