@@ -1028,6 +1028,16 @@ def test_thinking_payload_off_catalog_compat_sends_nothing() -> None:
     assert _thinking_payload(_vendor_model("deepseek", "deepseek-reasoner", effort="high")) is None
 
 
+def test_thinking_payload_kimi_k3_always_thinking_sends_nothing() -> None:
+    # kimi-k3 is on-catalog with thinking=None (always thinking; only accepts
+    # reasoning_effort=max today). No thinking field is sent — in particular it
+    # must NOT emit the K2.x ``thinking.type`` toggle that the other kimi models
+    # use (the K3 docs forbid it).
+    from orchestrator.agent_factory import _thinking_payload
+
+    assert _thinking_payload(_vendor_model("kimi", "kimi-k3")) is None
+
+
 # ---------------------------------------------------------------------------
 # Stream CM-10 PR3 — gate + thinking payload wiring for compat vendors
 # ---------------------------------------------------------------------------
