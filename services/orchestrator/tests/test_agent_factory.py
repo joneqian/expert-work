@@ -29,6 +29,7 @@ from orchestrator import (
 )
 from orchestrator.agent_factory import _build_provider, _chat_stream_deadline_s
 from orchestrator.llm import FakeEmbedder, RateLimitedProvider
+from orchestrator.llm.providers.openai_compatible import OpenAICompatibleProvider
 from orchestrator.tools import KnowledgeRetriever, RecordingTavilyClient
 
 # ---------------------------------------------------------------------------
@@ -1057,6 +1058,21 @@ def test_compat_off_catalog_not_gated_and_sends_nothing() -> None:
     provider = _build_provider(_vendor_model("qwen", "custom-gateway-model", effort="max"), "k")
     assert isinstance(provider, OpenAIProvider)
     assert provider.thinking_payload is None
+
+
+def test_glm_gets_tool_stream_stream_extra_body() -> None:
+    # glm batches tool-call args by default; tool_stream=True makes it stream
+    # them incrementally so the router's idle timer resets per fragment.
+    glm = _build_provider(_vendor_model("glm", "glm-5.2"), "k")
+    assert isinstance(glm, OpenAICompatibleProvider)
+    assert glm.stream_extra_body == {"tool_stream": True}
+
+
+def test_non_glm_compat_has_no_stream_extra_body() -> None:
+    # deepseek/qwen/kimi/doubao stream tool-args incrementally by default.
+    ds = _build_provider(_vendor_model("deepseek", "deepseek-v4-pro"), "k")
+    assert isinstance(ds, OpenAICompatibleProvider)
+    assert ds.stream_extra_body is None
 
 
 # ---------------------------------------------------------------------------
