@@ -76,6 +76,8 @@ import {
   patchContextGates,
   readSecurity,
   patchSecurity,
+  readSandboxFs,
+  patchSandboxFs,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -1212,5 +1214,110 @@ describe("security group (spec.sandbox.network egress + policies.tool_use_enforc
       denylist: undefined,
       toolUseEnforcement: undefined,
     });
+  });
+});
+
+describe("sandbox filesystem group (spec.sandbox.filesystem.persistent_workspace)", () => {
+  it("persistentWorkspace true round-trips through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchSandboxFs(m, { persistentWorkspace: true });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("filesystem:");
+    expect(yaml).toContain("persistent_workspace: true");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readSandboxFs(roundTripped).persistentWorkspace).toBe(true);
+  });
+
+  it("explicit undefined deletes persistent_workspace but keeps the emptied filesystem block (backend requires it)", () => {
+    // SandboxSpec.filesystem is a REQUIRED pydantic field with no default —
+    // dropping the block from an existing sandbox makes the manifest 422 on
+    // deploy (mirrors patchSecurity's network handling, hotfix #1017). An
+    // emptied block must survive as ``filesystem: {}``.
+    const base: AgentManifest = {
+      spec: { sandbox: { filesystem: { persistent_workspace: true } } },
+    };
+    const cleared = patchSandboxFs(base, { persistentWorkspace: undefined });
+    expect(cleared.spec?.sandbox?.filesystem).toEqual({});
+    expect(cleared.spec?.sandbox).toEqual({ filesystem: {} });
+  });
+
+  it("clearing persistent_workspace preserves sandbox's unrelated unknown keys (runtime, resources)", () => {
+    const base: AgentManifest = {
+      spec: {
+        sandbox: {
+          runtime: "gvisor",
+          resources: { cpu: "1.0" },
+          filesystem: { persistent_workspace: true },
+        },
+      },
+    };
+    const cleared = patchSandboxFs(base, { persistentWorkspace: undefined });
+    expect(cleared.spec?.sandbox?.filesystem).toEqual({});
+    expect(cleared.spec?.sandbox?.runtime).toBe("gvisor");
+    expect(cleared.spec?.sandbox?.resources).toEqual({ cpu: "1.0" });
+  });
+
+  it("preserves filesystem's own unrelated unknown keys (readonly_root, writable) when patching persistent_workspace", () => {
+    const base: AgentManifest = {
+      spec: {
+        sandbox: {
+          filesystem: { readonly_root: true, writable: ["/tmp", "/workspace"] },
+        },
+      },
+    };
+    const next = patchSandboxFs(base, { persistentWorkspace: true });
+    expect(next.spec?.sandbox?.filesystem).toEqual({
+      readonly_root: true,
+      writable: ["/tmp", "/workspace"],
+      persistent_workspace: true,
+    });
+  });
+
+  it("does not materialize an absent sandbox when the filesystem patch nets out empty", () => {
+    const base: AgentManifest = { spec: {} };
+    const cleared = patchSandboxFs(base, { persistentWorkspace: undefined });
+    expect(cleared.spec?.sandbox).toBeUndefined();
+  });
+
+  it("an empty patch does not materialize sandbox at all", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchSandboxFs(base, {});
+    expect(next.spec?.sandbox).toBeUndefined();
+  });
+
+  it("coexists with patchSecurity's network projection without disturbing each other", () => {
+    const base: AgentManifest = { spec: {} };
+    const withNetwork = patchSecurity(base, { egress: "none" });
+    const withBoth = patchSandboxFs(withNetwork, { persistentWorkspace: true });
+    expect(withBoth.spec?.sandbox?.network).toEqual({ egress: "none" });
+    expect(withBoth.spec?.sandbox?.filesystem).toEqual({
+      persistent_workspace: true,
+    });
+
+    // Same coexistence when applied in the opposite order.
+    const withFilesystem = patchSandboxFs(base, { persistentWorkspace: true });
+    const withBothReversed = patchSecurity(withFilesystem, { egress: "none" });
+    expect(withBothReversed.spec?.sandbox?.network).toEqual({ egress: "none" });
+    expect(withBothReversed.spec?.sandbox?.filesystem).toEqual({
+      persistent_workspace: true,
+    });
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m: AgentManifest = {
+      spec: {
+        sandbox: {
+          runtime: "gvisor",
+          filesystem: { persistent_workspace: false },
+        },
+      },
+    };
+    const snapshot = JSON.stringify(m);
+    patchSandboxFs(m, { persistentWorkspace: true });
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("readSandboxFs returns undefined for persistentWorkspace on an empty manifest", () => {
+    expect(readSandboxFs({})).toEqual({ persistentWorkspace: undefined });
   });
 });
