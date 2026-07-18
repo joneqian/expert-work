@@ -187,6 +187,20 @@ export function FormView({
   const approvalTools = readApprovalTools(formData);
   const dynamicWorkersOn = readDynamicWorkersOn(formData);
   const outputSchemaName = readOutputSchemaName(formData);
+  // Stacked panes (the ``sections`` prop) already render a ``data-section-id``
+  // sub-heading per section (see the final return below). Only suppress a
+  // section's own ``<Heading>`` where it's a pure duplicate of that
+  // sub-heading (basic/model's primary heading/tools/mcp/defenses — each
+  // says exactly what the tab already said, e.g. "MCP" under "MCP"). Leave
+  // every OTHER heading alone even when stacked: several FormSection entries
+  // bundle multiple distinctly-titled sub-parts under one tab (model's
+  // fallback/reflection-evaluator/vision; prompt's output-schema;
+  // governance's approval/dynamic-workers) or add a real qualifier the tab
+  // label lacks (memory's "Long-term memory") — hiding those would remove
+  // the only label distinguishing that content, not fix a duplicate.
+  // The singular ``section=`` path (``stacked`` false) is unaffected, and so
+  // is ``bare`` (a separate, independent switch for the "basic" section).
+  const stacked = sections !== undefined;
 
   const toggleApproval = (name: string, on: boolean): void => {
     const next = on
@@ -198,7 +212,7 @@ export function FormView({
   const sectionsRecord: Record<FormSection, ReactNode> = {
     basic: (
       <section data-testid="af-basic" style={SECTION}>
-        {!bare && <Heading>{t("agent_form.section_basic")}</Heading>}
+        {!bare && !stacked && <Heading>{t("agent_form.section_basic")}</Heading>}
         <div style={FIELD} data-testid="af-name">
           <label style={LABEL}>
             {t("agent_form.field_name")}{" "}
@@ -241,13 +255,15 @@ export function FormView({
     model: (
       <>
         <section data-testid="af-model" style={SECTION}>
-          <Heading>
-            {t("agent_form.section_model")}
-            <FieldHelp
-              text={t("agent_form.section_model_help")}
-              testId="af-model"
-            />
-          </Heading>
+          {!stacked && (
+            <Heading>
+              {t("agent_form.section_model")}
+              <FieldHelp
+                text={t("agent_form.section_model_help")}
+                testId="af-model"
+              />
+            </Heading>
+          )}
           <ModelSelect
             value={readModel(formData)}
             catalog={catalog}
@@ -401,13 +417,15 @@ export function FormView({
 
     tools: (
       <section data-testid="af-tools" style={SECTION}>
-        <Heading>
-          {t("agent_form.section_tools")}
-          <FieldHelp
-            text={t("agent_form.section_tools_help")}
-            testId="af-tools"
-          />
-        </Heading>
+        {!stacked && (
+          <Heading>
+            {t("agent_form.section_tools")}
+            <FieldHelp
+              text={t("agent_form.section_tools_help")}
+              testId="af-tools"
+            />
+          </Heading>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <span>
             <Checkbox
@@ -445,10 +463,12 @@ export function FormView({
 
     mcp: (
       <section data-testid="af-mcp" style={SECTION}>
-        <Heading>
-          {t("agent_form.section_mcp")}
-          <FieldHelp text={t("agent_form.section_mcp_help")} testId="af-mcp" />
-        </Heading>
+        {!stacked && (
+          <Heading>
+            {t("agent_form.section_mcp")}
+            <FieldHelp text={t("agent_form.section_mcp_help")} testId="af-mcp" />
+          </Heading>
+        )}
         <McpToolPicker
           source={mcpSource}
           servers={tools.mcpServers}
@@ -768,13 +788,15 @@ export function FormView({
 
     defenses: (
       <section data-testid="af-defenses" style={SECTION}>
-        <Heading>
-          {t("agent_form.section_defenses")}
-          <FieldHelp
-            text={t("agent_form.section_defenses_help")}
-            testId="af-defenses"
-          />
-        </Heading>
+        {!stacked && (
+          <Heading>
+            {t("agent_form.section_defenses")}
+            <FieldHelp
+              text={t("agent_form.section_defenses_help")}
+              testId="af-defenses"
+            />
+          </Heading>
+        )}
 
         {readExtends(formData) !== undefined && (
           <div data-testid="af-defenses-extends-note" style={FIELD}>

@@ -746,9 +746,6 @@ export interface TranslationKeys {
     memory_recall_mode_help: string;
     memory_recall_per_session: string;
     memory_recall_per_turn: string;
-    section_run_deadline: string;
-    section_run_deadline_help: string;
-    run_deadline_hint: string;
     approval_timeout: string;
     approval_timeout_help: string;
     trajectory_recording: string;
@@ -3156,7 +3153,7 @@ const en: TranslationKeys = {
       "Wall-clock cap (seconds) on the whole run, including sub-agents; 0 = falls back to the platform floor (default 1h)",
     run_deadline_impact:
       "How long a single run may take (seconds), including any sub-agents it spawns; when exceeded the run is aborted, guarding against runaway runs and cost. 0 is not truly unlimited — it falls back to the platform's wall-clock floor (currently 3600s / 1h, ops-configurable). Set an explicit value here for precise control or a longer run.",
-    run_deadline_default: "0",
+    run_deadline_default: "0 (platform floor)",
     stream_deadline_label: "First-token timeout",
     stream_deadline_brief:
       "Max wait (seconds) for the first token of a single LLM call; 0 = off",
@@ -3340,11 +3337,6 @@ const en: TranslationKeys = {
       "Where memories go in the conversation.\nPer session: inserted once for the whole session — cheaper and faster (default).\nPer turn: re-inserted every turn — for agents that edit their own memory mid-conversation.\nExample: per session",
     memory_recall_per_session: "Per session (cheaper, faster)",
     memory_recall_per_turn: "Per turn",
-    section_run_deadline: "Max run time (seconds)",
-    section_run_deadline_help:
-      "How long a single run may take (seconds), including any sub-agents it spawns.\nWhen exceeded the run is aborted — guards against runaway runs and cost.\n0 = no limit.\nExample: 0 (no limit) or 1800 (30 min)",
-    run_deadline_hint:
-      "Max time for a single run (seconds), sub-agents included; 0 = no limit.",
     approval_timeout: "Approval wait limit (seconds)",
     approval_timeout_help:
       "How long a pending approval may wait (seconds) before it is auto-rejected, so it doesn't tie up resources.\nDefault 24h (86400).\nExample: 86400",

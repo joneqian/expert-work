@@ -523,10 +523,6 @@ export const readApprovalTimeout = (m: unknown): number =>
   specOf(m).policies?.approval_timeout_s ?? 86400;
 export const setApprovalTimeout = (m: unknown, s: number): AgentManifest =>
   patchPolicies(m, { approval_timeout_s: s });
-export const readRunDeadline = (m: unknown): number =>
-  specOf(m).policies?.run_deadline_s ?? 0;
-export const setRunDeadline = (m: unknown, s: number): AgentManifest =>
-  patchPolicies(m, { run_deadline_s: s });
 export const readTrajectoryRecording = (m: unknown): boolean =>
   specOf(m).policies?.trajectory_recording ?? true;
 export const setTrajectoryRecording = (m: unknown, on: boolean): AgentManifest =>

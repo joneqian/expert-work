@@ -49,11 +49,9 @@ import {
   setReconcileWrites,
   setRecallMode,
   readApprovalTimeout,
-  readRunDeadline,
   readToolBudgetOn,
   readTrajectoryRecording,
   setApprovalTimeout,
-  setRunDeadline,
   setToolBudgetOn,
   setTrajectoryRecording,
   readFallback,
@@ -287,16 +285,9 @@ describe("form_model writers preserve siblings", () => {
 
   it("policy knob readers default; setters share the policies block with approval", () => {
     expect(readApprovalTimeout(seed)).toBe(86400);
-    expect(readRunDeadline(seed)).toBe(0);
     expect(readTrajectoryRecording(seed)).toBe(true);
 
     const withGate = setApprovalTools(seed, ["exec_python"]);
-    const withDeadline = setRunDeadline(withGate, 1800);
-    expect(withDeadline.spec?.policies?.run_deadline_s).toBe(1800);
-    // setting another policy knob keeps the approval gate intact
-    expect(withDeadline.spec?.policies?.approval_required_tools).toEqual([
-      "exec_python",
-    ]);
 
     const noTrace = setTrajectoryRecording(seed, false);
     expect(noTrace.spec?.policies?.trajectory_recording).toBe(false);

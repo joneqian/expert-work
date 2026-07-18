@@ -622,7 +622,7 @@ const zhCN: TranslationKeys = {
       "整次运行(含子 agent)的秒数上限,0 = 用平台地板(默认 1 小时)",
     run_deadline_impact:
       "一次运行最多跑多久(秒),包含它调起的子 agent;超时即中止,防止失控长跑、费用爆掉。0 并非真正不限制——会套用平台地板(当前默认 3600 秒/1 小时,由运维配置);要精确控制或延长运行时长,请显式设置本值。",
-    run_deadline_default: "0",
+    run_deadline_default: "0(平台地板)",
     stream_deadline_label: "首 token 超时",
     stream_deadline_brief: "LLM 单次调用的首 token 等待上限(秒),0 = 关闭",
     stream_deadline_impact:
@@ -800,10 +800,6 @@ const zhCN: TranslationKeys = {
       "记忆插入对话的位置。\n每会话:整段对话固定插一次,更省更快(默认)。\n每轮:每轮都重新插,适合对话中会自己改记忆的 Agent。\n示例:每会话",
     memory_recall_per_session: "每会话(更省更快)",
     memory_recall_per_turn: "每轮",
-    section_run_deadline: "单次运行时长上限(秒)",
-    section_run_deadline_help:
-      "一次运行最多跑多久(秒),包含它调起的子 Agent。\n超时就中止,防止失控长跑、费用爆掉。\n0 表示不限制。\n示例:0(不限)或 1800(30 分钟)",
-    run_deadline_hint: "一次运行的最长耗时(秒),含子 Agent;0 = 不限制。",
     approval_timeout: "审批等待上限(秒)",
     approval_timeout_help:
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",
