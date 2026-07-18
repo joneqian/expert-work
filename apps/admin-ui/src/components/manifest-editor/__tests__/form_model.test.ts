@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from "vitest";
-import { parseYaml as parse } from "../yaml";
+import { dumpYaml, parseYaml as parse } from "../yaml";
 import {
   readApprovalTools,
   readDescription,
@@ -74,6 +74,8 @@ import {
   setOutputDlp,
   readRunBudget,
   patchRunBudget,
+  readContextGates,
+  patchContextGates,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -884,5 +886,173 @@ describe("run budget (workflow.max_iterations + policies.max_no_progress/run_dea
     const snapshot = JSON.stringify(m);
     patchRunBudget(m, { maxIterations: 50 });
     expect(JSON.stringify(m)).toBe(snapshot);
+  });
+});
+
+describe("context gates (policies.context_compression / working_memory / tool_result_prune / tool_output_budget)", () => {
+  it("context_compression fields round-trip through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchContextGates(m, {
+      ccEnabled: false,
+      ccThresholdPct: 0.6,
+      ccHeadKeep: 2,
+      ccTailKeep: 3,
+      ccFlushBeforeCompaction: false,
+      ccMaxPasses: 5,
+      ccMaxTurns: 10,
+      ccMaxTokens: 8000,
+      ccPressureFeedback: false,
+      ccPressureWarnPct: 0.8,
+    });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("context_compression:");
+    expect(yaml).toContain("threshold_pct: 0.6");
+    expect(yaml).toContain("max_tokens: 8000");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readContextGates(roundTripped)).toMatchObject({
+      ccEnabled: false,
+      ccThresholdPct: 0.6,
+      ccHeadKeep: 2,
+      ccTailKeep: 3,
+      ccFlushBeforeCompaction: false,
+      ccMaxPasses: 5,
+      ccMaxTurns: 10,
+      ccMaxTokens: 8000,
+      ccPressureFeedback: false,
+      ccPressureWarnPct: 0.8,
+    });
+  });
+
+  it("working_memory fields round-trip through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchContextGates(m, {
+      wmEnabled: false,
+      wmThresholdPct: 0.5,
+      wmMaxRecentTurns: 12,
+      wmKeepFirstTurn: false,
+    });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("working_memory:");
+    expect(yaml).toContain("max_recent_turns: 12");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readContextGates(roundTripped)).toMatchObject({
+      wmEnabled: false,
+      wmThresholdPct: 0.5,
+      wmMaxRecentTurns: 12,
+      wmKeepFirstTurn: false,
+    });
+  });
+
+  it("tool_result_prune fields round-trip through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchContextGates(m, {
+      prEnabled: false,
+      prThresholdPct: 0.9,
+      prRecentKept: 2,
+    });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("tool_result_prune:");
+    expect(yaml).toContain("recent_tool_results_kept: 2");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readContextGates(roundTripped)).toMatchObject({
+      prEnabled: false,
+      prThresholdPct: 0.9,
+      prRecentKept: 2,
+    });
+  });
+
+  it("tool_output_budget.enabled round-trips through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchContextGates(m, { budgetEnabled: false });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("tool_output_budget:");
+    expect(yaml).toContain("enabled: false");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readContextGates(roundTripped).budgetEnabled).toBe(false);
+  });
+
+  it("preserves unrelated policies keys (approval_required_tools) when patching", () => {
+    const base: AgentManifest = {
+      spec: { policies: { approval_required_tools: ["exec_python"] } },
+    };
+    const next = patchContextGates(base, { ccEnabled: false });
+    expect(next.spec?.policies?.approval_required_tools).toEqual([
+      "exec_python",
+    ]);
+    expect(next.spec?.policies?.context_compression).toEqual({
+      enabled: false,
+    });
+  });
+
+  it("explicit undefined deletes a key, dropping the block when emptied", () => {
+    const base: AgentManifest = {
+      spec: { policies: { context_compression: { enabled: false } } },
+    };
+    const cleared = patchContextGates(base, { ccEnabled: undefined });
+    expect(cleared.spec?.policies?.context_compression).toBeUndefined();
+    expect(cleared.spec?.policies).toBeUndefined();
+  });
+
+  it("clearing one field preserves siblings in the same sub-block", () => {
+    const base: AgentManifest = {
+      spec: {
+        policies: {
+          context_compression: { enabled: false, head_keep: 2 },
+        },
+      },
+    };
+    const next = patchContextGates(base, { ccEnabled: undefined });
+    expect(next.spec?.policies?.context_compression).toEqual({
+      head_keep: 2,
+    });
+  });
+
+  it("does not materialize an absent parent block for an untouched sub-block", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchContextGates(base, { prEnabled: false });
+    expect(next.spec?.policies?.context_compression).toBeUndefined();
+    expect(next.spec?.policies?.working_memory).toBeUndefined();
+    expect(next.spec?.policies?.tool_output_budget).toBeUndefined();
+    expect(next.spec?.policies?.tool_result_prune).toEqual({
+      enabled: false,
+    });
+  });
+
+  it("an empty patch does not materialize policies at all", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchContextGates(base, {});
+    expect(next.spec?.policies).toBeUndefined();
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m: AgentManifest = {
+      spec: { policies: { context_compression: { enabled: true } } },
+    };
+    const snapshot = JSON.stringify(m);
+    patchContextGates(m, { ccEnabled: false });
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("readContextGates returns undefined for every field on an empty manifest", () => {
+    expect(readContextGates({})).toEqual({
+      ccEnabled: undefined,
+      ccThresholdPct: undefined,
+      ccHeadKeep: undefined,
+      ccTailKeep: undefined,
+      ccFlushBeforeCompaction: undefined,
+      ccMaxPasses: undefined,
+      ccMaxTurns: undefined,
+      ccMaxTokens: undefined,
+      ccPressureFeedback: undefined,
+      ccPressureWarnPct: undefined,
+      wmEnabled: undefined,
+      wmThresholdPct: undefined,
+      wmMaxRecentTurns: undefined,
+      wmKeepFirstTurn: undefined,
+      prEnabled: undefined,
+      prThresholdPct: undefined,
+      prRecentKept: undefined,
+      budgetEnabled: undefined,
+    });
   });
 });
