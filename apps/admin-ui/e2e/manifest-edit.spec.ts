@@ -1,10 +1,12 @@
 /**
- * Manifest edit-via-form E2E — Stream S PR E.
+ * Manifest edit-via-form E2E — Stream S PR E, selectors migrated to the
+ * group-nav + detail-pane layout (agent-config-page redesign PR1).
  *
  * Proves an admin can open the agent-detail "配置清单"/Manifest tab — which now
  * renders the visual ``<ManifestEditor>`` form by default (no view/edit
- * toggle) — flip to its YAML escape-hatch tab, and Save, firing
- * ``PUT /v1/agents/{name}/{version}``. A second test runs axe over the editor.
+ * toggle) — flip to the raw YAML escape hatch via the top-right toggle
+ * button, and Save, firing ``PUT /v1/agents/{name}/{version}``. A second
+ * test runs axe over the editor.
  *
  * The editor fetches ``GET /v1/agents/schema`` and ``GET /v1/model-catalog``
  * (both enveloped) on mount; the shared ``installControlPlaneStub`` fixture
@@ -142,8 +144,9 @@ test("edit a manifest via the form", async ({ page }) => {
   await expect(page.getByTestId("manifest-save-btn")).toBeVisible();
   await expect(page.getByTestId("manifest-reset-btn")).toBeVisible();
 
-  // Switch to the raw YAML escape-hatch tab.
-  await page.getByTestId("manifest-tab-yaml").click();
+  // Switch to the raw YAML escape hatch via the top-right toggle button
+  // (replaces the old flat-tab row's "yaml" tab).
+  await page.getByTestId("cfg-yaml-toggle").click();
   await expect(page.getByTestId("manifest-yaml-view")).toBeVisible();
 
   // Save fires the PUT; the editor stays mounted.

@@ -1,9 +1,11 @@
 /**
- * Manifest editor E2E — Stream S PR C.
+ * Manifest editor E2E — Stream S PR C, selectors migrated to the group-nav +
+ * detail-pane layout (agent-config-page redesign PR1).
  *
- * Proves the Create-Agent modal opens the visual ``<ManifestEditor>``
- * on its Form tab, that the YAML tab switches the view, and that the
- * open modal passes the axe a11y check.
+ * Proves the Create-Agent modal opens the visual ``<ManifestEditor>`` on its
+ * Form view (the "basic" group by default), that the top-right YAML toggle
+ * switches the pane to the raw YAML view, and that the open modal passes the
+ * axe a11y check.
  *
  * The editor fetches ``GET /v1/agents/schema`` (enveloped) on mount, so
  * we stub it here. Because the shared ``installControlPlaneStub`` fixture
@@ -61,7 +63,8 @@ test("create modal opens the manifest editor on the Form tab", async ({ page }) 
   await expect(page.getByTestId("manifest-editor-create")).toBeVisible();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
 
-  await page.getByTestId("manifest-tab-yaml").click();
+  // Top-right YAML toggle (replaces the old flat-tab row's "yaml" tab).
+  await page.getByTestId("cfg-yaml-toggle").click();
   await expect(page.getByTestId("manifest-yaml-view")).toBeVisible();
 });
 
