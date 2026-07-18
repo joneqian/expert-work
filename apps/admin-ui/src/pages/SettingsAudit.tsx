@@ -68,9 +68,11 @@ interface McpTraffic {
  *  operator scans MCP volume in the timeline instead of opening every drawer.
  *  Returns ``null`` for non-MCP rows. */
 function mcpTraffic(entry: AuditEntry): McpTraffic | null {
-  if (entry.resource_id === null || !entry.resource_id.startsWith("mcp:")) return null;
+  // MCP tool names are namespaced ``mcp__<server>__<tool>`` (wire-safe form).
+  if (entry.resource_id === null || !entry.resource_id.startsWith("mcp__")) return null;
   const d = entry.details ?? {};
-  const server = typeof d.mcp_server === "string" ? d.mcp_server : entry.resource_id.slice(4).split(".")[0];
+  const server =
+    typeof d.mcp_server === "string" ? d.mcp_server : entry.resource_id.slice("mcp__".length).split("__")[0];
   const responseChars = typeof d.response_chars === "number" ? d.response_chars : null;
   return { server, responseChars, isError: d.mcp_is_error === true };
 }

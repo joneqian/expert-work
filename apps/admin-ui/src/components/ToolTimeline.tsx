@@ -3,7 +3,7 @@
  *
  * Parses the raw SSE ``updates`` frames into an ordered list of tool calls
  * (see ``parseToolCalls``) and renders each as a timeline entry: tool name
- * (with an MCP server badge for ``mcp:server.tool`` calls), status, the
+ * (with an MCP server badge for ``mcp__server__tool`` calls), status, the
  * call arguments, and a preview of the result. Answers "did the agent call
  * tool/MCP X, with what, and did it work?" at a glance — which the raw
  * event dump does not.

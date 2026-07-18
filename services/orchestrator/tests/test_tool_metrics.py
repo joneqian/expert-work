@@ -132,12 +132,12 @@ async def test_middleware_block_increments_blocked_outcome() -> None:
 
 
 async def test_mcp_tool_label_collapses_to_server() -> None:
-    # MCP tool names (mcp:<server>.<tool>) are externally defined → the metric
+    # MCP tool names (mcp__<server>__<tool>) are externally defined → the metric
     # label collapses to mcp:<server> to bound cardinality. Two different
     # tools on the same server share one series.
     server_label = "mcp:gh"
     before = _calls(server_label, "ok")
-    for tool_name in ("mcp:gh.create_issue", "mcp:gh.list_repos"):
+    for tool_name in ("mcp__gh__create_issue", "mcp__gh__list_repos"):
         await _dispatch_tool(
             _call(tool_name),
             _registry(_EchoTool(ToolSpec(name=tool_name, description="d"))),
@@ -148,7 +148,7 @@ async def test_mcp_tool_label_collapses_to_server() -> None:
     # both dispatches counted under the single collapsed server label ...
     assert _calls(server_label, "ok") == before + 2
     # ... and the per-tool labels were never created
-    assert _calls("mcp:gh.create_issue", "ok") == 0.0
+    assert _calls("mcp__gh__create_issue", "ok") == 0.0
 
 
 async def test_metrics_emit_without_audit_logger_or_tenant() -> None:

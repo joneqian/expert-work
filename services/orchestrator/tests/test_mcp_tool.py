@@ -255,9 +255,40 @@ async def test_mcp_tool_spec_is_namespaced() -> None:
         tool_def=_read_file_def(),
         server_name="fs",
     )
-    assert tool.spec.name == "mcp:fs.read_file"
+    assert tool.spec.name == "mcp__fs__read_file"
     assert tool.spec.description == "Read a file from the workspace."
     assert tool.spec.parameters["required"] == ["path"]
+
+
+def test_mcp_tool_name_is_wire_safe() -> None:
+    """The namespaced name must satisfy the vendor function-name grammar
+    ``^[a-zA-Z][a-zA-Z0-9_-]{,63}$`` — strict OpenAI-compatible vendors
+    (moonshot/kimi) 400 on ``:`` / ``.`` (the old ``mcp:<server>.<tool>`` form),
+    lenient ones (bigmodel/glm) tolerate them. ``mcp_tool_name`` must produce a
+    name accepted everywhere, folding any out-of-grammar character to ``_``."""
+    import re
+
+    from orchestrator.tools.mcp import MCP_TOOL_NAME_PREFIX, mcp_tool_name, parse_mcp_tool_name
+
+    grammar = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
+
+    # A real amap-style server (dash) + snake_case tool: no folding, just prefix.
+    assert mcp_tool_name("amap-maps", "maps_geo") == "mcp__amap-maps__maps_geo"
+    # Out-of-grammar characters in either segment fold to ``_`` (colon, dot,
+    # space, slash, CJK) — the exact chars that 400'd on moonshot/kimi.
+    folded = mcp_tool_name("weird:srv", "get.weather now/地图")
+    assert ":" not in folded and "." not in folded and " " not in folded
+    for name in (mcp_tool_name("amap-maps", "maps_geo"), folded, mcp_tool_name("s", "t")):
+        assert grammar.match(name), name
+        assert len(name) <= 64
+    # A pathologically long tool name is capped at 64 without breaking the grammar.
+    long_name = mcp_tool_name("srv", "x" * 200)
+    assert len(long_name) == 64 and grammar.match(long_name)
+    # ``parse_mcp_tool_name`` recovers the server (first ``__`` after the prefix);
+    # non-MCP names return ``None``.
+    assert parse_mcp_tool_name("mcp__amap-maps__maps_geo") == ("amap-maps", "maps_geo")
+    assert parse_mcp_tool_name("read_file") is None
+    assert MCP_TOOL_NAME_PREFIX == "mcp__"
 
 
 @pytest.mark.asyncio
@@ -363,11 +394,11 @@ async def test_register_mcp_tools_registers_each_with_namespaced_name() -> None:
         registry=registry,
     )
 
-    assert registered == ["mcp:fs.read_file", "mcp:fs.list_directory"]
-    assert "mcp:fs.read_file" in registry
-    assert "mcp:fs.list_directory" in registry
+    assert registered == ["mcp__fs__read_file", "mcp__fs__list_directory"]
+    assert "mcp__fs__read_file" in registry
+    assert "mcp__fs__list_directory" in registry
     # Dispatchable end-to-end through the registry.
-    tool = registry.get_required("mcp:fs.read_file")
+    tool = registry.get_required("mcp__fs__read_file")
     result = await tool.call({"path": "/x"}, ctx=_CTX)
     assert result.content == "r"
 

@@ -902,13 +902,13 @@ async def test_defer_loading_marker_ships_with_beta_header() -> None:
         messages=[HumanMessage(content="hi")],
         tools=[
             ToolSpec(name="active_tool", description="always bound"),
-            ToolSpec(name="mcp:gh.issue", description="deferred", defer_loading=True),
+            ToolSpec(name="mcp__gh__issue", description="deferred", defer_loading=True),
         ],
     )
     call = client.calls[0]
     assert call["betas"] == ["tool-search-tool-2025-10-19"]
     by_name = {t["name"]: t for t in call["tools"]}
-    assert by_name["mcp:gh.issue"]["defer_loading"] is True
+    assert by_name["mcp__gh__issue"]["defer_loading"] is True
     assert "defer_loading" not in by_name["active_tool"]
 
 
@@ -943,7 +943,7 @@ async def test_beta_rejection_falls_back_and_sticks() -> None:
     client = _RejectBetaOnce()
     provider = AnthropicProvider(client=client, model="claude-opus-4-8")
     deferred_tools = [
-        ToolSpec(name="mcp:gh.issue", description="deferred", defer_loading=True),
+        ToolSpec(name="mcp__gh__issue", description="deferred", defer_loading=True),
     ]
 
     result = await provider.complete(messages=[HumanMessage(content="hi")], tools=deferred_tools)

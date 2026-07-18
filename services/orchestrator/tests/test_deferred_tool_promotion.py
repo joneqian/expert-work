@@ -444,8 +444,8 @@ def _registry_for_tiers() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(FindToolsTool(registry=registry))
     registry.register(_ScriptedTool(name="active_tool"))
-    registry.register(_ScriptedTool(name="mcp:gh.issue"), deferred=True)
-    registry.register(_ScriptedTool(name="mcp:gh.pr"), deferred=True)
+    registry.register(_ScriptedTool(name="mcp__gh__issue"), deferred=True)
+    registry.register(_ScriptedTool(name="mcp__gh__pr"), deferred=True)
     return registry
 
 
@@ -487,16 +487,16 @@ async def test_native_search_tier_marks_deferred_and_drops_find_tools() -> None:
     by_name = {s.name: s for s in specs}
     assert "find_tools" not in by_name  # HX-J3: one retrieval channel
     assert by_name["active_tool"].defer_loading is False
-    assert by_name["mcp:gh.issue"].defer_loading is True
-    assert by_name["mcp:gh.pr"].defer_loading is True
+    assert by_name["mcp__gh__issue"].defer_loading is True
+    assert by_name["mcp__gh__pr"].defer_loading is True
 
 
 @pytest.mark.asyncio
 async def test_native_search_promoted_tool_loses_marker() -> None:
-    specs = await _bound_specs("native_search", promoted=["mcp:gh.issue"])
+    specs = await _bound_specs("native_search", promoted=["mcp__gh__issue"])
     by_name = {s.name: s for s in specs}
-    assert by_name["mcp:gh.issue"].defer_loading is False  # promoted = active-shaped
-    assert by_name["mcp:gh.pr"].defer_loading is True
+    assert by_name["mcp__gh__issue"].defer_loading is False  # promoted = active-shaped
+    assert by_name["mcp__gh__pr"].defer_loading is True
 
 
 @pytest.mark.asyncio
@@ -504,7 +504,7 @@ async def test_allowed_tools_tier_keeps_find_tools_and_full_set() -> None:
     specs = await _bound_specs("allowed_tools")
     by_name = {s.name: s for s in specs}
     assert "find_tools" in by_name  # HX-J3: the only promotion entry point
-    assert by_name["mcp:gh.issue"].defer_loading is True
+    assert by_name["mcp__gh__issue"].defer_loading is True
     assert by_name["find_tools"].defer_loading is False
 
 

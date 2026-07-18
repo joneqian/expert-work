@@ -548,7 +548,7 @@ async def test_defer_markers_build_allowed_tools_subset() -> None:
         tools=[
             ToolSpec(name="active_tool", description="always allowed"),
             ToolSpec(name="find_tools", description="promotion entry"),
-            ToolSpec(name="mcp:gh.issue", description="deferred", defer_loading=True),
+            ToolSpec(name="mcp__gh__issue", description="deferred", defer_loading=True),
         ],
     )
     call = client.calls[0]
@@ -556,7 +556,7 @@ async def test_defer_markers_build_allowed_tools_subset() -> None:
     assert {t["function"]["name"] for t in call["tools"]} == {
         "active_tool",
         "find_tools",
-        "mcp:gh.issue",
+        "mcp__gh__issue",
     }
     # …while the allowed subset excludes the marked (still-deferred) tool.
     choice = call["tool_choice"]
@@ -598,7 +598,7 @@ async def test_allowed_tools_rejection_falls_back_and_sticks() -> None:
 
     client = _RejectConstraintOnce()
     provider = OpenAIProvider(client=client, model="gpt-5.5")
-    deferred_tools = [ToolSpec(name="mcp:gh.issue", description="d", defer_loading=True)]
+    deferred_tools = [ToolSpec(name="mcp__gh__issue", description="d", defer_loading=True)]
 
     result = await provider.complete(messages=[HumanMessage(content="hi")], tools=deferred_tools)
     assert result.content == "ok"

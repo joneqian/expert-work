@@ -57,9 +57,9 @@ async def test_register_mcp_tools_deferred_excludes_from_bind() -> None:
 
     # Absent from the LLM bind (specs) but present in all_specs + dispatchable.
     assert _active(registry) == set()
-    assert _all(registry) == {"mcp:fs.read_file", "mcp:fs.list_dir"}
+    assert _all(registry) == {"mcp__fs__read_file", "mcp__fs__list_dir"}
     assert registry.has_deferred()
-    assert registry.get_required("mcp:fs.read_file") is not None
+    assert registry.get_required("mcp__fs__read_file") is not None
 
 
 # --- build_tool_registry policy --------------------------------------------
@@ -77,15 +77,15 @@ async def test_build_defers_mcp_tools_and_autoregisters_find_tools() -> None:
     registry = await _registry_with_mcp()
 
     # MCP tools deferred (not in bind), find_tools auto-added and ACTIVE.
-    assert "mcp:fs.read_file" not in _active(registry)
-    assert "mcp:fs.read_file" in _all(registry)
+    assert "mcp__fs__read_file" not in _active(registry)
+    assert "mcp__fs__read_file" in _all(registry)
     assert "find_tools" in _active(registry)  # discovery entry point always reachable
 
     # find_tools can surface the deferred MCP tools.
     found = registry.search("read_file")
     # HX-12 ranked retrieval: best match first; sibling tools sharing a
     # token (e.g. "file") may follow.
-    assert found and found[0].name == "mcp:fs.read_file"
+    assert found and found[0].name == "mcp__fs__read_file"
 
 
 @pytest.mark.asyncio
@@ -114,8 +114,8 @@ async def test_small_pool_activates_under_threshold() -> None:
     # Two tiny MCP schemas against a 200k window → far under
     # min(10% ctx, 20k); everything registers active, no find_tools.
     registry = await _registry_with_mcp_and_window(200_000)
-    assert "mcp:fs.read_file" in _active(registry)
-    assert "mcp:fs.list_dir" in _active(registry)
+    assert "mcp__fs__read_file" in _active(registry)
+    assert "mcp__fs__list_dir" in _active(registry)
     assert not registry.has_deferred()
     assert "find_tools" not in _all(registry)
 
@@ -125,7 +125,7 @@ async def test_small_pool_stays_deferred_over_threshold() -> None:
     # A tiny context window shrinks the threshold below even two small
     # schemas → defer stays, find_tools registers.
     registry = await _registry_with_mcp_and_window(100)
-    assert "mcp:fs.read_file" not in _active(registry)
+    assert "mcp__fs__read_file" not in _active(registry)
     assert registry.has_deferred()
     assert "find_tools" in _active(registry)
 
@@ -134,7 +134,7 @@ async def test_small_pool_stays_deferred_over_threshold() -> None:
 async def test_no_window_keeps_always_defer() -> None:
     # Legacy call sites (no context_window) keep TE-6b byte-identical.
     registry = await _registry_with_mcp_and_window(None)
-    assert "mcp:fs.read_file" not in _active(registry)
+    assert "mcp__fs__read_file" not in _active(registry)
     assert registry.has_deferred()
     assert "find_tools" in _active(registry)
 
@@ -156,4 +156,4 @@ async def test_escape_hatch_estimator_failure_keeps_defer(monkeypatch: pytest.Mo
 @pytest.mark.asyncio
 async def test_escape_hatch_keeps_source_labels() -> None:
     registry = await _registry_with_mcp_and_window(200_000)
-    assert registry.source_of("mcp:fs.read_file") == "mcp:fs"
+    assert registry.source_of("mcp__fs__read_file") == "mcp:fs"

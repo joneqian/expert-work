@@ -145,6 +145,7 @@ from orchestrator.tools.error_classifier import (
     render_recovery_advisory,
 )
 from orchestrator.tools.find_tools import promotion_events
+from orchestrator.tools.mcp import parse_mcp_tool_name
 from orchestrator.tools.mutation_classifier import classify as classify_mutation
 from orchestrator.tools.overflow import (
     EXEMPT_TOOLS,
@@ -2221,16 +2222,19 @@ def _elapsed_ms(started: float) -> int:
 def _metric_tool_label(name: str) -> str:
     """Bound the ``tool`` metric label (Stream TE-3).
 
-    MCP tool names are server-defined (``mcp:<server>.<tool>``) and thus
+    MCP tool names are server-defined (``mcp__<server>__<tool>``) and thus
     not bounded by anything we author — one server can expose dozens of
     tools. Collapse them to ``mcp:<server>`` so the label stays bounded by
-    the (catalog-curated, pool-capped) server set. The exact tool name is
-    still recorded in the TE-2 audit row, the right home for unbounded
-    identifiers. Builtin / manifest-authored HTTP / skill tool names are
-    human-authored and finite-per-config, so they pass through unchanged.
+    the (catalog-curated, pool-capped) server set (the ``mcp:`` label form is
+    kept for dashboard stability — it is a Prometheus label, never a wire
+    function name). The exact tool name is still recorded in the TE-2 audit
+    row, the right home for unbounded identifiers. Builtin / manifest-authored
+    HTTP / skill tool names are human-authored and finite-per-config, so they
+    pass through unchanged.
     """
-    if name.startswith("mcp:"):
-        return name.split(".", 1)[0]
+    parsed = parse_mcp_tool_name(name)
+    if parsed is not None:
+        return f"mcp:{parsed[0]}"
     return name
 
 
@@ -2254,15 +2258,16 @@ def _mcp_audit_details(
     """Stream 14.4 — structured MCP traffic dimensions for the audit row.
 
     Returns ``None`` for non-MCP tools (the generic ``tool:call`` audit is
-    unchanged). For an ``mcp:<server>.<tool>`` name it returns the server +
+    unchanged). For an ``mcp__<server>__<tool>`` name it returns the server +
     bare tool as structured fields (so operators filter MCP traffic without
     parsing the name) plus, on the success path, ``response_chars`` — the size
     of the textified MCP response, a data-volume / exfil signal. The response
     CONTENT is never recorded (privacy / clear-text-logging), only its length.
     """
-    if not name.startswith("mcp:"):
+    parsed = parse_mcp_tool_name(name)
+    if parsed is None:
         return None
-    server, _, tool = name[len("mcp:") :].partition(".")
+    server, tool = parsed
     details: dict[str, Any] = {"mcp_server": server, "mcp_tool": tool, "mcp_is_error": is_error}
     if content is not None:
         details["response_chars"] = len(content)

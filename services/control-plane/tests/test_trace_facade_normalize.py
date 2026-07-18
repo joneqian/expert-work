@@ -481,9 +481,9 @@ def test_normalize_tool_span_detail_from_attributes_tool() -> None:
             "sess",
             0.5,
             0,
-            metadata={"attributes": {"tool": "mcp:amap-maps.maps_weather"}},
+            metadata={"attributes": {"tool": "mcp__amap-maps__maps_weather"}},
         ),
     ]
     spans = normalize_trace(_trace(obs))["spans"]
     tool = next(s for s in spans if s["kind"] == "tool")
-    assert tool["detail"] == "mcp:amap-maps.maps_weather"
+    assert tool["detail"] == "mcp__amap-maps__maps_weather"

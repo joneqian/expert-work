@@ -29,7 +29,7 @@ _SEP_RE = re.compile(r"[_\-./:]+")
 def split_identifier(name: str) -> list[str]:
     """Split a tool identifier into searchable words.
 
-    ``mcp:github.create_pull_request`` → ``["mcp", "github", "create",
+    ``mcp__github__create_pull_request`` → ``["mcp", "github", "create",
     "pull", "request"]``; camelCase splits too.
     """
     parts = _SEP_RE.split(_CAMEL_RE.sub(" ", name))
