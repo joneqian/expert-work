@@ -922,11 +922,13 @@ export const setOutputDlp = (m: unknown, v: "redact" | "off"): AgentManifest =>
 // fields). Readers return the raw stored value (``undefined`` when unset —
 // the backend Pydantic defaults apply). ``patchSecurity`` only touches the
 // block(s)/key(s) whose fields are present in ``patch`` (never materializes
-// an untouched block), deletes a key whose patch value is ``undefined``, and
-// drops the ``network`` block when patching empties it — dropping ``sandbox``
-// itself only when that also empties it AND it carries no other (unknown)
-// keys, since ``sandbox`` commonly carries unrelated YAML-authored keys
-// (runtime/image/resources/filesystem) that must survive untouched. Arrays
+// an untouched block) and deletes a key whose patch value is ``undefined``.
+// Unlike the optional ``policies`` sub-blocks, ``sandbox.network`` is a
+// REQUIRED pydantic field (no default) — an emptied block is kept as
+// ``network: {}`` (valid: every NetworkSpec field is defaulted) instead of
+// dropped, which would 422 the next deploy. ``sandbox``'s unrelated keys
+// (runtime/image/resources/filesystem) survive untouched; a fully absent
+// sandbox is still never materialized just to hold an empty network. Arrays
 // are copied on write so the stored manifest never aliases the caller's array.
 export interface SecurityFields {
   egress?: string;
@@ -963,16 +965,15 @@ export function patchSecurity(
       patch.denylist === undefined ? undefined : [...patch.denylist];
   }
   if (Object.keys(networkPatch).length > 0) {
-    const sandbox = spec.sandbox ?? {};
-    const mergedNetwork = mergeBlock(
-      sandbox.network as Record<string, unknown> | undefined,
-      networkPatch,
-    );
-    const mergedSandbox: Record<string, unknown> = { ...sandbox };
-    if (mergedNetwork === undefined) delete mergedSandbox.network;
-    else mergedSandbox.network = mergedNetwork;
-    updates.sandbox =
-      Object.keys(mergedSandbox).length > 0 ? mergedSandbox : undefined;
+    const sandbox = spec.sandbox;
+    const mergedNetwork =
+      mergeBlock(
+        sandbox?.network as Record<string, unknown> | undefined,
+        networkPatch,
+      ) ?? {};
+    if (sandbox !== undefined || Object.keys(mergedNetwork).length > 0) {
+      updates.sandbox = { ...(sandbox ?? {}), network: mergedNetwork };
+    }
   }
 
   if ("toolUseEnforcement" in patch) {
