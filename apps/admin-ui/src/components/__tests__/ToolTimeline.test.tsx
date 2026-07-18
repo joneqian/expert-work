@@ -46,7 +46,7 @@ describe("ToolTimeline", () => {
           tool_calls: [
             {
               id: "c1",
-              name: "mcp:amap-maps.maps_direction_driving",
+              name: "mcp__amap-maps__maps_direction_driving",
               args: { origin: "a" },
               type: "tool_call",
             },

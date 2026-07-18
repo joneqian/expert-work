@@ -325,7 +325,7 @@ from orchestrator.graph_builder.builder import _mcp_audit_details  # noqa: E402
 
 
 def test_mcp_audit_details_parses_server_and_volume() -> None:
-    d = _mcp_audit_details("mcp:github.search_issues", content="hello world")
+    d = _mcp_audit_details("mcp__github__search_issues", content="hello world")
     assert d == {
         "mcp_server": "github",
         "mcp_tool": "search_issues",
@@ -339,16 +339,16 @@ def test_mcp_audit_details_none_for_non_mcp_tool() -> None:
 
 
 def test_mcp_audit_details_omits_volume_without_content() -> None:
-    d = _mcp_audit_details("mcp:fs.read", is_error=True)
+    d = _mcp_audit_details("mcp__fs__read", is_error=True)
     assert d == {"mcp_server": "fs", "mcp_tool": "read", "mcp_is_error": True}
     assert "response_chars" not in d
 
 
 async def test_mcp_tool_call_audit_carries_traffic_dimensions() -> None:
-    tool = _EchoTool(ToolSpec(name="mcp:github.search", description="d"))
+    tool = _EchoTool(ToolSpec(name="mcp__github__search", description="d"))
     audit = _RecordingAuditLogger()
     await _dispatch_tool(
-        _call("mcp:github.search", {"q": "bug"}),
+        _call("mcp__github__search", {"q": "bug"}),
         _registry(tool),
         _ctx(),
         before_tool_dispatch_chain=None,
@@ -356,7 +356,7 @@ async def test_mcp_tool_call_audit_carries_traffic_dimensions() -> None:
     )
     entry = audit.entries[0]
     assert entry.action.value == "tool:call"
-    assert entry.resource_id == "mcp:github.search"
+    assert entry.resource_id == "mcp__github__search"
     # MCP traffic dimensions present + structured.
     assert entry.details["mcp_server"] == "github"
     assert entry.details["mcp_tool"] == "search"

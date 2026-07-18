@@ -157,13 +157,13 @@ async def test_mcp_tools_assembled_from_pool() -> None:
     pool = await _seeded_pool()
     registry = await build_tool_registry([MCPToolSpec()], tool_env=ToolEnv(mcp_pool=pool))
     # Stream TE-6b — both server-advertised tools register *deferred*
-    # (namespaced ``mcp:<server>.<tool>``, absent from the bind), and
+    # (namespaced ``mcp__<server>__<tool>``, absent from the bind), and
     # ``find_tools`` is auto-added active so they can be discovered.
     assert {s.name for s in registry.specs()} == {"find_tools"}
     assert {s.name for s in registry.all_specs()} == {
         "find_tools",
-        "mcp:gitlab.read_pr",
-        "mcp:gitlab.post_comment",
+        "mcp__gitlab__read_pr",
+        "mcp__gitlab__post_comment",
     }
 
 
@@ -175,7 +175,7 @@ async def test_mcp_allow_tools_filters() -> None:
     )
     # TE-6b — only read_pr registers (deferred); find_tools auto-added active.
     assert {s.name for s in registry.specs()} == {"find_tools"}
-    assert {s.name for s in registry.all_specs()} == {"find_tools", "mcp:gitlab.read_pr"}
+    assert {s.name for s in registry.all_specs()} == {"find_tools", "mcp__gitlab__read_pr"}
 
 
 async def _two_server_pool() -> MCPServerPool:
@@ -201,8 +201,8 @@ async def test_mcp_server_allowlist_empty_sees_all_servers() -> None:
     # TE-6b — both servers' tools register deferred; find_tools auto-added.
     assert {s.name for s in registry.all_specs()} == {
         "find_tools",
-        "mcp:gitlab.read_pr",
-        "mcp:linear.list_issues",
+        "mcp__gitlab__read_pr",
+        "mcp__linear__list_issues",
     }
     assert {s.name for s in registry.specs()} == {"find_tools"}
 
@@ -218,9 +218,9 @@ async def test_mcp_server_allowlist_hides_unlisted_servers() -> None:
     )
     # TE-6b — gitlab's tool registers deferred (dispatchable via get), linear
     # is hidden by the allowlist; find_tools auto-added active.
-    assert {s.name for s in registry.all_specs()} == {"find_tools", "mcp:gitlab.read_pr"}
-    assert registry.get("mcp:gitlab.read_pr") is not None
-    assert registry.get("mcp:linear.list_issues") is None
+    assert {s.name for s in registry.all_specs()} == {"find_tools", "mcp__gitlab__read_pr"}
+    assert registry.get("mcp__gitlab__read_pr") is not None
+    assert registry.get("mcp__linear__list_issues") is None
 
 
 @pytest.mark.asyncio
@@ -409,8 +409,8 @@ async def test_tenant_pool_tools_registered_alongside_platform() -> None:
     registry = await build_tool_registry(
         [MCPToolSpec()], tool_env=ToolEnv(mcp_pool=platform, tenant_mcp_pool=tenant)
     )
-    assert registry.get("mcp:ops.deploy") is not None
-    assert registry.get("mcp:github.create_issue") is not None
+    assert registry.get("mcp__ops__deploy") is not None
+    assert registry.get("mcp__github__create_issue") is not None
 
 
 @pytest.mark.asyncio
@@ -433,8 +433,8 @@ async def test_tenant_pool_not_filtered_by_platform_allowlist() -> None:
         [MCPToolSpec()],
         tool_env=ToolEnv(mcp_pool=platform, tenant_mcp_pool=tenant, mcp_allowlist=("ops",)),
     )
-    assert registry.get("mcp:ops.deploy") is not None  # platform, on allowlist
-    assert registry.get("mcp:github.create_issue") is not None  # tenant, not gated
+    assert registry.get("mcp__ops__deploy") is not None  # platform, on allowlist
+    assert registry.get("mcp__github__create_issue") is not None  # tenant, not gated
 
 
 @pytest.mark.asyncio
@@ -453,8 +453,8 @@ async def test_allow_tools_filters_tenant_pool_too() -> None:
         [MCPToolSpec(allow_tools=["create_issue"])],
         tool_env=ToolEnv(tenant_mcp_pool=tenant),
     )
-    assert registry.get("mcp:github.create_issue") is not None
-    assert registry.get("mcp:github.delete_repo") is None
+    assert registry.get("mcp__github__create_issue") is not None
+    assert registry.get("mcp__github__delete_repo") is None
 
 
 @pytest.mark.asyncio
@@ -468,7 +468,7 @@ async def test_tenant_pool_only_no_platform_pool_ok() -> None:
         ),
     )
     registry = await build_tool_registry([MCPToolSpec()], tool_env=ToolEnv(tenant_mcp_pool=tenant))
-    assert registry.get("mcp:github.create_issue") is not None
+    assert registry.get("mcp__github__create_issue") is not None
 
 
 @pytest.mark.asyncio
@@ -491,8 +491,8 @@ async def test_name_collision_platform_wins() -> None:
         [MCPToolSpec()], tool_env=ToolEnv(mcp_pool=platform, tenant_mcp_pool=tenant)
     )
     # platform registered first; the colliding tenant server is skipped.
-    assert registry.get("mcp:github.from_platform") is not None
-    assert registry.get("mcp:github.from_tenant") is None
+    assert registry.get("mcp__github__from_platform") is not None
+    assert registry.get("mcp__github__from_tenant") is None
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +511,7 @@ async def test_platform_db_pool_tools_registered() -> None:
         [MCPToolSpec()],
         tool_env=ToolEnv(platform_mcp_pool=catalog, mcp_allowlist=("weather",)),
     )
-    assert registry.get("mcp:weather.forecast") is not None
+    assert registry.get("mcp__weather__forecast") is not None
 
 
 @pytest.mark.asyncio
@@ -531,8 +531,8 @@ async def test_platform_db_pool_gated_by_allowlist() -> None:
         [MCPToolSpec()],
         tool_env=ToolEnv(platform_mcp_pool=catalog, mcp_allowlist=("weather",)),
     )
-    assert registry.get("mcp:weather.forecast") is not None
-    assert registry.get("mcp:secret.leak") is None
+    assert registry.get("mcp__weather__forecast") is not None
+    assert registry.get("mcp__secret__leak") is None
 
 
 @pytest.mark.asyncio
@@ -547,7 +547,7 @@ async def test_platform_db_pool_empty_allowlist_sees_none() -> None:
     registry = await build_tool_registry(
         [MCPToolSpec()], tool_env=ToolEnv(platform_mcp_pool=catalog)
     )
-    assert registry.get("mcp:weather.forecast") is None
+    assert registry.get("mcp__weather__forecast") is None
 
 
 @pytest.mark.asyncio
@@ -566,8 +566,8 @@ async def test_file_pool_wins_collision_over_db_pool() -> None:
         [MCPToolSpec()], tool_env=ToolEnv(mcp_pool=file_pool, platform_mcp_pool=db_pool)
     )
     # file pool registered first; the colliding DB server is skipped.
-    assert registry.get("mcp:shared.from_file") is not None
-    assert registry.get("mcp:shared.from_db") is None
+    assert registry.get("mcp__shared__from_file") is not None
+    assert registry.get("mcp__shared__from_db") is None
 
 
 @pytest.mark.asyncio
@@ -581,7 +581,7 @@ async def test_platform_db_pool_only_no_file_pool_ok() -> None:
         [MCPToolSpec()],
         tool_env=ToolEnv(platform_mcp_pool=catalog, mcp_allowlist=("weather",)),
     )
-    assert registry.get("mcp:weather.forecast") is not None
+    assert registry.get("mcp__weather__forecast") is not None
 
 
 @pytest.mark.asyncio
@@ -604,8 +604,8 @@ async def test_servers_filter_restricts_to_named_servers() -> None:
     registry = await build_tool_registry(
         [MCPToolSpec(servers=["github"])], tool_env=ToolEnv(mcp_pool=pool)
     )
-    assert registry.get("mcp:github.gh") is not None
-    assert registry.get("mcp:linear.li") is None
+    assert registry.get("mcp__github__gh") is not None
+    assert registry.get("mcp__linear__li") is None
 
 
 @pytest.mark.asyncio
@@ -620,8 +620,8 @@ async def test_empty_servers_means_all() -> None:
         RecordingMCPClient(tools=(MCPToolDef(name="li", description="", input_schema={}),)),
     )
     registry = await build_tool_registry([MCPToolSpec()], tool_env=ToolEnv(mcp_pool=pool))
-    assert registry.get("mcp:github.gh") is not None
-    assert registry.get("mcp:linear.li") is not None
+    assert registry.get("mcp__github__gh") is not None
+    assert registry.get("mcp__linear__li") is not None
 
 
 @pytest.mark.asyncio
@@ -638,8 +638,8 @@ async def test_servers_filter_applies_to_tenant_pool() -> None:
     registry = await build_tool_registry(
         [MCPToolSpec(servers=["github"])], tool_env=ToolEnv(tenant_mcp_pool=tenant)
     )
-    assert registry.get("mcp:github.gh") is not None
-    assert registry.get("mcp:postgres.pg") is None
+    assert registry.get("mcp__github__gh") is not None
+    assert registry.get("mcp__postgres__pg") is None
 
 
 @pytest.mark.asyncio
@@ -659,8 +659,8 @@ async def test_servers_filter_composes_with_platform_and_tenant() -> None:
         [MCPToolSpec(servers=["github"])],
         tool_env=ToolEnv(mcp_pool=platform, tenant_mcp_pool=tenant),
     )
-    assert registry.get("mcp:github.gh") is not None
-    assert registry.get("mcp:ops.deploy") is None
+    assert registry.get("mcp__github__gh") is not None
+    assert registry.get("mcp__ops__deploy") is None
 
 
 @pytest.mark.asyncio
@@ -688,9 +688,9 @@ async def test_platform_reserves_name_even_when_all_its_tools_filtered() -> None
         [MCPToolSpec(allow_tools=["tenant_tool"])],
         tool_env=ToolEnv(mcp_pool=platform, tenant_mcp_pool=tenant),
     )
-    # Platform reserved "github" → tenant's mcp:github.tenant_tool is NOT registered.
-    assert registry.get("mcp:github.tenant_tool") is None
-    assert registry.get("mcp:github.platform_tool") is None  # filtered out by allow_tools
+    # Platform reserved "github" → tenant's mcp__github__tenant_tool is NOT registered.
+    assert registry.get("mcp__github__tenant_tool") is None
+    assert registry.get("mcp__github__platform_tool") is None  # filtered out by allow_tools
 
 
 # --- Stream TE-7/TE-8/TE-9a file-op builtins ---

@@ -6,7 +6,7 @@ from orchestrator.tools.ranking import build_document, rank_tools, split_identif
 
 
 def test_split_identifier_handles_separators_and_camel_case() -> None:
-    assert split_identifier("mcp:github.create_pull_request") == [
+    assert split_identifier("mcp__github__create_pull_request") == [
         "mcp",
         "github",
         "create",

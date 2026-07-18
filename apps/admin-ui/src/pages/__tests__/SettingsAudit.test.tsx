@@ -194,7 +194,7 @@ describe("SettingsAudit", () => {
       id: 7,
       action: "tool:call",
       resource_type: "tool",
-      resource_id: "mcp:github.search",
+      resource_id: "mcp__github__search",
       details: { mcp_server: "github", mcp_tool: "search", response_chars: 2400, mcp_is_error: false },
     };
     installAdapter([

@@ -8,9 +8,10 @@
  * message carries no tool name (LangChain quirk), so the name + args come
  * from the call side.
  *
- * MCP tools are registered as ``mcp:{server}.{tool}`` (orchestrator
- * ``MCPTool``), so we attribute the originating MCP server from the name.
- * Builtin tools (``web_search``, ``exec_python``, …) keep their bare name.
+ * MCP tools are registered as ``mcp__{server}__{tool}`` (orchestrator
+ * ``MCPTool`` — wire-safe form, see ``mcp_tool_name``), so we attribute the
+ * originating MCP server from the name. Builtin tools (``web_search``,
+ * ``exec_python``, …) keep their bare name.
  */
 import type { SseEvent } from "./sessions";
 
@@ -19,12 +20,12 @@ export type ToolCallStatus = "pending" | "success" | "error" | "pending_approval
 export interface ToolCallEntry {
   /** ``tool_call_id`` — links the call to its result. */
   id: string;
-  /** Raw tool name as the LLM called it (e.g. ``mcp:amap-maps.maps_direction_driving``). */
+  /** Raw tool name as the LLM called it (e.g. ``mcp__amap-maps__maps_direction_driving``). */
   rawName: string;
   isMcp: boolean;
   /** MCP server name when ``isMcp`` (else ``null``). */
   server: string | null;
-  /** Display tool name — the ``mcp:server.`` prefix stripped. */
+  /** Display tool name — the ``mcp__server__`` prefix stripped. */
   toolName: string;
   args: Record<string, unknown>;
   status: ToolCallStatus;
@@ -36,7 +37,8 @@ export interface ToolCallEntry {
   durationMs: number | null;
 }
 
-const MCP_PREFIX = "mcp:";
+const MCP_PREFIX = "mcp__";
+const MCP_SEP = "__";
 // Spotlight injection-defense fence lines wrapping untrusted tool output.
 const SPOTLIGHT_FENCE = /«\/?UNTRUSTED[^»]*»/g;
 
@@ -81,10 +83,10 @@ interface ParsedName {
 
 function parseName(raw: string): ParsedName {
   if (raw.startsWith(MCP_PREFIX)) {
-    const rest = raw.slice(MCP_PREFIX.length); // "server.tool"
-    const dot = rest.indexOf(".");
-    if (dot > 0) {
-      return { isMcp: true, server: rest.slice(0, dot), toolName: rest.slice(dot + 1) };
+    const rest = raw.slice(MCP_PREFIX.length); // "server__tool"
+    const sep = rest.indexOf(MCP_SEP);
+    if (sep > 0) {
+      return { isMcp: true, server: rest.slice(0, sep), toolName: rest.slice(sep + MCP_SEP.length) };
     }
     return { isMcp: true, server: null, toolName: rest };
   }

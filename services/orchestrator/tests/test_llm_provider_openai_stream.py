@@ -127,7 +127,7 @@ async def test_stream_allowed_tools_rejection_falls_back_and_sticks() -> None:
 
     client = _RejectConstraintStream()
     provider = OpenAIProvider(client=client, model="gpt-5.5")
-    deferred_tools = [ToolSpec(name="mcp:gh.issue", description="d", defer_loading=True)]
+    deferred_tools = [ToolSpec(name="mcp__gh__issue", description="d", defer_loading=True)]
 
     out = [
         d

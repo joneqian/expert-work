@@ -41,6 +41,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -59,6 +60,41 @@ from orchestrator.tools.registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Wire-safe namespaced-name grammar for MCP tools. The OpenAI / Anthropic
+#: function-name rule is ``^[a-zA-Z][a-zA-Z0-9_-]{,63}$``: strict OpenAI-compatible
+#: vendors (moonshot/kimi) return a 400 on ``:`` / ``.`` while lenient ones
+#: (bigmodel/glm) tolerate them, so the old ``mcp:<server>.<tool>`` form worked on
+#: some vendors and 400'd on others. ``mcp__<server>__<tool>`` — with every
+#: out-of-grammar character folded to ``_`` and the whole capped at 64 chars — is
+#: accepted everywhere. The ``mcp__`` prefix guarantees a letter start and still
+#: marks a name as MCP-routed for the metric / audit helpers.
+MCP_TOOL_NAME_PREFIX = "mcp__"
+_MCP_NAME_SEP = "__"
+_MCP_NAME_MAX_CHARS = 64
+_MCP_UNSAFE_CHAR = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def mcp_tool_name(server_name: str, tool_name: str) -> str:
+    """Compose the wire-safe Expert Work-side name for one MCP tool."""
+    server = _MCP_UNSAFE_CHAR.sub("_", server_name)
+    tool = _MCP_UNSAFE_CHAR.sub("_", tool_name)
+    return f"{MCP_TOOL_NAME_PREFIX}{server}{_MCP_NAME_SEP}{tool}"[:_MCP_NAME_MAX_CHARS]
+
+
+def parse_mcp_tool_name(name: str) -> tuple[str, str] | None:
+    """Split a namespaced MCP tool name into ``(server, tool)``.
+
+    ``None`` for non-MCP names. The FIRST ``__`` after the ``mcp__`` prefix
+    separates server from tool — server names are catalog-curated and never
+    contain ``__``, so the server segment is unambiguous even when the (folded)
+    tool segment does. A name with no separator yields ``(server, "")``.
+    """
+    if not name.startswith(MCP_TOOL_NAME_PREFIX):
+        return None
+    server, _, tool = name[len(MCP_TOOL_NAME_PREFIX) :].partition(_MCP_NAME_SEP)
+    return server, tool
+
 
 DEFAULT_MCP_CHAR_CAP = 20_000
 DEFAULT_MAX_SERVERS = 5
@@ -603,9 +639,10 @@ def _render_content_blocks(blocks: Sequence[Any]) -> str:
 class MCPTool:
     """Expert Work :class:`Tool` wrapping one MCP-exposed tool.
 
-    The Expert Work-side name is namespaced ``mcp:<server>.<tool>`` so the
-    LLM (and the audit log) can tell which MCP server a call routed
-    to. ``call`` ignores ``ctx`` in M0 — per-tenant MCP server
+    The Expert Work-side name is namespaced ``mcp__<server>__<tool>`` (see
+    :func:`mcp_tool_name`) so the LLM (and the audit log) can tell which MCP
+    server a call routed to, while staying inside the vendor function-name
+    grammar. ``call`` ignores ``ctx`` in M0 — per-tenant MCP server
     selection happens at registration time (the orchestrator binds a
     pool per tenant); the tool itself only sees one server.
     """
@@ -624,7 +661,7 @@ class MCPTool:
             self,
             "spec",
             ToolSpec(
-                name=f"mcp:{self.server_name}.{self.tool_def.name}",
+                name=mcp_tool_name(self.server_name, self.tool_def.name),
                 description=self.tool_def.description,
                 parameters=self.tool_def.input_schema,
             ),

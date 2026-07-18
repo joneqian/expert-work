@@ -38,7 +38,7 @@ function toolResult(id: string, content: string, status = "success"): unknown {
 describe("parseToolCalls", () => {
   it("links a call to its result and parses an MCP server from the name", () => {
     const events = [
-      updates("agent", [aiCall("c1", "mcp:amap-maps.maps_direction_driving", { origin: "a" })]),
+      updates("agent", [aiCall("c1", "mcp__amap-maps__maps_direction_driving", { origin: "a" })]),
       updates("tools", [
         toolResult("c1", "«UNTRUSTED nonce=x»\n{\"distance\":\"1001\"}\n«/UNTRUSTED nonce=x»"),
       ]),
@@ -91,7 +91,7 @@ describe("parseToolCalls", () => {
   it("preserves call order across frames and handles multiple calls", () => {
     const events = [
       updates("agent", [aiCall("c1", "web_search", {})]),
-      updates("agent", [aiCall("c2", "mcp:amap-maps.geocode", {})]),
+      updates("agent", [aiCall("c2", "mcp__amap-maps__geocode", {})]),
       updates("tools", [toolResult("c2", "ok"), toolResult("c1", "ok")]),
     ];
     const out = parseToolCalls(events);
@@ -116,7 +116,7 @@ describe("parseToolCalls", () => {
     const named = {
       type: "tool",
       tool_call_id: "orphan",
-      name: "mcp:amap-maps.geo",
+      name: "mcp__amap-maps__geo",
       content: "{}",
       status: "success",
     };
