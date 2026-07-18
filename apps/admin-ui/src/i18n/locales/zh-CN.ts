@@ -603,6 +603,8 @@ const zhCN: TranslationKeys = {
     group_sandbox: "沙箱与资源",
     group_observability: "触发器与可观测",
     group_pending_hint: "本组设置将在后续版本可视化,当前请用 YAML 编辑",
+    field_impact_label: "影响说明",
+    field_default_badge: "默认 {{value}}",
   },
   model_select: {
     provider_label: "提供方",

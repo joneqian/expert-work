@@ -4,12 +4,16 @@
  * line, a one-line brief always visible beneath it, and an optional impact
  * note that stays collapsed until expanded.
  *
- * Purely presentational: all copy (label/brief/impact) and the control
- * itself come from the caller — this component formats none of it, it just
- * lays the pieces out. Task 6 supplies the actual field copy when it wires
- * the pilot "运行预算与超时" group; this component takes no i18n dependency.
+ * Purely presentational: per-field copy (label/brief/impact) and the
+ * control itself come from the caller, already translated — this component
+ * formats none of it, it just lays the pieces out. Task 6 supplies the
+ * actual field copy when it wires the pilot "运行预算与超时" group. The
+ * component's own chrome (impact-expander label, default-value badge
+ * prefix) is sourced via react-i18next, same as every sibling
+ * manifest-editor component.
  */
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Collapse, Tag } from "antd";
 
 export interface FieldRowProps {
@@ -36,6 +40,8 @@ export function FieldRow({
   isDefault,
   children,
 }: FieldRowProps) {
+  const { t } = useTranslation();
+
   return (
     <div data-field-id={fieldId} style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -43,7 +49,11 @@ export function FieldRow({
         <span style={{ flex: 1 }}>{children}</span>
         {defaultValue !== undefined && (
           <Tag color={isDefault ? undefined : "blue"} bordered={false}>
-            {isDefault ? `默认 ${defaultValue}` : defaultValue}
+            {isDefault
+              ? t("manifest_editor.field_default_badge", {
+                  value: defaultValue,
+                })
+              : defaultValue}
           </Tag>
         )}
       </div>
@@ -57,7 +67,7 @@ export function FieldRow({
           items={[
             {
               key: "impact",
-              label: "影响说明",
+              label: t("manifest_editor.field_impact_label"),
               children: <div style={{ fontSize: 12 }}>{impact}</div>,
             },
           ]}

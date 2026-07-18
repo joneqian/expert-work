@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import "../../../i18n";
 
 import { FieldRow } from "../FieldRow";
 
@@ -75,7 +76,7 @@ describe("FieldRow", () => {
       screen.queryByText("调大会增加单次运行时长与成本;调小可能导致任务提前中断"),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("影响说明"));
+    await user.click(screen.getByText("Impact"));
 
     expect(
       screen.getByText("调大会增加单次运行时长与成本;调小可能导致任务提前中断"),
@@ -95,10 +96,10 @@ describe("FieldRow", () => {
       </FieldRow>,
     );
 
-    expect(screen.queryByText("影响说明")).not.toBeInTheDocument();
+    expect(screen.queryByText("Impact")).not.toBeInTheDocument();
   });
 
-  it("shows a gray '默认 <value>' badge when isDefault is true", () => {
+  it("shows a gray 'Default <value>' badge when isDefault is true", () => {
     render(
       <FieldRow
         fieldId="workflow.max_iterations"
@@ -111,7 +112,7 @@ describe("FieldRow", () => {
       </FieldRow>,
     );
 
-    const badge = screen.getByText("默认 30");
+    const badge = screen.getByText("Default 30");
     expect(badge).toBeInTheDocument();
     expect(badge.closest(".ant-tag")).not.toHaveClass("ant-tag-blue");
   });
@@ -129,7 +130,7 @@ describe("FieldRow", () => {
       </FieldRow>,
     );
 
-    expect(screen.queryByText("默认 45")).not.toBeInTheDocument();
+    expect(screen.queryByText("Default 45")).not.toBeInTheDocument();
     const badge = screen.getByText("45");
     expect(badge.closest(".ant-tag")).toHaveClass("ant-tag-blue");
   });

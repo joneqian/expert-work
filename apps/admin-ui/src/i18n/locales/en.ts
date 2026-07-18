@@ -589,6 +589,8 @@ export interface TranslationKeys {
     group_sandbox: string;
     group_observability: string;
     group_pending_hint: string;
+    field_impact_label: string;
+    field_default_badge: string;
   };
   model_select: {
     provider_label: string;
@@ -3108,6 +3110,8 @@ const en: TranslationKeys = {
     group_observability: "Triggers & Observability",
     group_pending_hint:
       "Settings in this group will be visualized in a later release — edit them via YAML for now.",
+    field_impact_label: "Impact",
+    field_default_badge: "Default {{value}}",
   },
   model_select: {
     provider_label: "Provider",
