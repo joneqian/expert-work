@@ -1,0 +1,23 @@
+import type { FormSection } from "./FormView";
+
+export interface ConfigGroup {
+  id: string; // 稳定 id,亦作树节点 key
+  labelKey: string; // i18n: manifest_editor.group_<id>
+  /** 该组堆叠渲染的既有 FormView sections(迁移映射,机械)。 */
+  sections: readonly FormSection[];
+  /** 组级搜索关键词(中英混合,小写匹配)。 */
+  keywords: readonly string[];
+}
+
+export const CONFIG_GROUPS: readonly ConfigGroup[] = [
+  { id: "basic", labelKey: "manifest_editor.group_basic", sections: ["basic"], keywords: ["名称", "版本", "描述", "name", "version", "extends"] },
+  { id: "model", labelKey: "manifest_editor.group_model", sections: ["model"], keywords: ["模型", "回退", "路由", "思考", "model", "fallback", "thinking", "vision"] },
+  { id: "prompt", labelKey: "manifest_editor.group_prompt", sections: ["prompt"], keywords: ["提示词", "输出", "jinja", "prompt", "schema"] },
+  { id: "capabilities", labelKey: "manifest_editor.group_capabilities", sections: ["tools", "mcp", "knowledge", "skills", "subagents"], keywords: ["工具", "技能", "知识库", "子agent", "worker", "tools", "mcp", "skills"] },
+  { id: "memory", labelKey: "manifest_editor.group_memory", sections: ["memory"], keywords: ["记忆", "memory", "recall"] },
+  { id: "budget", labelKey: "manifest_editor.group_budget", sections: [], keywords: ["步数", "超时", "预算", "max_iterations", "deadline", "idle", "no_progress"] },
+  { id: "context", labelKey: "manifest_editor.group_context", sections: [], keywords: ["压缩", "上下文", "compression", "working memory", "prune"] },
+  { id: "security", labelKey: "manifest_editor.group_security", sections: ["defenses", "governance"], keywords: ["防护", "审批", "安全", "defense", "approval", "egress"] },
+  { id: "sandbox", labelKey: "manifest_editor.group_sandbox", sections: [], keywords: ["沙箱", "资源", "镜像", "sandbox", "cpu", "image"] },
+  { id: "observability", labelKey: "manifest_editor.group_observability", sections: [], keywords: ["触发器", "可观测", "trigger", "trace", "log"] },
+];

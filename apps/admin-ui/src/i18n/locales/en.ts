@@ -577,6 +577,16 @@ export interface TranslationKeys {
     schema_load_failed: string;
     invalid_yaml_title: string;
     invalid_yaml_hint: string;
+    group_basic: string;
+    group_model: string;
+    group_prompt: string;
+    group_capabilities: string;
+    group_memory: string;
+    group_budget: string;
+    group_context: string;
+    group_security: string;
+    group_sandbox: string;
+    group_observability: string;
   };
   model_select: {
     provider_label: string;
@@ -3083,6 +3093,16 @@ const en: TranslationKeys = {
     invalid_yaml_title: "Can't switch to Form",
     invalid_yaml_hint:
       "The YAML is invalid or doesn't match the manifest schema. Fix it here first.",
+    group_basic: "Basic",
+    group_model: "Model & Routing",
+    group_prompt: "Prompt & Output",
+    group_capabilities: "Capabilities",
+    group_memory: "Memory",
+    group_budget: "Run Budget & Timeouts",
+    group_context: "Context & Compression",
+    group_security: "Security & Defenses",
+    group_sandbox: "Sandbox & Resources",
+    group_observability: "Triggers & Observability",
   },
   model_select: {
     provider_label: "Provider",
