@@ -100,29 +100,10 @@ describe("FieldRow", () => {
   });
 
   it("shows a gray 'Default <value>' badge when isDefault is true", () => {
-    render(
-      <FieldRow
-        fieldId="workflow.max_iterations"
-        label="最大迭代次数"
-        brief="限制单次运行的最大步数"
-        isDefault
-        defaultValue="30"
-      >
-        <input />
-      </FieldRow>,
-    );
-
-    const badge = screen.getByText("Default 30");
-    expect(badge).toBeInTheDocument();
-    expect(badge.closest(".ant-tag")).not.toHaveClass("ant-tag-blue");
-  });
-
-  it("shows the gray 'Default <value>' badge when the raw stored value equals the default (not just when unset)", () => {
     // FieldRow itself is presentation-only — it takes ``isDefault`` as given
     // and doesn't know whether the caller derived it from "stored===undefined"
-    // or "stored===effectiveDefault" (PolicyFieldList's ``isAtDefault`` has
-    // both branches). This locks in that the badge's rendering depends only
-    // on the ``isDefault`` prop, not on the reason it's true.
+    // or "stored===effectiveDefault". That raw===def derivation is covered in
+    // field_defs.test.tsx; this only locks in the badge's rendering.
     render(
       <FieldRow
         fieldId="workflow.max_iterations"

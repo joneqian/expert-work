@@ -124,14 +124,14 @@ describe("SettingsSearch", () => {
     expect(onPick).toHaveBeenCalledWith("capabilities");
   });
 
-  it("clears the query after a selection instead of leaving the picked group's raw id", async () => {
+  it("input is cleared after selecting a result", async () => {
     const user = userEvent.setup();
     render(<SettingsSearch onPick={vi.fn()} />);
     await user.type(getSearchInput(), "mcp");
     await pickOption(user, en.manifest_editor.group_capabilities);
-    // The AutoComplete's ``value`` is controlled and cleared as soon as
-    // ``onSelect`` fires, so the input never settles on the picked option's
-    // raw group id ("capabilities") — only the (now empty) query.
+    // The selected group id ("capabilities") must not remain in the input
+    // once selection settles. Transient intra-batch states are not
+    // observable to this test by design — it only asserts the settled value.
     expect(getSearchInput().value).toBe("");
     expect(getSearchInput().value).not.toBe("capabilities");
   });
