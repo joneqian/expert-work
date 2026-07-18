@@ -135,6 +135,24 @@ describe("ManifestEditor", () => {
     expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
+  it("the 'security' group renders SecuritySection instead of a plain stacked FormView", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-nav-security"));
+    // "security" still lists real ``sections`` in CONFIG_GROUPS (unlike
+    // budget/context's statically-empty entries), so the distinguishing
+    // signal isn't "not pending" — it's the curated pane's own wrapper +
+    // its dict-note, which a plain stacked FormView never renders.
+    expect(screen.getByTestId("security-section")).toBeInTheDocument();
+    expect(screen.getByTestId("security-gates-dict-note")).toBeInTheDocument();
+    // The embedded defenses/governance sections still render underneath.
+    expect(screen.getByTestId("af-defenses-output-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("af-approval")).toBeInTheDocument();
+  });
+
   it("YAML toggle round-trips: Form→YAML dumps the manifest, YAML→Form parses it back", async () => {
     const user = userEvent.setup();
     render(

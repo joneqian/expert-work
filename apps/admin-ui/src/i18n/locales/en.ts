@@ -702,6 +702,41 @@ export interface TranslationKeys {
     budget_enabled_impact: string;
     budget_enabled_default: string;
   };
+  // Task 3 (PR3) — "Security" group (SecuritySection), embedded after the
+  // existing defenses/governance FormView sections. Two curated panels:
+  // sandbox egress (spec.sandbox.network) and tool-use enforcement
+  // (policies.tool_use_enforcement) — both default-collapsed since
+  // defenses/governance remain the group's primary content. i18nKey
+  // prefixes mirror SecurityFields' value keys (egress/allowlist/denylist/
+  // enforce ~ toolUseEnforcement).
+  security_gates: {
+    group_intro: string;
+    panel_network: string;
+    panel_enforce: string;
+    egress_label: string;
+    egress_brief: string;
+    egress_impact: string;
+    egress_default: string;
+    egress_opt_proxy: string;
+    egress_opt_direct: string;
+    egress_opt_none: string;
+    allowlist_label: string;
+    allowlist_brief: string;
+    allowlist_impact: string;
+    allowlist_default: string;
+    denylist_label: string;
+    denylist_brief: string;
+    denylist_impact: string;
+    denylist_default: string;
+    enforce_label: string;
+    enforce_brief: string;
+    enforce_impact: string;
+    enforce_default: string;
+    enforce_opt_auto: string;
+    enforce_opt_on: string;
+    enforce_opt_off: string;
+    dict_note: string;
+  };
   model_select: {
     provider_label: string;
     provider_placeholder: string;
@@ -834,8 +869,6 @@ export interface TranslationKeys {
     approval_timeout_help: string;
     trajectory_recording: string;
     trajectory_recording_help: string;
-    tool_budget: string;
-    tool_budget_help: string;
     section_knowledge: string;
     section_knowledge_help: string;
     knowledge_hint: string;
@@ -3366,6 +3399,44 @@ const en: TranslationKeys = {
       "Effective = platform switch AND this switch (if the platform switch is off, turning this on has no effect). Once off, large outputs are no longer externalized to the workspace — an oversized result can only be truncated. Early bash/exec/http/mcp overflow externalization is unaffected by this switch.",
     budget_enabled_default: "true",
   },
+  security_gates: {
+    group_intro:
+      "The sandbox's outbound network policy for code and tools inside it, decided in three layers: egress mode → denylist (priority) → allowlist.",
+    panel_network: "① Network egress",
+    panel_enforce: "② Tool-use enforcement",
+    egress_label: "Egress mode",
+    egress_brief:
+      "The sandbox's master outbound-network switch: proxy = via the credentialed proxy (default) / direct = direct connection / none = no network",
+    egress_impact:
+      "Under none, every outbound call from inside the sandbox is unavailable; direct bypasses the proxy's credential injection and centralized audit — generally not recommended; proxy goes out through the credentialed proxy, fully audited.",
+    egress_default: "proxy",
+    egress_opt_proxy: "Proxy (default)",
+    egress_opt_direct: "Direct",
+    egress_opt_none: "None (blocked)",
+    allowlist_label: "Domain allowlist",
+    allowlist_brief:
+      "Non-empty = only these domains are allowed; empty = open to the public internet (SSRF / internal-network probing is still blocked, fully audited)",
+    allowlist_impact:
+      "Matches an exact domain or its subdomains. Wildcards like ['*'] aren't allowed (submission validation rejects them). When both lists are present, the denylist wins.",
+    allowlist_default: "Empty (open to the public internet)",
+    denylist_label: "Domain denylist",
+    denylist_brief:
+      "Regardless of the allowlist / default-open behavior, these domains are always blocked",
+    denylist_impact:
+      "Takes priority over the allowlist; matches an exact domain or its subdomains. Good for \"stay open to the public internet but block a few specific bad targets.\"",
+    denylist_default: "Empty",
+    enforce_label: "Tool-use enforcement",
+    enforce_brief:
+      "Appends an enforcement block to the system prompt: must use tools for real-time facts, act immediately, never fabricate tool output",
+    enforce_impact:
+      "auto (default) = enabled for every model family except the ones (Claude/GPT, etc.) that reliably self-initiate tool calls — a newly onboarded weak model gets enforcement for free, no config change needed; on/off = force it on/off regardless of the model.",
+    enforce_default: "auto",
+    enforce_opt_auto: "Auto (default)",
+    enforce_opt_on: "Always on",
+    enforce_opt_off: "Always off",
+    dict_note:
+      "Rate limiting / PII / security policy are still a free-form dict (the backend schema isn't finalized yet) — edit them in the YAML view.",
+  },
   model_select: {
     provider_label: "Provider",
     provider_placeholder: "Select a configured provider",
@@ -3542,9 +3613,6 @@ const en: TranslationKeys = {
     trajectory_recording: "Keep a record of conversations",
     trajectory_recording_help:
       "When on, each completed conversation is saved, used for quality evaluation and model improvement.\nTurn off if conversation content must not be retained.\nOn by default.\nExample: on",
-    tool_budget: "Tool-output budget",
-    tool_budget_help:
-      "When on, large/accumulated tool results are externalized to the workspace and pruned from context so long runs stay within the model window.\nTurn off to keep every tool result verbatim in context for this agent.\nOn by default; the platform switch can override it off (effective = platform AND agent).\nExample: on",
     section_knowledge: "Knowledge bases (RAG)",
     section_knowledge_help:
       "Knowledge bases the agent can search to back up its answers.\nPick existing bases, or type a name.\nExample: hr-policies, eng-handbook",

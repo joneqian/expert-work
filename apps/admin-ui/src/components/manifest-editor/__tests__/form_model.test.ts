@@ -49,10 +49,8 @@ import {
   setReconcileWrites,
   setRecallMode,
   readApprovalTimeout,
-  readToolBudgetOn,
   readTrajectoryRecording,
   setApprovalTimeout,
-  setToolBudgetOn,
   setTrajectoryRecording,
   readFallback,
   setFallback,
@@ -295,21 +293,6 @@ describe("form_model writers preserve siblings", () => {
 
     const noTrace = setTrajectoryRecording(seed, false);
     expect(noTrace.spec?.policies?.trajectory_recording).toBe(false);
-
-    // Phase 3 — tool-output budget: default on; off writes {enabled:false};
-    // back on drops the block (clean YAML) while keeping the approval gate.
-    expect(readToolBudgetOn(seed)).toBe(true);
-    const budgetOff = setToolBudgetOn(withGate, false);
-    expect(budgetOff.spec?.policies?.tool_output_budget?.enabled).toBe(false);
-    expect(readToolBudgetOn(budgetOff)).toBe(false);
-    expect(budgetOff.spec?.policies?.approval_required_tools).toEqual([
-      "exec_python",
-    ]);
-    const budgetOn = setToolBudgetOn(budgetOff, true);
-    expect(budgetOn.spec?.policies?.tool_output_budget).toBeUndefined();
-    expect(budgetOn.spec?.policies?.approval_required_tools).toEqual([
-      "exec_python",
-    ]);
 
     const withTimeout = setApprovalTimeout(withGate, 3600);
     expect(withTimeout.spec?.policies?.approval_timeout_s).toBe(3600);

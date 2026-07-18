@@ -762,27 +762,6 @@ export function patchContextGates(
   });
 }
 
-// ---- tool-output budget (policies.tool_output_budget.enabled) ----
-// Per-agent master switch for the whole tool-output-budget feature
-// (externalization + persist + prune). Block absent = enabled (the platform
-// switch governs the ceiling: effective = platform AND agent). ``on`` drops the
-// block (back to default-on, clean YAML); ``off`` writes ``{enabled:false}``.
-export const readToolBudgetOn = (m: unknown): boolean =>
-  (specOf(m).policies?.tool_output_budget?.enabled ?? true) !== false;
-
-export function setToolBudgetOn(m: unknown, on: boolean): AgentManifest {
-  const policies = specOf(m).policies ?? {};
-  if (on) {
-    const { tool_output_budget: _dropped, ...rest } = policies;
-    return patchSpec(m, {
-      policies: Object.keys(rest).length > 0 ? rest : undefined,
-    });
-  }
-  return patchSpec(m, {
-    policies: { ...policies, tool_output_budget: { enabled: false } },
-  });
-}
-
 // ---- dynamic workers (spawn_worker) ----
 // Whether the agent's LLM may spawn ephemeral workers at run time. The block is
 // absent by default and that means ENABLED (the platform switch governs the
