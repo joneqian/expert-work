@@ -767,6 +767,18 @@ const zhCN: TranslationKeys = {
     dict_note:
       "速率限制 / PII / 安全策略暂为自由字典(后端 schema 未定型),请在 YAML 视图编辑。",
   },
+  sandbox_group: {
+    pw_label: "计划投影到工作区",
+    pw_brief:
+      "每轮结束把 PLAN.md / TODO.md / MEMORY.md 写入用户工作区,run 开始时回读——沙箱内外共享任务进度",
+    pw_impact:
+      "仅控制计划/状态投影,不控制文件持久性:带 user_id 的运行本就自动挂载该用户的持久 /workspace 卷(闲置回收后下次自动恢复),系统运行(无 user_id)恒为临时空间——均与本开关无关。开关生效还需部署接入 sandbox supervisor。",
+    platform_note_title: "平台实际生效值",
+    platform_note_body:
+      "沙箱实际运行参数由平台部署决定,manifest 不参与:镜像=平台统一镜像(Python+办公/数据/媒体全量);资源=supervisor 环境配置(默认 1.0 CPU / 1024 MB 内存 / 128 进程);单命令超时默认 30 秒、工具调用可指定、上限 300 秒;根文件系统恒只读,可写路径恒为 /workspace 与 /tmp;容器运行时(gVisor/runc)由部署环境变量决定。",
+    declarative_note:
+      "manifest 中的 runtime / image / image_build / resources / readonly_root / writable / mounts 及 code 块当前为声明性字段:通过校验但运行时不读取,留在 YAML 中无害。调整实际资源限额请修改平台部署配置(sandbox-supervisor 环境变量)。",
+  },
   model_select: {
     provider_label: "提供方",
     provider_placeholder: "选择已配置密钥的提供方",

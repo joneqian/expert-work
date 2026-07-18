@@ -104,10 +104,11 @@ describe("ManifestEditor", () => {
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
-    // "budget" and "context" both got real curated panes (RunBudgetSection
-    // Task 6 / ContextGatesSection Task 3) — use "sandbox" (still statically
-    // empty, Phase 2) to exercise the generic pending-hint pathway.
-    await user.click(screen.getByTestId("cfg-nav-sandbox"));
+    // "budget"/"context"/"sandbox" all got real curated panes (RunBudgetSection
+    // Task 6 / ContextGatesSection Task 3 / SandboxSection Task 2) — use
+    // "observability" (still statically empty, Phase 2) to exercise the
+    // generic pending-hint pathway.
+    await user.click(screen.getByTestId("cfg-nav-observability"));
     expect(screen.getByTestId("cfg-pane-pending")).toHaveTextContent(
       en.manifest_editor.group_pending_hint,
     );
@@ -151,6 +152,17 @@ describe("ManifestEditor", () => {
     // The embedded defenses/governance sections still render underneath.
     expect(screen.getByTestId("af-defenses-output-screen")).toBeInTheDocument();
     expect(screen.getByTestId("af-approval")).toBeInTheDocument();
+  });
+
+  it("the 'sandbox' group renders SandboxSection instead of the pending hint", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-nav-sandbox"));
+    expect(screen.getByTestId("sandbox-section")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
   it("YAML toggle round-trips: Form→YAML dumps the manifest, YAML→Form parses it back", async () => {
@@ -348,12 +360,12 @@ describe("ManifestEditor", () => {
     expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
 
     // A statically-empty group (no sections registered yet) is unaffected —
-    // it keeps showing with the "pending" hint. ("budget"/"context" are also
-    // statically empty but special-cased to a curated pane — see the
-    // dedicated tests above — so "sandbox" exercises the generic
+    // it keeps showing with the "pending" hint. ("budget"/"context"/"sandbox"
+    // are also statically empty but special-cased to a curated pane — see
+    // the dedicated tests above — so "observability" exercises the generic
     // pending-hint pathway here.)
-    expect(screen.getByTestId("cfg-nav-sandbox")).toBeInTheDocument();
-    await user.click(screen.getByTestId("cfg-nav-sandbox"));
+    expect(screen.getByTestId("cfg-nav-observability")).toBeInTheDocument();
+    await user.click(screen.getByTestId("cfg-nav-observability"));
     expect(screen.getByTestId("cfg-pane-pending")).toHaveTextContent(
       en.manifest_editor.group_pending_hint,
     );

@@ -737,6 +737,19 @@ export interface TranslationKeys {
     enforce_opt_off: string;
     dict_note: string;
   };
+  // Task 2 (PR4) — "Sandbox & Resources" group (SandboxSection). One live
+  // field (persistent_workspace, the plan-projection switch) plus two note
+  // blocks explaining that everything else under spec.sandbox is
+  // declarative-only (validated but not read at runtime — real resource
+  // limits/image/runtime are decided by the platform deployment).
+  sandbox_group: {
+    pw_label: string;
+    pw_brief: string;
+    pw_impact: string;
+    platform_note_title: string;
+    platform_note_body: string;
+    declarative_note: string;
+  };
   model_select: {
     provider_label: string;
     provider_placeholder: string;
@@ -3436,6 +3449,18 @@ const en: TranslationKeys = {
     enforce_opt_off: "Always off",
     dict_note:
       "Rate limiting / PII / security policy are still a free-form dict (the backend schema isn't finalized yet) — edit them in the YAML view.",
+  },
+  sandbox_group: {
+    pw_label: "Project plan to workspace",
+    pw_brief:
+      "At the end of each turn, write PLAN.md / TODO.md / MEMORY.md into the user's workspace, and read them back when a run starts — sharing task progress inside and outside the sandbox",
+    pw_impact:
+      "Controls plan/status projection only, not file persistence: a run with a user_id already auto-mounts that user's persistent /workspace volume (restored automatically next time after idle reclaim); a system run (no user_id) is always ephemeral — neither depends on this switch. Also requires the deployment to wire up the sandbox supervisor to take effect.",
+    platform_note_title: "Platform-effective values",
+    platform_note_body:
+      "The sandbox's actual runtime parameters are decided by the platform deployment; the manifest has no say: image = the platform's unified image (Python + the full office/data/media stack); resources = the supervisor's environment configuration (default 1.0 CPU / 1024 MB memory / 128 processes); per-command timeout defaults to 30s, tool calls may specify their own, capped at 300s; the root filesystem is always read-only, writable paths are always /workspace and /tmp; the container runtime (gVisor/runc) is set by a deployment environment variable.",
+    declarative_note:
+      "The manifest's runtime / image / image_build / resources / readonly_root / writable / mounts fields and the code block are currently declarative: they pass validation but aren't read at runtime, and are harmless left in the YAML. To change the actual resource limits, edit the platform deployment config (the sandbox-supervisor environment variables).",
   },
   model_select: {
     provider_label: "Provider",
