@@ -2166,12 +2166,19 @@ def _build_provider(
     # behaviour-identical whenever no output_schema is requested.
     make_client = openai_compatible.get(provider)
     if make_client is not None:
+        # glm batches tool-call args by default (composes the whole arg in
+        # silence past idle_timeout_s → spurious stream_idle_timeout). Its
+        # ``tool_stream: true`` param streams them incrementally; stream-only
+        # (glm's structured-output complete() may reject it). Other compat
+        # vendors stream tool-args incrementally already — no injection.
+        stream_extra_body = {"tool_stream": True} if provider == "glm" else None
         return OpenAICompatibleProvider(
             client=make_client(api_key=api_key, timeout_s=timeout_eff),
             model=model.name,
             temperature=model.temperature,
             image_resolver=image_resolver,
             thinking_payload=thinking_payload,
+            stream_extra_body=stream_extra_body,
         )
 
     if provider == "self-hosted":

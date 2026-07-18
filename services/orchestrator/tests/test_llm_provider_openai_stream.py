@@ -159,3 +159,81 @@ async def test_stream_plain_client_error_propagates_without_fallback() -> None:
             )
         ]
     assert len(client.calls) == 1  # no retry (use_allowed False → plain error propagates)
+
+
+async def _drain(provider: OpenAIProvider, tools: list[ToolSpec] | None = None) -> None:
+    async for _ in provider.stream(messages=[HumanMessage(content="hi")], tools=tools or []):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_stream_extra_body_merged_into_stream_request() -> None:
+    client = RecordingOpenAIClient(stream_chunks=_text_chunks())
+    provider = OpenAIProvider(
+        client=client, model="glm-5.2", stream_extra_body={"tool_stream": True}
+    )
+    await _drain(provider)
+    assert client.calls[-1]["extra_body"] == {"tool_stream": True}
+
+
+@pytest.mark.asyncio
+async def test_stream_extra_body_not_on_complete_request() -> None:
+    # 命门:tool_stream is stream-only — glm's structured-output complete()
+    # path must NOT carry it.
+    client = RecordingOpenAIClient(response={"choices": [{"message": {"content": "ok"}}]})
+    provider = OpenAIProvider(
+        client=client, model="glm-5.2", stream_extra_body={"tool_stream": True}
+    )
+    await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+    assert client.calls[-1]["extra_body"] is None
+
+
+@pytest.mark.asyncio
+async def test_stream_extra_body_none_leaves_request_byte_identical() -> None:
+    client = RecordingOpenAIClient(stream_chunks=_text_chunks())
+    provider = OpenAIProvider(client=client, model="glm-5.2")  # default None
+    await _drain(provider)
+    assert client.calls[-1]["extra_body"] is None
+
+
+@pytest.mark.asyncio
+async def test_stream_extra_body_merges_with_thinking_payload() -> None:
+    client = RecordingOpenAIClient(stream_chunks=_text_chunks())
+    provider = OpenAIProvider(
+        client=client,
+        model="glm-5.2",
+        thinking_payload={"thinking": {"type": "enabled"}},
+        stream_extra_body={"tool_stream": True},
+    )
+    await _drain(provider)
+    assert client.calls[-1]["extra_body"] == {
+        "thinking": {"type": "enabled"},
+        "tool_stream": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_stream_extra_body_applied_on_allowed_tools_retry() -> None:
+    # allowed_tools rejection → fall back + re-stream once; the retry request
+    # must ALSO carry stream_extra_body.
+    @dataclass
+    class _RejectConstraintStream:
+        calls: list[dict[str, Any]] = field(default_factory=list)
+
+        async def stream_chat_completions(self, **kwargs: Any) -> AsyncIterator[Mapping[str, Any]]:
+            self.calls.append(kwargs)
+            if kwargs.get("tool_choice") is not None:  # allowed_tools constraint
+                raise LLMClientError("openai 400: unknown tool_choice type")
+            for chunk in _text_chunks():
+                yield chunk
+
+    client = _RejectConstraintStream()
+    provider = OpenAIProvider(
+        client=client, model="glm-5.2", stream_extra_body={"tool_stream": True}
+    )
+    # a defer_loading tool makes use_allowed=True → constrained first attempt
+    tool = ToolSpec(name="mcp:t", description="d", defer_loading=True)
+    await _drain(provider, tools=[tool])
+    assert len(client.calls) == 2  # constrained (rejected) + unconstrained retry
+    assert client.calls[0]["extra_body"] == {"tool_stream": True}  # main stream path
+    assert client.calls[1]["extra_body"] == {"tool_stream": True}  # retry path
