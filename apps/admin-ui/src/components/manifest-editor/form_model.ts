@@ -83,6 +83,9 @@ export interface AgentManifest {
       approval_timeout_s?: number;
       // Wall-clock cap on the whole run incl. sub-agent recursion (0 = off).
       run_deadline_s?: number;
+      // No-progress stop — consecutive loop-detection trips after which the
+      // ReAct loop force-wraps up early (0 = off).
+      max_no_progress?: number;
       // Stream L.L7 — record completed runs to ObjectStore (privacy toggle).
       trajectory_recording?: boolean;
       // Phase 3 — per-agent master switch for the tool-output-budget feature
@@ -90,6 +93,17 @@ export interface AgentManifest {
       tool_output_budget?: { enabled?: boolean; [k: string]: unknown };
       [k: string]: unknown;
     } | null;
+    // Group 6 试点(运行预算与超时) — ReAct loop step budget + free-form knobs
+    // (early_stop, builder) authored via YAML. The curated form only surfaces
+    // max_iterations.
+    workflow?: { max_iterations?: number; [k: string]: unknown };
+    // Stream L (P1) — time-to-first-token budget for a single LLM provider
+    // call (0 = disabled). Top-level spec key (sibling of policies), not
+    // nested under policies.
+    stream_deadline_s?: number;
+    // Stream L (P1) — inter-token idle cap once streaming has started
+    // (0 = disabled). Top-level spec key (sibling of policies).
+    idle_timeout_s?: number;
     // Orchestrator-Worker — whether the agent may spawn ephemeral workers at
     // run time (spawn_worker). Block absent = enabled (the platform default).
     dynamic_workers?: { enabled?: boolean; [k: string]: unknown } | null;
@@ -517,6 +531,72 @@ export const readTrajectoryRecording = (m: unknown): boolean =>
   specOf(m).policies?.trajectory_recording ?? true;
 export const setTrajectoryRecording = (m: unknown, on: boolean): AgentManifest =>
   patchPolicies(m, { trajectory_recording: on });
+
+// ---- run budget (Group 6 试点: workflow.max_iterations + policies.max_no_progress
+// + policies.run_deadline_s + top-level stream_deadline_s / idle_timeout_s) ----
+// Aggregates five knobs that live in three different places in the manifest
+// (workflow block / policies block / top-level spec) behind one curated
+// "运行预算与超时" reader+writer pair. Readers return the raw stored value
+// (``undefined`` when unset — the FieldRow widgets show the backend default
+// themselves); ``patchRunBudget`` only touches the block(s) whose fields are
+// present in ``patch`` so an untouched knob never materializes an empty
+// parent block, and a field patched to ``undefined`` is removed (dropping
+// the whole block if that empties it).
+export interface RunBudgetFields {
+  maxIterations?: number;
+  maxNoProgress?: number;
+  runDeadlineS?: number;
+  streamDeadlineS?: number;
+  idleTimeoutS?: number;
+}
+
+export const readRunBudget = (m: unknown): RunBudgetFields => ({
+  maxIterations: specOf(m).workflow?.max_iterations,
+  maxNoProgress: specOf(m).policies?.max_no_progress,
+  runDeadlineS: specOf(m).policies?.run_deadline_s,
+  streamDeadlineS: specOf(m).stream_deadline_s,
+  idleTimeoutS: specOf(m).idle_timeout_s,
+});
+
+// Merge a partial patch into a block, deleting keys whose patch value is
+// ``undefined``; returns ``undefined`` (drop the block) when that empties it.
+function mergeBlock(
+  existing: Record<string, unknown> | undefined,
+  patch: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const merged: Record<string, unknown> = { ...(existing ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete merged[k];
+    else merged[k] = v;
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+export function patchRunBudget(
+  m: unknown,
+  patch: Partial<RunBudgetFields>,
+): AgentManifest {
+  const spec = specOf(m);
+  const updates: Record<string, unknown> = {};
+
+  if ("maxIterations" in patch) {
+    updates.workflow = mergeBlock(spec.workflow, {
+      max_iterations: patch.maxIterations,
+    });
+  }
+
+  const policiesPatch: Record<string, unknown> = {};
+  if ("maxNoProgress" in patch) policiesPatch.max_no_progress = patch.maxNoProgress;
+  if ("runDeadlineS" in patch) policiesPatch.run_deadline_s = patch.runDeadlineS;
+  if (Object.keys(policiesPatch).length > 0) {
+    updates.policies = mergeBlock(spec.policies ?? undefined, policiesPatch);
+  }
+
+  if ("streamDeadlineS" in patch) updates.stream_deadline_s = patch.streamDeadlineS;
+  if ("idleTimeoutS" in patch) updates.idle_timeout_s = patch.idleTimeoutS;
+
+  return patchSpec(m, updates);
+}
 
 // ---- tool-output budget (policies.tool_output_budget.enabled) ----
 // Per-agent master switch for the whole tool-output-budget feature

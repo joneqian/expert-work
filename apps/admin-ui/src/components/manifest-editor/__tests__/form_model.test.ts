@@ -1,4 +1,5 @@
 import { describe, expect, it, test } from "vitest";
+import { parseYaml as parse } from "../yaml";
 import {
   readApprovalTools,
   readDescription,
@@ -73,6 +74,8 @@ import {
   setActionScreen,
   setActionScreenOnError,
   setOutputDlp,
+  readRunBudget,
+  patchRunBudget,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -807,5 +810,88 @@ describe("form_model defenses setters (default-omission + orphan cleanup)", () =
     const snapshot = JSON.stringify(frozen);
     setOutputScreen(frozen, "off");
     expect(JSON.stringify(frozen)).toBe(snapshot);
+  });
+});
+
+describe("run budget (workflow.max_iterations + policies.max_no_progress/run_deadline_s + stream/idle deadlines)", () => {
+  it("workflow.max_iterations projects and round-trips", () => {
+    const m = parse(`spec:\n  workflow:\n    max_iterations: 40\n    type: react\n`);
+    expect(readRunBudget(m).maxIterations).toBe(40);
+    const next = patchRunBudget(m, { maxIterations: 50 });
+    expect(next.spec?.workflow?.max_iterations).toBe(50);
+    expect(next.spec?.workflow?.type).toBe("react"); // 未投影键保留
+  });
+
+  it("max_no_progress round-trips under policies", () => {
+    const m = parse(
+      `spec:\n  policies:\n    max_no_progress: 3\n    approval_timeout_s: 3600\n`,
+    );
+    expect(readRunBudget(m).maxNoProgress).toBe(3);
+    const next = patchRunBudget(m, { maxNoProgress: 7 });
+    expect(next.spec?.policies?.max_no_progress).toBe(7);
+    // 未投影键保留
+    expect(next.spec?.policies?.approval_timeout_s).toBe(3600);
+  });
+
+  it("absent workflow stays absent until set", () => {
+    const m = parse(`spec:\n  policies:\n    approval_timeout_s: 3600\n`);
+    // patch 未设值 (maxIterations) 不产生空块
+    const next = patchRunBudget(m, { maxNoProgress: 5 });
+    expect(next.spec?.workflow).toBeUndefined();
+    expect(next.spec?.policies?.max_no_progress).toBe(5);
+    expect(next.spec?.policies?.approval_timeout_s).toBe(3600);
+  });
+
+  it("patching maxNoProgress preserves unrelated policies keys (approval_required_tools)", () => {
+    const base: AgentManifest = {
+      spec: {
+        policies: { approval_required_tools: ["exec_python"] },
+      },
+    };
+    const next = patchRunBudget(base, { maxNoProgress: 2 });
+    expect(next.spec?.policies?.max_no_progress).toBe(2);
+    expect(next.spec?.policies?.approval_required_tools).toEqual([
+      "exec_python",
+    ]);
+  });
+
+  it("aggregates run_deadline_s / stream_deadline_s / idle_timeout_s from their existing locations", () => {
+    const m = parse(
+      `spec:\n  policies:\n    run_deadline_s: 1800\n  stream_deadline_s: 90\n  idle_timeout_s: 30\n`,
+    );
+    expect(readRunBudget(m)).toEqual({
+      maxIterations: undefined,
+      maxNoProgress: undefined,
+      runDeadlineS: 1800,
+      streamDeadlineS: 90,
+      idleTimeoutS: 30,
+    });
+  });
+
+  it("patchRunBudget writes run_deadline_s/stream_deadline_s/idle_timeout_s independently", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchRunBudget(m, {
+      runDeadlineS: 600,
+      streamDeadlineS: 120,
+      idleTimeoutS: 60,
+    });
+    expect(next.spec?.policies?.run_deadline_s).toBe(600);
+    expect(next.spec?.stream_deadline_s).toBe(120);
+    expect(next.spec?.idle_timeout_s).toBe(60);
+  });
+
+  it("setting a field to undefined removes it from its block, dropping an emptied block", () => {
+    const m: AgentManifest = {
+      spec: { workflow: { max_iterations: 40 } },
+    };
+    const cleared = patchRunBudget(m, { maxIterations: undefined });
+    expect(cleared.spec?.workflow).toBeUndefined();
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m: AgentManifest = { spec: { workflow: { max_iterations: 40 } } };
+    const snapshot = JSON.stringify(m);
+    patchRunBudget(m, { maxIterations: 50 });
+    expect(JSON.stringify(m)).toBe(snapshot);
   });
 });
