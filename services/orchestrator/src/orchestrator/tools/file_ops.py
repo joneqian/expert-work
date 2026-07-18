@@ -96,6 +96,16 @@ def _require_path(args: Mapping[str, Any], *, tool: str, default: str | None = N
     if "\x00" in cleaned:
         msg = f"{tool} path must not contain a NUL byte"
         raise ValueError(msg)
+    # Fold the well-known sandbox root: every tool description anchors paths at
+    # /workspace, so models routinely pass "/workspace/foo" — treat that as the
+    # workspace-relative "foo" instead of bouncing the call (a reject costs a
+    # whole recovery round). Only this exact root folds; any other absolute
+    # path (and any ``..`` that survives the fold) still rejects below, and the
+    # in-sandbox realpath re-check remains the actual escape boundary.
+    if cleaned in ("/workspace", "/workspace/"):
+        cleaned = "."
+    elif cleaned.startswith("/workspace/"):
+        cleaned = cleaned[len("/workspace/") :]
     if cleaned.startswith("/") or ".." in PurePosixPath(cleaned).parts:
         msg = f"{tool} path must be a relative workspace path without '..': {raw!r}"
         raise ValueError(msg)

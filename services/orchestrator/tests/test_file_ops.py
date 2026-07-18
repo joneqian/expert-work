@@ -568,11 +568,43 @@ async def test_edit_expected_hash_threaded_into_snippet() -> None:
     assert '"expected_hash": "cafe"' in code
 
 
-@pytest.mark.parametrize("bad", ["/etc/passwd", "../escape", "", "  ", "a\x00b"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "/etc/passwd",
+        "../escape",
+        "",
+        "  ",
+        "a\x00b",
+        # The /workspace fold must not open an escape: a second slash or a
+        # ``..`` surviving the fold still rejects.
+        "/workspace//etc/passwd",
+        "/workspace/../etc/passwd",
+        "/workspacefoo/x",  # not the root prefix — plain absolute, rejected
+    ],
+)
 async def test_require_path_rejects_bad_paths(bad: str) -> None:
     client = _client(json.dumps({"ok": True, "content": "", "content_hash": "x", "size": 0}))
     with pytest.raises(ValueError, match="path"):
         await ReadFileTool(client=client).call({"path": bad}, ctx=_ctx())
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_rel"),
+    [
+        # Models routinely anchor at the documented sandbox root — folded to
+        # the workspace-relative path instead of bouncing the call.
+        ("/workspace/build_ppt.py", "build_ppt.py"),
+        ("/workspace/out/deck.pptx", "out/deck.pptx"),
+        ("/workspace", "."),
+        ("/workspace/", "."),
+    ],
+)
+async def test_require_path_folds_workspace_root_prefix(raw: str, expected_rel: str) -> None:
+    client = _client(json.dumps({"ok": True, "content": "", "content_hash": "x", "size": 0}))
+    await ReadFileTool(client=client).call({"path": raw}, ctx=_ctx())
+    code = client.execs[0][1]
+    assert f'"rel": "{expected_rel}"' in code
 
 
 async def test_write_requires_content_string() -> None:
