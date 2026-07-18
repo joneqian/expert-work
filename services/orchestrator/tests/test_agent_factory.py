@@ -451,17 +451,26 @@ async def test_build_agent_supports_vision_propagates_from_manifest() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_agent_rejects_vision_block_on_visual_model() -> None:
-    """Stream J.6 symmetric guard — Path A (content blocks) and Path B
-    (ask_image) are mutually exclusive. A ``vision:`` block on a
-    vision-capable manifest is an un-buildable agent."""
+async def test_build_agent_ignores_vision_block_on_visual_model(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Stream J.6 — Path A (native content blocks) and Path B (ask_image) are
+    mutually exclusive. A ``vision:`` block on a natively-multimodal manifest is
+    IGNORED (Path A wins) with a warning, rather than failing the build: the
+    block is commonly a leftover after the editor flips supports_vision on when a
+    vision-capable model is selected. The qwen VL model in the ignored block is
+    never routed (so ``_secret_store()`` needs no qwen credential)."""
     doc = deepcopy(_MINIMAL_SPEC)
     doc["spec"]["model"]["supports_vision"] = True
     doc["spec"]["vision"] = {"model": {"provider": "qwen", "name": "qwen-vl-max"}}
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        with pytest.raises(AgentFactoryError, match="mutually exclusive"):
-            await _build(spec, secret_store=_secret_store(), checkpointer=cp)
+        with caplog.at_level(logging.WARNING, logger="expert_work.orchestrator.agent_factory"):
+            built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
+    # Build succeeds and Path A stays active (no raise on the leftover Path B).
+    assert built.supports_vision is True
+    # The dropped VL config is warned, not silently discarded.
+    assert "vision_block_ignored" in caplog.text
 
 
 class _StubChildBuilder:
