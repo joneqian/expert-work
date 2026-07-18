@@ -4,26 +4,22 @@
  * pane that renders real controls instead of the group-pending hint: five
  * knobs that live in three different manifest locations
  * (workflow.max_iterations / policies.max_no_progress+run_deadline_s /
- * top-level spec.stream_deadline_s+idle_timeout_s) behind one screen, each
- * rendered as a ``FieldRow`` (label + control + default badge, one-line
- * brief, collapsible impact note).
+ * top-level spec.stream_deadline_s+idle_timeout_s) behind one screen.
  *
- * Reads/writes go through the single ``readRunBudget``/``patchRunBudget``
- * pair (form_model.ts) so this component stays presentation-only. Per-field
- * copy is resolved here (react-i18next) and handed to ``FieldRow`` as plain
- * strings — ``FieldRow`` itself renders none of it.
+ * Rendering itself is delegated to ``PolicyFieldList`` (Task 1's FieldDef
+ * config-array pattern) — ``RUN_BUDGET_DEFS`` below is the data table that
+ * used to be five hand-written ``FieldRow`` blocks; this component now only
+ * wires the ``readRunBudget``/``patchRunBudget`` pair (form_model.ts) to it.
  *
  * Clearing an InputNumber (antd emits ``null``) reverts that field to the
  * platform default: the patch carries an explicit ``undefined``, which
  * ``patchRunBudget`` treats as "delete this key" (dropping the parent block
  * too when that empties it) rather than writing the default value into the
- * manifest.
+ * manifest. A switch field would follow the same rule (value === default →
+ * delete the key) but this pilot group has none yet.
  */
-import { InputNumber } from "antd";
-import { useTranslation } from "react-i18next";
-
-import { FieldRow } from "../FieldRow";
-import { patchRunBudget, readRunBudget, type RunBudgetFields } from "../form_model";
+import { PolicyFieldList, type FieldDef } from "./field_defs";
+import { patchRunBudget, readRunBudget } from "../form_model";
 
 interface RunBudgetSectionProps {
   formData: unknown;
@@ -31,154 +27,69 @@ interface RunBudgetSectionProps {
 }
 
 // Display-layer effective defaults (agent_spec.py WorkflowSpec/PolicySpec/
-// AgentSpecBody) — a stored value of ``undefined`` means the backend applies
-// these. Kept here (not in form_model.ts) since they're presentation
-// concerns: which value the badge/control shows when the manifest is silent.
-const DEFAULTS = {
-  maxIterations: 30,
-  maxNoProgress: 0,
-  runDeadlineS: 0,
-  streamDeadlineS: 180,
-  idleTimeoutS: 45,
-} as const satisfies Required<RunBudgetFields>;
-
-function isAtDefault(raw: number | undefined, def: number): boolean {
-  return raw === undefined || raw === def;
-}
+// AgentSpecBody) live in each def's ``effectiveDefault`` — a stored value of
+// ``undefined`` means the backend applies these. i18nKey mirrors the existing
+// ``run_budget.*`` locale keys (already four-key complete per field).
+const RUN_BUDGET_DEFS: readonly FieldDef[] = [
+  {
+    fieldId: "workflow.max_iterations",
+    i18nKey: "run_budget.max_iterations",
+    valueKey: "maxIterations",
+    kind: "number",
+    effectiveDefault: 30,
+    min: 1,
+  },
+  {
+    fieldId: "policies.max_no_progress",
+    i18nKey: "run_budget.max_no_progress",
+    valueKey: "maxNoProgress",
+    kind: "number",
+    effectiveDefault: 0,
+    min: 0,
+  },
+  {
+    fieldId: "policies.run_deadline_s",
+    i18nKey: "run_budget.run_deadline",
+    valueKey: "runDeadlineS",
+    kind: "number",
+    effectiveDefault: 0,
+    min: 0,
+    max: 86400,
+  },
+  {
+    fieldId: "spec.stream_deadline_s",
+    i18nKey: "run_budget.stream_deadline",
+    valueKey: "streamDeadlineS",
+    kind: "number",
+    effectiveDefault: 180,
+    min: 0,
+    max: 3600,
+  },
+  {
+    fieldId: "spec.idle_timeout_s",
+    i18nKey: "run_budget.idle_timeout",
+    valueKey: "idleTimeoutS",
+    kind: "number",
+    effectiveDefault: 45,
+    min: 0,
+    max: 600,
+  },
+];
 
 export function RunBudgetSection({ formData, onChange }: RunBudgetSectionProps) {
-  const { t } = useTranslation();
   const budget = readRunBudget(formData);
 
-  const patch = (field: keyof RunBudgetFields, value: number | null): void => {
-    onChange(patchRunBudget(formData, { [field]: value ?? undefined }));
+  const handlePatch = (patch: Record<string, number | boolean | undefined>): void => {
+    onChange(patchRunBudget(formData, patch));
   };
-
-  const maxIterationsAtDefault = isAtDefault(
-    budget.maxIterations,
-    DEFAULTS.maxIterations,
-  );
-  const maxNoProgressAtDefault = isAtDefault(
-    budget.maxNoProgress,
-    DEFAULTS.maxNoProgress,
-  );
-  const runDeadlineAtDefault = isAtDefault(
-    budget.runDeadlineS,
-    DEFAULTS.runDeadlineS,
-  );
-  const streamDeadlineAtDefault = isAtDefault(
-    budget.streamDeadlineS,
-    DEFAULTS.streamDeadlineS,
-  );
-  const idleTimeoutAtDefault = isAtDefault(
-    budget.idleTimeoutS,
-    DEFAULTS.idleTimeoutS,
-  );
 
   return (
     <div data-testid="run-budget-section" style={{ maxWidth: 760 }}>
-      <FieldRow
-        fieldId="workflow.max_iterations"
-        label={t("run_budget.max_iterations_label")}
-        brief={t("run_budget.max_iterations_brief")}
-        impact={t("run_budget.max_iterations_impact")}
-        defaultValue={
-          maxIterationsAtDefault
-            ? t("run_budget.max_iterations_default")
-            : String(budget.maxIterations)
-        }
-        isDefault={maxIterationsAtDefault}
-      >
-        <InputNumber
-          min={1}
-          value={budget.maxIterations ?? DEFAULTS.maxIterations}
-          aria-label={t("run_budget.max_iterations_label")}
-          onChange={(v) => patch("maxIterations", v)}
-        />
-      </FieldRow>
-
-      <FieldRow
-        fieldId="policies.max_no_progress"
-        label={t("run_budget.max_no_progress_label")}
-        brief={t("run_budget.max_no_progress_brief")}
-        impact={t("run_budget.max_no_progress_impact")}
-        defaultValue={
-          maxNoProgressAtDefault
-            ? t("run_budget.max_no_progress_default")
-            : String(budget.maxNoProgress)
-        }
-        isDefault={maxNoProgressAtDefault}
-      >
-        <InputNumber
-          min={0}
-          value={budget.maxNoProgress ?? DEFAULTS.maxNoProgress}
-          aria-label={t("run_budget.max_no_progress_label")}
-          onChange={(v) => patch("maxNoProgress", v)}
-        />
-      </FieldRow>
-
-      <FieldRow
-        fieldId="policies.run_deadline_s"
-        label={t("run_budget.run_deadline_label")}
-        brief={t("run_budget.run_deadline_brief")}
-        impact={t("run_budget.run_deadline_impact")}
-        defaultValue={
-          runDeadlineAtDefault
-            ? t("run_budget.run_deadline_default")
-            : String(budget.runDeadlineS)
-        }
-        isDefault={runDeadlineAtDefault}
-      >
-        <InputNumber
-          min={0}
-          max={86400}
-          value={budget.runDeadlineS ?? DEFAULTS.runDeadlineS}
-          aria-label={t("run_budget.run_deadline_label")}
-          onChange={(v) => patch("runDeadlineS", v)}
-        />
-      </FieldRow>
-
-      <FieldRow
-        fieldId="spec.stream_deadline_s"
-        label={t("run_budget.stream_deadline_label")}
-        brief={t("run_budget.stream_deadline_brief")}
-        impact={t("run_budget.stream_deadline_impact")}
-        defaultValue={
-          streamDeadlineAtDefault
-            ? t("run_budget.stream_deadline_default")
-            : String(budget.streamDeadlineS)
-        }
-        isDefault={streamDeadlineAtDefault}
-      >
-        <InputNumber
-          min={0}
-          max={3600}
-          value={budget.streamDeadlineS ?? DEFAULTS.streamDeadlineS}
-          aria-label={t("run_budget.stream_deadline_label")}
-          onChange={(v) => patch("streamDeadlineS", v)}
-        />
-      </FieldRow>
-
-      <FieldRow
-        fieldId="spec.idle_timeout_s"
-        label={t("run_budget.idle_timeout_label")}
-        brief={t("run_budget.idle_timeout_brief")}
-        impact={t("run_budget.idle_timeout_impact")}
-        defaultValue={
-          idleTimeoutAtDefault
-            ? t("run_budget.idle_timeout_default")
-            : String(budget.idleTimeoutS)
-        }
-        isDefault={idleTimeoutAtDefault}
-      >
-        <InputNumber
-          min={0}
-          max={600}
-          value={budget.idleTimeoutS ?? DEFAULTS.idleTimeoutS}
-          aria-label={t("run_budget.idle_timeout_label")}
-          onChange={(v) => patch("idleTimeoutS", v)}
-        />
-      </FieldRow>
+      <PolicyFieldList
+        defs={RUN_BUDGET_DEFS}
+        values={budget as Record<string, number | boolean | undefined>}
+        onPatch={handlePatch}
+      />
     </div>
   );
 }

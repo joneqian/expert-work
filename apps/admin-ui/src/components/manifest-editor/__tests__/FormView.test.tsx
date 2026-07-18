@@ -115,6 +115,37 @@ describe("FormView", () => {
     expect(screen.getByTestId("af-defenses")).toBeInTheDocument();
   });
 
+  it("keeps the section's own heading on the singular section= path", () => {
+    renderSection("model");
+    // ``manifest_editor.tab_model`` and ``agent_form.section_model`` both
+    // translate to "Model" — on the singular path there's no data-section-id
+    // subtitle at all, so this is the only place "Model" can come from.
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(document.querySelector("[data-section-id]")).not.toBeInTheDocument();
+  });
+
+  it("suppresses only the section's own duplicate heading in the stacked path", () => {
+    render(
+      <FormView formData={SEED} onChange={vi.fn()} sections={["model"]} />,
+    );
+    // Before the fix this rendered twice: the data-section-id subtitle
+    // (manifest_editor.tab_model) and the "model" section's own <h3>
+    // (agent_form.section_model) — both translate to "Model".
+    expect(screen.getAllByText("Model")).toHaveLength(1);
+    expect(
+      document.querySelector('[data-section-id="model"]'),
+    ).toBeInTheDocument();
+    // Sibling sub-sections bundled into the same "model" tab keep their OWN
+    // (non-duplicate) headings — suppressing those would remove the only
+    // label distinguishing them from one another.
+    expect(screen.getByTestId("af-fallback")).toHaveTextContent(
+      "Fallback providers (optional)",
+    );
+    expect(screen.getByTestId("af-reflection-evaluator")).toHaveTextContent(
+      "Reflection evaluator (optional)",
+    );
+  });
+
   it("hides the fallback section until a primary model is picked", () => {
     const noPrimary: AgentManifest = {
       ...SEED,

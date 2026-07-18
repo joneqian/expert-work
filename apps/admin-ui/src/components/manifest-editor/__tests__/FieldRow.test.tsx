@@ -100,6 +100,10 @@ describe("FieldRow", () => {
   });
 
   it("shows a gray 'Default <value>' badge when isDefault is true", () => {
+    // FieldRow itself is presentation-only — it takes ``isDefault`` as given
+    // and doesn't know whether the caller derived it from "stored===undefined"
+    // or "stored===effectiveDefault". That raw===def derivation is covered in
+    // field_defs.test.tsx; this only locks in the badge's rendering.
     render(
       <FieldRow
         fieldId="workflow.max_iterations"

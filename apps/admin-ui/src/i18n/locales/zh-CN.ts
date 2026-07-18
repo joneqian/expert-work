@@ -622,7 +622,7 @@ const zhCN: TranslationKeys = {
       "整次运行(含子 agent)的秒数上限,0 = 用平台地板(默认 1 小时)",
     run_deadline_impact:
       "一次运行最多跑多久(秒),包含它调起的子 agent;超时即中止,防止失控长跑、费用爆掉。0 并非真正不限制——会套用平台地板(当前默认 3600 秒/1 小时,由运维配置);要精确控制或延长运行时长,请显式设置本值。",
-    run_deadline_default: "0",
+    run_deadline_default: "0(平台地板)",
     stream_deadline_label: "首 token 超时",
     stream_deadline_brief: "LLM 单次调用的首 token 等待上限(秒),0 = 关闭",
     stream_deadline_impact:
@@ -633,6 +633,103 @@ const zhCN: TranslationKeys = {
     idle_timeout_impact:
       "首个 token 到达后,若相邻两个 token 的间隔超过此值,视为模型中途卡住/沉默,提前结束本轮并保留已生成的部分输出。区别于首 token 超时(stream_deadline_s)。0 = 关闭该计时器(仅建议开发/长批处理场景使用);非流式 provider 不受影响。",
     idle_timeout_default: "45",
+  },
+  context_gates: {
+    group_intro:
+      "三道门在提示词估算超过 上下文窗口×阈值 时依次介入:①结果修剪(最便宜,旧工具结果塌成引用)→ ②滑动窗口(免 LLM,裁旧轮次)→ ③上下文压缩(LLM 摘要中段)。多数轻超限在前两道解决;阈值分母是模型真实窗口(模型目录)。",
+    panel_tool_result_prune: "①结果修剪",
+    panel_working_memory: "②滑动窗口",
+    panel_context_compression: "③上下文压缩",
+    panel_tool_output_budget: "④工具输出预算",
+    pr_enabled_label: "启用结果修剪",
+    pr_enabled_brief: "超阈值时把旧工具结果塌成一行引用",
+    pr_enabled_impact:
+      "三道门中最便宜、损失最小的一道:保留全部轮次与推理,只把最近 N 条之外的工具结果换成引用(已外置到工作区的可无损恢复)。只影响本次发送的视图,历史记录不改写。关闭后轻超限将更早落到滑动窗口/压缩。",
+    pr_enabled_default: "true",
+    pr_threshold_pct_label: "触发阈值(窗口占比)",
+    pr_threshold_pct_brief: "估算提示词达到 上下文窗口×此值 才修剪,低于时零改动",
+    pr_threshold_pct_impact:
+      "与滑动窗口/压缩共用同一比例形制(各自独立配置)。调低=更早修剪更省;调高=更保真但更依赖后两道门。范围 0.05–1。",
+    pr_threshold_pct_default: "0.7",
+    pr_recent_kept_label: "保留最近工具结果数",
+    pr_recent_kept_brief: "最近 N 条工具结果保持完整,更早的才塌成引用",
+    pr_recent_kept_impact:
+      "调大=模型看到更多完整结果但上下文更大;0=超阈值时全部塌引用。",
+    pr_recent_kept_default: "4",
+    wm_enabled_label: "启用滑动窗口",
+    wm_enabled_brief: "超阈值时裁剪到首轮+最近 N 轮,免 LLM 调用",
+    wm_enabled_impact:
+      "只在 用户消息 边界切割,绝不拆散工具调用对。多数轻超限在此解决,省下压缩的摘要 LLM 调用。只影响本次视图,下轮从完整历史重新裁剪。",
+    wm_enabled_default: "true",
+    wm_threshold_pct_label: "触发阈值(窗口占比)",
+    wm_threshold_pct_brief: "估算提示词达到 上下文窗口×此值 才裁剪,低于时零改动",
+    wm_threshold_pct_impact:
+      "与结果修剪/压缩共用同一比例形制(各自独立配置)。调低=更早裁剪更省;调高=更保真但更依赖压缩这道门。范围 0.05–1。",
+    wm_threshold_pct_default: "0.7",
+    wm_max_recent_turns_label: "保留最近轮数",
+    wm_max_recent_turns_brief: "窗口保留的最近用户轮数",
+    wm_max_recent_turns_impact:
+      "调小=更省但丢更多中程上下文(被丢的中段不进摘要——那是压缩的事);长多轮会话建议 ≥10。",
+    wm_max_recent_turns_default: "20",
+    wm_keep_first_turn_label: "保留首轮",
+    wm_keep_first_turn_brief: "裁剪时始终保留第一轮(任务目标锚)",
+    wm_keep_first_turn_impact:
+      "关闭后长会话可能丢失最初任务描述,一般不建议关。",
+    wm_keep_first_turn_default: "true",
+    cc_enabled_label: "启用上下文压缩",
+    cc_enabled_brief: "超阈值时用 LLM 把对话中段摘要成一条背景总结",
+    cc_enabled_impact:
+      "三道门的最后一道。保留头 N 尾 M 条,中间换成〈context-summary〉;被丢中段先冲入长期记忆(若开)。关闭且前两道不够时,超大上下文将直接失败。",
+    cc_enabled_default: "true",
+    cc_threshold_pct_label: "触发阈值(窗口占比)",
+    cc_threshold_pct_brief: "估算提示词达到 上下文窗口×此值 才压缩,低于时零改动",
+    cc_threshold_pct_impact:
+      "与结果修剪/滑动窗口共用同一比例形制(各自独立配置)。调低=更早压缩更省;调高=更保真但风险更高(这是最后一道门,再往后没有兜底)。范围 0.05–1。",
+    cc_threshold_pct_default: "0.7",
+    cc_head_keep_label: "保留头部条数",
+    cc_head_keep_brief: "摘要时原样保留最前 N 条非系统消息",
+    cc_head_keep_impact:
+      "含记忆注入锚点;调 0 且开启记忆注入时运行期会自动抬到 1。",
+    cc_head_keep_default: "4",
+    cc_tail_keep_label: "保留尾部条数",
+    cc_tail_keep_brief: "摘要时原样保留最近 M 条",
+    cc_tail_keep_impact: "尾部是当前工作现场,过小会丢近期细节。",
+    cc_tail_keep_default: "6",
+    cc_flush_before_compaction_label: "压缩前冲入记忆",
+    cc_flush_before_compaction_brief:
+      "中段被摘要丢弃前,先把要点写入长期记忆",
+    cc_flush_before_compaction_impact:
+      "仅当长期记忆写回开启时生效,否则空转。保多次压缩后关键决策不丢。",
+    cc_flush_before_compaction_default: "true",
+    cc_max_passes_label: "最大压缩轮数",
+    cc_max_passes_brief: "连续压缩仍超阈值时,最多再试 N 轮",
+    cc_max_passes_impact:
+      "耗尽仍超限 → 运行以上下文溢出失败(不静默兜底)。摘要 LLM 瞬时失败会跳过本轮重试,连续 3 轮失败才失败。",
+    cc_max_passes_default: "3",
+    cc_max_turns_label: "粗粒度轮数上限",
+    cc_max_turns_brief: "每次调用直接截到最近 N 轮(旧裁剪层),留空=关闭",
+    cc_max_turns_impact:
+      "早于三道门的老机制,默认关闭(留空)。设置后每次调用无条件截断——通常不需要,优先用上面的比例门。",
+    cc_max_turns_default: "留空(关闭)",
+    cc_max_tokens_label: "粗粒度 token 上限",
+    cc_max_tokens_brief: "同上,按 token 截,留空=关闭",
+    cc_max_tokens_impact: "同 max_turns,设置即无条件生效,一般保持留空。",
+    cc_max_tokens_default: "留空(关闭)",
+    cc_pressure_feedback_label: "压力反馈提示",
+    cc_pressure_feedback_brief: "接近窗口上限时,给模型附加一条预算提醒",
+    cc_pressure_feedback_impact:
+      "达 窗口×预警占比 时在最后一条消息附提醒(不动系统提示词,前缀缓存不失效),引导模型自行收敛。低于阈值零改动。",
+    cc_pressure_feedback_default: "true",
+    cc_pressure_warn_pct_label: "压力预警占比",
+    cc_pressure_warn_pct_brief: "触发预算提醒的窗口占比",
+    cc_pressure_warn_pct_impact:
+      "应低于压缩阈值才有引导意义(默认 0.75 vs 压缩 0.7——注意默认预警晚于压缩,若要提前引导可调低)。",
+    cc_pressure_warn_pct_default: "0.75",
+    budget_enabled_label: "启用工具输出预算",
+    budget_enabled_brief: "本 agent 的大工具输出外置/持久化/修剪总开关",
+    budget_enabled_impact:
+      "实际生效 = 平台开关 AND 本开关(平台关则此处开也无效)。关闭后大输出不再外置到工作区,超长结果只能靠截断。早期的 bash/exec/http/mcp 溢出外置不受此开关影响。",
+    budget_enabled_default: "true",
   },
   model_select: {
     provider_label: "提供方",
@@ -800,10 +897,6 @@ const zhCN: TranslationKeys = {
       "记忆插入对话的位置。\n每会话:整段对话固定插一次,更省更快(默认)。\n每轮:每轮都重新插,适合对话中会自己改记忆的 Agent。\n示例:每会话",
     memory_recall_per_session: "每会话(更省更快)",
     memory_recall_per_turn: "每轮",
-    section_run_deadline: "单次运行时长上限(秒)",
-    section_run_deadline_help:
-      "一次运行最多跑多久(秒),包含它调起的子 Agent。\n超时就中止,防止失控长跑、费用爆掉。\n0 表示不限制。\n示例:0(不限)或 1800(30 分钟)",
-    run_deadline_hint: "一次运行的最长耗时(秒),含子 Agent;0 = 不限制。",
     approval_timeout: "审批等待上限(秒)",
     approval_timeout_help:
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",

@@ -124,6 +124,18 @@ describe("SettingsSearch", () => {
     expect(onPick).toHaveBeenCalledWith("capabilities");
   });
 
+  it("input is cleared after selecting a result", async () => {
+    const user = userEvent.setup();
+    render(<SettingsSearch onPick={vi.fn()} />);
+    await user.type(getSearchInput(), "mcp");
+    await pickOption(user, en.manifest_editor.group_capabilities);
+    // The selected group id ("capabilities") must not remain in the input
+    // once selection settles. Transient intra-batch states are not
+    // observable to this test by design — it only asserts the settled value.
+    expect(getSearchInput().value).toBe("");
+    expect(getSearchInput().value).not.toBe("capabilities");
+  });
+
   it("never surfaces an excluded (hidden) group even when it matches", async () => {
     const user = userEvent.setup();
     render(<SettingsSearch onPick={vi.fn()} exclude={["budget"]} />);

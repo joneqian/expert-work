@@ -91,6 +91,35 @@ export interface AgentManifest {
       // Phase 3 — per-agent master switch for the tool-output-budget feature
       // (externalization + persist + prune). Block absent = enabled.
       tool_output_budget?: { enabled?: boolean; [k: string]: unknown };
+      // Stream L.L2 — per-agent context compression knobs (ContextCompressionPolicy).
+      context_compression?: {
+        enabled?: boolean;
+        threshold_pct?: number;
+        head_keep?: number;
+        tail_keep?: number;
+        flush_before_compaction?: boolean;
+        max_passes?: number;
+        max_turns?: number;
+        max_tokens?: number;
+        pressure_feedback?: boolean;
+        pressure_warn_pct?: number;
+        [k: string]: unknown;
+      };
+      // Stream CM-2 — working-memory sliding-window knobs (WorkingMemoryPolicy).
+      working_memory?: {
+        enabled?: boolean;
+        threshold_pct?: number;
+        max_recent_turns?: number;
+        keep_first_turn?: boolean;
+        [k: string]: unknown;
+      };
+      // Stream CM-12 — mechanical tool-result prune gate knobs (ToolResultPrunePolicy).
+      tool_result_prune?: {
+        enabled?: boolean;
+        threshold_pct?: number;
+        recent_tool_results_kept?: number;
+        [k: string]: unknown;
+      };
       [k: string]: unknown;
     } | null;
     // Group 6 试点(运行预算与超时) — ReAct loop step budget + free-form knobs
@@ -523,10 +552,6 @@ export const readApprovalTimeout = (m: unknown): number =>
   specOf(m).policies?.approval_timeout_s ?? 86400;
 export const setApprovalTimeout = (m: unknown, s: number): AgentManifest =>
   patchPolicies(m, { approval_timeout_s: s });
-export const readRunDeadline = (m: unknown): number =>
-  specOf(m).policies?.run_deadline_s ?? 0;
-export const setRunDeadline = (m: unknown, s: number): AgentManifest =>
-  patchPolicies(m, { run_deadline_s: s });
 export const readTrajectoryRecording = (m: unknown): boolean =>
   specOf(m).policies?.trajectory_recording ?? true;
 export const setTrajectoryRecording = (m: unknown, on: boolean): AgentManifest =>
@@ -596,6 +621,129 @@ export function patchRunBudget(
   if ("idleTimeoutS" in patch) updates.idle_timeout_s = patch.idleTimeoutS;
 
   return patchSpec(m, updates);
+}
+
+// ---- context gates (policies.context_compression / working_memory /
+// tool_result_prune / tool_output_budget) ----
+// Curated "上下文与压缩" group over four independent PolicySpec sub-blocks
+// (ContextCompressionPolicy / WorkingMemoryPolicy / ToolResultPrunePolicy /
+// ToolOutputBudgetPolicy). Readers return the raw stored value (``undefined``
+// when unset — the backend Pydantic defaults apply). ``patchContextGates``
+// only touches the sub-block(s) whose fields are present in ``patch`` (never
+// materializes an untouched sub-block or ``policies`` itself), deletes a key
+// whose patch value is ``undefined``, and drops a sub-block that patching
+// empties — mirrors ``patchRunBudget``.
+export interface ContextGatesFields {
+  ccEnabled?: boolean;
+  ccThresholdPct?: number;
+  ccHeadKeep?: number;
+  ccTailKeep?: number;
+  ccFlushBeforeCompaction?: boolean;
+  ccMaxPasses?: number;
+  ccMaxTurns?: number;
+  ccMaxTokens?: number;
+  ccPressureFeedback?: boolean;
+  ccPressureWarnPct?: number;
+  wmEnabled?: boolean;
+  wmThresholdPct?: number;
+  wmMaxRecentTurns?: number;
+  wmKeepFirstTurn?: boolean;
+  prEnabled?: boolean;
+  prThresholdPct?: number;
+  prRecentKept?: number;
+  budgetEnabled?: boolean;
+}
+
+export const readContextGates = (m: unknown): ContextGatesFields => {
+  const policies = specOf(m).policies ?? {};
+  const cc = policies.context_compression ?? {};
+  const wm = policies.working_memory ?? {};
+  const pr = policies.tool_result_prune ?? {};
+  const tb = policies.tool_output_budget ?? {};
+  return {
+    ccEnabled: cc.enabled,
+    ccThresholdPct: cc.threshold_pct,
+    ccHeadKeep: cc.head_keep,
+    ccTailKeep: cc.tail_keep,
+    ccFlushBeforeCompaction: cc.flush_before_compaction,
+    ccMaxPasses: cc.max_passes,
+    ccMaxTurns: cc.max_turns,
+    ccMaxTokens: cc.max_tokens,
+    ccPressureFeedback: cc.pressure_feedback,
+    ccPressureWarnPct: cc.pressure_warn_pct,
+    wmEnabled: wm.enabled,
+    wmThresholdPct: wm.threshold_pct,
+    wmMaxRecentTurns: wm.max_recent_turns,
+    wmKeepFirstTurn: wm.keep_first_turn,
+    prEnabled: pr.enabled,
+    prThresholdPct: pr.threshold_pct,
+    prRecentKept: pr.recent_tool_results_kept,
+    budgetEnabled: tb.enabled,
+  };
+};
+
+export function patchContextGates(
+  m: unknown,
+  patch: Partial<ContextGatesFields>,
+): AgentManifest {
+  const policies = specOf(m).policies ?? {};
+  const updates: Record<string, unknown> = { ...policies };
+
+  // Merge a patched sub-block into ``updates``, deleting the key entirely
+  // (not setting it to ``undefined``) when it empties — so the subsequent
+  // ``Object.keys(updates).length`` check below sees an accurate count and
+  // an untouched sub-block is never materialized.
+  const mergeSubBlock = (
+    key: "context_compression" | "working_memory" | "tool_result_prune" | "tool_output_budget",
+    subPatch: Record<string, unknown>,
+  ): void => {
+    if (Object.keys(subPatch).length === 0) return;
+    const merged = mergeBlock(
+      policies[key] as Record<string, unknown> | undefined,
+      subPatch,
+    );
+    if (merged === undefined) delete updates[key];
+    else updates[key] = merged;
+  };
+
+  const ccPatch: Record<string, unknown> = {};
+  if ("ccEnabled" in patch) ccPatch.enabled = patch.ccEnabled;
+  if ("ccThresholdPct" in patch) ccPatch.threshold_pct = patch.ccThresholdPct;
+  if ("ccHeadKeep" in patch) ccPatch.head_keep = patch.ccHeadKeep;
+  if ("ccTailKeep" in patch) ccPatch.tail_keep = patch.ccTailKeep;
+  if ("ccFlushBeforeCompaction" in patch)
+    ccPatch.flush_before_compaction = patch.ccFlushBeforeCompaction;
+  if ("ccMaxPasses" in patch) ccPatch.max_passes = patch.ccMaxPasses;
+  if ("ccMaxTurns" in patch) ccPatch.max_turns = patch.ccMaxTurns;
+  if ("ccMaxTokens" in patch) ccPatch.max_tokens = patch.ccMaxTokens;
+  if ("ccPressureFeedback" in patch)
+    ccPatch.pressure_feedback = patch.ccPressureFeedback;
+  if ("ccPressureWarnPct" in patch)
+    ccPatch.pressure_warn_pct = patch.ccPressureWarnPct;
+  mergeSubBlock("context_compression", ccPatch);
+
+  const wmPatch: Record<string, unknown> = {};
+  if ("wmEnabled" in patch) wmPatch.enabled = patch.wmEnabled;
+  if ("wmThresholdPct" in patch) wmPatch.threshold_pct = patch.wmThresholdPct;
+  if ("wmMaxRecentTurns" in patch)
+    wmPatch.max_recent_turns = patch.wmMaxRecentTurns;
+  if ("wmKeepFirstTurn" in patch) wmPatch.keep_first_turn = patch.wmKeepFirstTurn;
+  mergeSubBlock("working_memory", wmPatch);
+
+  const prPatch: Record<string, unknown> = {};
+  if ("prEnabled" in patch) prPatch.enabled = patch.prEnabled;
+  if ("prThresholdPct" in patch) prPatch.threshold_pct = patch.prThresholdPct;
+  if ("prRecentKept" in patch)
+    prPatch.recent_tool_results_kept = patch.prRecentKept;
+  mergeSubBlock("tool_result_prune", prPatch);
+
+  const budgetPatch: Record<string, unknown> = {};
+  if ("budgetEnabled" in patch) budgetPatch.enabled = patch.budgetEnabled;
+  mergeSubBlock("tool_output_budget", budgetPatch);
+
+  return patchSpec(m, {
+    policies: Object.keys(updates).length > 0 ? updates : undefined,
+  });
 }
 
 // ---- tool-output budget (policies.tool_output_budget.enabled) ----
