@@ -77,6 +77,7 @@ export interface AgentManifest {
         denylist?: string[];
         [k: string]: unknown;
       };
+      filesystem?: { persistent_workspace?: boolean; [k: string]: unknown };
       [k: string]: unknown;
     };
     routing?: RoutingFields | null;
@@ -980,6 +981,49 @@ export function patchSecurity(
     updates.policies = mergeBlock(spec.policies ?? undefined, {
       tool_use_enforcement: patch.toolUseEnforcement,
     });
+  }
+
+  return patchSpec(m, updates);
+}
+
+// ---- sandbox filesystem group (spec.sandbox.filesystem.persistent_workspace) ----
+// Mirrors patchSecurity's network handling: SandboxSpec.filesystem, like
+// network, is a REQUIRED pydantic field with no default — an emptied block is
+// kept as ``filesystem: {}`` (valid: every field is defaulted) instead of
+// dropped, which would 422 the next deploy (hotfix #1017). Reader returns the
+// raw stored value (``undefined`` when unset — the display layer supplies the
+// effective default, false). ``sandbox``'s unrelated keys (runtime/resources/
+// network etc.) and ``filesystem``'s own unrelated keys survive untouched. A
+// fully absent sandbox is never materialized just to hold an empty filesystem.
+export interface SandboxFsFields {
+  persistentWorkspace?: boolean;
+}
+
+export const readSandboxFs = (m: unknown): SandboxFsFields => ({
+  persistentWorkspace: specOf(m).sandbox?.filesystem?.persistent_workspace,
+});
+
+export function patchSandboxFs(
+  m: unknown,
+  patch: Partial<SandboxFsFields>,
+): AgentManifest {
+  const spec = specOf(m);
+  const updates: Record<string, unknown> = {};
+
+  const filesystemPatch: Record<string, unknown> = {};
+  if ("persistentWorkspace" in patch) {
+    filesystemPatch.persistent_workspace = patch.persistentWorkspace;
+  }
+  if (Object.keys(filesystemPatch).length > 0) {
+    const sandbox = spec.sandbox;
+    const mergedFilesystem =
+      mergeBlock(
+        sandbox?.filesystem as Record<string, unknown> | undefined,
+        filesystemPatch,
+      ) ?? {};
+    if (sandbox !== undefined || Object.keys(mergedFilesystem).length > 0) {
+      updates.sandbox = { ...(sandbox ?? {}), filesystem: mergedFilesystem };
+    }
   }
 
   return patchSpec(m, updates);

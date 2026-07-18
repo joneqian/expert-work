@@ -28,16 +28,17 @@ import { CONFIG_GROUPS } from "./groups";
 import { RunBudgetSection } from "./groups/RunBudgetSection";
 import { ContextGatesSection } from "./groups/ContextGatesSection";
 import { SecuritySection } from "./groups/SecuritySection";
+import { SandboxSection } from "./groups/SandboxSection";
 import type { McpPickerSource } from "./widgets/McpToolPicker";
 
 /** Curated group panes — a hand-written component that replaces FormView's
  * registered-sections pathway for that group entirely (checked BEFORE the
  * ``sections.length === 0`` pending-hint branch below, so it wins even for
  * "security", whose ``CONFIG_GROUPS`` entry still lists real sections —
- * ``SecuritySection`` embeds those itself). "budget"/"context" instead have
- * a statically-empty entry (``sections: []``); either way, a group absent
- * from this map (sandbox/observability, pending Phase 2) falls through to
- * the generic "pending" hint. */
+ * ``SecuritySection`` embeds those itself). "budget"/"context"/"sandbox"
+ * instead have a statically-empty entry (``sections: []``); either way, a
+ * group absent from this map (observability, pending Phase 2) falls through
+ * to the generic "pending" hint. */
 interface CuratedPaneProps {
   formData: unknown;
   onChange: (data: unknown) => void;
@@ -49,6 +50,7 @@ const CURATED_GROUP_PANES: Record<
   budget: RunBudgetSection,
   context: ContextGatesSection,
   security: SecuritySection,
+  sandbox: SandboxSection,
 };
 
 /** A caller-supplied node rendered ABOVE the registered groups in the tree —
@@ -244,11 +246,11 @@ export function ManifestEditor({
   // leading tab renders nothing on its own — e.g. "basic" once its only
   // section is merged. Its node must be unreachable, or clicking it would
   // show FormView with an empty sections array (a blank pane). Groups that
-  // are statically empty to begin with (sandbox/observability, pending
-  // Phase 2) are untouched — they keep showing with the pending hint.
-  // "budget"/"context" are also statically empty (``sections: []``) but are
+  // are statically empty to begin with (observability, pending Phase 2) are
+  // untouched — they keep showing with the pending hint. "budget"/"context"/
+  // "sandbox" are also statically empty (``sections: []``) but are
   // special-cased below via ``CURATED_GROUP_PANES`` to render a hand-written
-  // component instead (Task 6 / Task 3 pilots).
+  // component instead (Task 6 / Task 3 / Task 2 pilots).
   const hiddenGroups = CONFIG_GROUPS.filter(
     (g) =>
       g.sections.length > 0 &&
