@@ -20,12 +20,25 @@ interface GroupNavProps {
   active: string;
   onSelect: (id: string) => void;
   leading?: GroupNavLeading;
+  /** Group ids to omit entirely — e.g. a group whose only section(s) were
+   * folded into a leading tab via ``mergeSection`` and would otherwise
+   * render an empty pane if clicked. Purely a filter over ``CONFIG_GROUPS``;
+   * the caller decides which ids qualify. */
+  hiddenGroups?: readonly string[];
 }
 
-export function GroupNav({ active, onSelect, leading }: GroupNavProps) {
+export function GroupNav({
+  active,
+  onSelect,
+  leading,
+  hiddenGroups,
+}: GroupNavProps) {
   const { t } = useTranslation();
+  const hidden = new Set(hiddenGroups);
 
-  const groupItems: MenuProps["items"] = CONFIG_GROUPS.map((group) => ({
+  const groupItems: MenuProps["items"] = CONFIG_GROUPS.filter(
+    (group) => !hidden.has(group.id),
+  ).map((group) => ({
     key: group.id,
     label: t(group.labelKey),
     "data-testid": `cfg-nav-${group.id}`,

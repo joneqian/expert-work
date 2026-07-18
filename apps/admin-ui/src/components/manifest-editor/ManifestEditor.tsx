@@ -122,12 +122,36 @@ export function ManifestEditor({
     onChange(text);
   }
 
+  // Guarded YAML→Form transition — parses + validates ``yamlText`` before
+  // adopting it; an invalid switch is refused (inline error, stays on YAML)
+  // — moved verbatim from the old ``switchTo``. Shared by the YAML toggle
+  // button AND by clicking a group node while YAML mode is active (below),
+  // so both paths run the exact same guard and neither can desync the tree
+  // highlight from the pane. Returns whether the switch succeeded.
+  function tryExitYaml(): boolean {
+    let parsed: unknown;
+    try {
+      parsed = parseYaml(yamlText);
+    } catch {
+      setSwitchError(t("manifest_editor.invalid_yaml_hint"));
+      return false;
+    }
+    if (
+      schema &&
+      validator.validateFormData(parsed, schema).errors.length > 0
+    ) {
+      setSwitchError(t("manifest_editor.invalid_yaml_hint"));
+      return false;
+    }
+    setManifestObject(parsed);
+    setSwitchError(null);
+    setYamlActive(false);
+    return true;
+  }
+
   // Top-right YAML toggle — replaces the old flat-tab row's "yaml" tab.
   // Entering YAML serialises the current curated manifest (normalized so an
   // incomplete fallback row doesn't leak into the YAML view / submit).
-  // Leaving YAML parses + validates the edited text before adopting it; an
-  // invalid switch is refused (inline error, stays on YAML) — moved
-  // verbatim from the old ``switchTo``.
   function toggleYaml(): void {
     if (!yamlActive) {
       const y = dumpYaml(normalizeForSubmit(manifestObject));
@@ -137,23 +161,22 @@ export function ManifestEditor({
       setYamlActive(true);
       return;
     }
-    let parsed: unknown;
-    try {
-      parsed = parseYaml(yamlText);
-    } catch {
-      setSwitchError(t("manifest_editor.invalid_yaml_hint"));
+    tryExitYaml();
+  }
+
+  // Group-nav click — mirrors the old UI where clicking a form tab from the
+  // yaml tab ran the same guarded switch as the toggle: while YAML mode is
+  // active, attempt the YAML→Form transition first. On success, exit YAML
+  // mode AND move to the clicked group; on failure, stay in YAML mode with
+  // the error shown and DON'T move the tree highlight (setGroup is skipped).
+  function handleGroupSelect(id: string): void {
+    if (yamlActive) {
+      if (tryExitYaml()) {
+        setGroup(id);
+      }
       return;
     }
-    if (
-      schema &&
-      validator.validateFormData(parsed, schema).errors.length > 0
-    ) {
-      setSwitchError(t("manifest_editor.invalid_yaml_hint"));
-      return;
-    }
-    setManifestObject(parsed);
-    setSwitchError(null);
-    setYamlActive(false);
+    setGroup(id);
   }
 
   // Without leading tabs the editor has nothing to show until the schema
@@ -192,6 +215,17 @@ export function ManifestEditor({
   const mergedSections = new Set<string>(
     leadingTabs.flatMap((lt) => (lt.mergeSection ? [lt.mergeSection] : [])),
   );
+  // A group whose EVERY (statically registered) section got folded into a
+  // leading tab renders nothing on its own — e.g. "basic" once its only
+  // section is merged. Its node must be unreachable, or clicking it would
+  // show FormView with an empty sections array (a blank pane). Groups that
+  // are statically empty to begin with (budget/context/sandbox/observability,
+  // pending Phase 2) are untouched — they keep showing with the pending hint.
+  const hiddenGroups = CONFIG_GROUPS.filter(
+    (g) =>
+      g.sections.length > 0 &&
+      g.sections.every((s) => mergedSections.has(s)),
+  ).map((g) => g.id);
   const activeConfigGroup = CONFIG_GROUPS.find((g) => g.id === group);
 
   const pane = schemaError ? (
@@ -243,12 +277,13 @@ export function ManifestEditor({
         <div data-testid="cfg-nav" style={{ flex: "0 0 200px", width: 200 }}>
           <GroupNav
             active={group}
-            onSelect={setGroup}
+            onSelect={handleGroupSelect}
             leading={
               primaryLeading
                 ? { value: primaryLeading.value, label: primaryLeading.label }
                 : undefined
             }
+            hiddenGroups={hiddenGroups}
           />
         </div>
 

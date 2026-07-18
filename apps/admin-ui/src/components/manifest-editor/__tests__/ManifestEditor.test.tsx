@@ -69,7 +69,7 @@ describe("ManifestEditor", () => {
 
   it("selecting the capabilities group stacks tools/mcp/knowledge/skills/subagents in one pane", async () => {
     const user = userEvent.setup();
-    render(
+    const { container } = render(
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
@@ -81,6 +81,21 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
     // "basic" is no longer shown once another group is active.
     expect(screen.queryByTestId("af-basic")).not.toBeInTheDocument();
+
+    // Each stacked section is wrapped in a `data-section-id` anchor div...
+    for (const id of ["tools", "mcp", "knowledge", "skills", "subagents"]) {
+      expect(
+        container.querySelector(`[data-section-id="${id}"]`),
+      ).toBeInTheDocument();
+    }
+    // ...with its own stacked sub-section title (checked for two sections
+    // whose tab label doesn't collide with the section's own heading text).
+    expect(
+      screen.getByText(en.manifest_editor.tab_knowledge),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(en.manifest_editor.tab_subagents),
+    ).toBeInTheDocument();
   });
 
   it("a group with no curated sections yet (Phase 2) shows the pending hint", async () => {
@@ -236,7 +251,6 @@ describe("ManifestEditor", () => {
   });
 
   it("a leading tab with mergeSection folds that manifest section in and de-dupes it from its mapped group", async () => {
-    const user = userEvent.setup();
     render(
       <ManifestEditor
         mode="create"
@@ -260,9 +274,91 @@ describe("ManifestEditor", () => {
     // leading tab's own description field.
     expect(screen.queryByTestId("af-description")).not.toBeInTheDocument();
 
-    // Switching to the "basic" group must NOT render the section a second
-    // time — its only instance lives in the (now-hidden) leading pane.
-    await user.click(screen.getByTestId("cfg-nav-basic"));
-    expect(screen.getAllByTestId("af-basic")).toHaveLength(1);
+    // The "basic" group's only section is fully merged away, so its node is
+    // hidden entirely — there's no way to re-render the section a second
+    // time via the tree (see the dedicated hidden-group test below).
+    expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
+  });
+
+  it("a leading tab with mergeSection hides the fully-merged-away group node, keeping statically-empty groups", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor
+        mode="create"
+        initialYaml={SEED}
+        onChange={vi.fn()}
+        leadingTabs={[
+          {
+            value: "meta",
+            label: "Basic info",
+            content: <div data-testid="meta-form">meta</div>,
+            mergeSection: "basic",
+          },
+        ]}
+      />,
+    );
+    await screen.findByTestId("meta-form");
+
+    // "basic" group's only section is folded into the leading tab — its
+    // node must not be reachable at all, or clicking it would render
+    // FormView with an empty sections array (a blank pane).
+    expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
+
+    // A statically-empty group (no sections registered yet) is unaffected —
+    // it keeps showing with the "pending" hint.
+    expect(screen.getByTestId("cfg-nav-budget")).toBeInTheDocument();
+    await user.click(screen.getByTestId("cfg-nav-budget"));
+    expect(screen.getByTestId("cfg-pane-pending")).toHaveTextContent(
+      en.manifest_editor.group_pending_hint,
+    );
+  });
+
+  it("clicking a group node while YAML is invalid keeps the tree highlight unchanged and stays on YAML with the error shown", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-yaml-toggle"));
+
+    const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
+    await user.clear(ta);
+    await user.type(ta, "metadata:\n  notname: x");
+
+    await user.click(screen.getByTestId("cfg-nav-capabilities"));
+
+    expect(screen.getByTestId("manifest-switch-error")).toBeInTheDocument();
+    expect(screen.getByTestId("monaco-stub")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("manifest-form-view"),
+    ).not.toBeInTheDocument();
+    // The highlight must not move to the clicked node.
+    expect(screen.getByTestId("cfg-nav-basic")).toHaveClass(
+      "ant-menu-item-selected",
+    );
+    expect(screen.getByTestId("cfg-nav-capabilities")).not.toHaveClass(
+      "ant-menu-item-selected",
+    );
+  });
+
+  it("clicking a group node while YAML is valid exits YAML mode and lands on the clicked group", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-yaml-toggle"));
+    expect(screen.getByTestId("monaco-stub")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("cfg-nav-capabilities"));
+
+    expect(screen.queryByTestId("monaco-stub")).not.toBeInTheDocument();
+    expect(screen.getByTestId("af-tools")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("manifest-switch-error"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("cfg-nav-capabilities")).toHaveClass(
+      "ant-menu-item-selected",
+    );
   });
 });
