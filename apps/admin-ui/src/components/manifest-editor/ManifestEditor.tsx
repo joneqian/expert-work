@@ -25,6 +25,7 @@ import { YamlView } from "./YamlView";
 import { GroupNav } from "./GroupNav";
 import { SettingsSearch } from "./SettingsSearch";
 import { CONFIG_GROUPS } from "./groups";
+import { RunBudgetSection } from "./groups/RunBudgetSection";
 import type { McpPickerSource } from "./widgets/McpToolPicker";
 
 /** A caller-supplied node rendered ABOVE the registered groups in the tree —
@@ -220,8 +221,10 @@ export function ManifestEditor({
   // leading tab renders nothing on its own — e.g. "basic" once its only
   // section is merged. Its node must be unreachable, or clicking it would
   // show FormView with an empty sections array (a blank pane). Groups that
-  // are statically empty to begin with (budget/context/sandbox/observability,
+  // are statically empty to begin with (context/sandbox/observability,
   // pending Phase 2) are untouched — they keep showing with the pending hint.
+  // "budget" is also statically empty (``sections: []``) but is special-cased
+  // below to render RunBudgetSection instead (Task 6 pilot).
   const hiddenGroups = CONFIG_GROUPS.filter(
     (g) =>
       g.sections.length > 0 &&
@@ -248,6 +251,8 @@ export function ManifestEditor({
     </div>
   ) : yamlActive ? (
     <YamlView value={yamlText} onChange={handleYamlChange} />
+  ) : activeConfigGroup?.id === "budget" ? (
+    <RunBudgetSection formData={manifestObject} onChange={handleFormChange} />
   ) : activeConfigGroup && activeConfigGroup.sections.length === 0 ? (
     <div data-testid="cfg-pane-pending" style={{ padding: 24 }}>
       <Alert

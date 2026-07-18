@@ -55,7 +55,6 @@ import {
   readReflectionEvaluator,
   readReflectionEvaluatorOn,
   readRecallMode,
-  readRunDeadline,
   readSystemPrompt,
   readTools,
   readTopK,
@@ -85,7 +84,6 @@ import {
   setReconcileWrites,
   setRecallMode,
   setReflectionEvaluator,
-  setRunDeadline,
   setSystemPrompt,
   setTool,
   setTopK,
@@ -645,6 +643,9 @@ export function FormView({
       </section>
     ),
 
+    // The run-deadline control that used to live here moved to the "budget"
+    // group's RunBudgetSection (Task 6 pilot) — policies.run_deadline_s is
+    // now edited alongside the other run-budget/timeout knobs.
     governance: (
       <>
         <section data-testid="af-approval" style={SECTION}>
@@ -690,26 +691,6 @@ export function FormView({
             />
             <Text type="secondary">{t("agent_form.dynamic_workers_hint")}</Text>
           </label>
-        </section>
-
-        <section data-testid="af-run-deadline" style={SECTION}>
-          <Heading>
-            {t("agent_form.section_run_deadline")}
-            <FieldHelp
-              text={t("agent_form.section_run_deadline_help")}
-              testId="af-run-deadline"
-            />
-          </Heading>
-          <Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-            {t("agent_form.run_deadline_hint")}
-          </Text>
-          <InputNumber
-            min={0}
-            max={86400}
-            value={readRunDeadline(formData)}
-            aria-label={t("agent_form.section_run_deadline")}
-            onChange={(v) => onChange(setRunDeadline(formData, v ?? 0))}
-          />
         </section>
 
         <Collapse

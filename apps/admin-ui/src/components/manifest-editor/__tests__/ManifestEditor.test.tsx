@@ -104,10 +104,24 @@ describe("ManifestEditor", () => {
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
-    await user.click(screen.getByTestId("cfg-nav-budget"));
+    // "budget" got a real curated pane (RunBudgetSection, Task 6) — use
+    // "context" (still statically empty, Phase 2) to exercise the generic
+    // pending-hint pathway.
+    await user.click(screen.getByTestId("cfg-nav-context"));
     expect(screen.getByTestId("cfg-pane-pending")).toHaveTextContent(
       en.manifest_editor.group_pending_hint,
     );
+  });
+
+  it("the 'budget' group renders RunBudgetSection instead of the pending hint", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-nav-budget"));
+    expect(screen.getByTestId("run-budget-section")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
   it("YAML toggle round-trips: Form→YAML dumps the manifest, YAML→Form parses it back", async () => {
@@ -305,9 +319,11 @@ describe("ManifestEditor", () => {
     expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
 
     // A statically-empty group (no sections registered yet) is unaffected —
-    // it keeps showing with the "pending" hint.
-    expect(screen.getByTestId("cfg-nav-budget")).toBeInTheDocument();
-    await user.click(screen.getByTestId("cfg-nav-budget"));
+    // it keeps showing with the "pending" hint. ("budget" is also statically
+    // empty but special-cased to RunBudgetSection — see the dedicated test
+    // above — so "context" exercises the generic pending-hint pathway here.)
+    expect(screen.getByTestId("cfg-nav-context")).toBeInTheDocument();
+    await user.click(screen.getByTestId("cfg-nav-context"));
     expect(screen.getByTestId("cfg-pane-pending")).toHaveTextContent(
       en.manifest_editor.group_pending_hint,
     );
