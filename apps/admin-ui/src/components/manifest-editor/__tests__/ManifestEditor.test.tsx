@@ -362,7 +362,7 @@ describe("ManifestEditor", () => {
 
     // The "basic" group's only section is fully merged away, so its node is
     // hidden entirely — there's no way to re-render the section a second
-    // time via the tree (see the dedicated hidden-group test below).
+    // time via the tree (asserted directly here).
     expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
   });
 
