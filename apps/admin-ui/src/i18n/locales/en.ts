@@ -777,6 +777,31 @@ export interface TranslationKeys {
     aux_model_note: string;
     reserved_note: string;
   };
+  // Task 3 (PR6) — "Model & Routing" group (ModelRoutingSection), embedded
+  // after the existing "model" FormView section (provider/model picker,
+  // fallback chain, reflection-evaluator model picker, vision fallback). One
+  // default-collapsed panel: reflection self-assessment (spec.reflection —
+  // Stream J.11's reflect-node config), whose activation switch is
+  // presence-semantic (see form_model.ts's readReflectionOn/setReflectionOn)
+  // and whose two tuning fields (budget/deadline_s) only render once it's
+  // on. A closing note flags the model-group fields still YAML-only
+  // (routing.rules planning rule / vision.fallbacks / base_url and azure_*
+  // wiring / the deprecated api_key_ref).
+  model_group: {
+    panel_reflection: string;
+    rf_enable_label: string;
+    rf_enable_brief: string;
+    rf_enable_impact: string;
+    rf_budget_label: string;
+    rf_budget_brief: string;
+    rf_budget_impact: string;
+    rf_budget_default: string;
+    rf_deadline_label: string;
+    rf_deadline_brief: string;
+    rf_deadline_impact: string;
+    rf_deadline_default: string;
+    yaml_note: string;
+  };
   model_select: {
     provider_label: string;
     provider_placeholder: string;
@@ -3522,6 +3547,28 @@ const en: TranslationKeys = {
     reserved_note:
       "memory.short_term and dynamic_context.inject_memory are currently reserved fields: they pass validation but aren't read at runtime. Whether memory is enabled is decided solely by whether memory.long_term is declared (the toggle above).",
   },
+  model_group: {
+    panel_reflection: "Reflection self-assessment",
+    rf_enable_label: "Reflection self-assessment",
+    rf_enable_brief:
+      "Before replying, the judge model reflects on and scores its own answer, auto-retrying with improvements if it falls short",
+    rf_enable_impact:
+      "Each reflection round adds one extra LLM call: higher quality, but more latency and cost. The judge model is set by the \"reflection evaluator model\" rule below; when unset, reflection reuses the main model.",
+    rf_budget_label: "Reflection retry cap",
+    rf_budget_brief:
+      "Maximum reflection calls per run; once the cap is hit, the current answer is accepted",
+    rf_budget_impact:
+      "Raise it for more rounds of self-improvement — cost and latency scale roughly linearly; 1 = judge only once.",
+    rf_budget_default: "2",
+    rf_deadline_label: "Per-reflection time limit (seconds)",
+    rf_deadline_brief:
+      "Wall-clock cap for each reflection call; on timeout, the current answer is force-accepted",
+    rf_deadline_impact:
+      "Prevents a stuck judge model from stalling the whole run. Raise it to tolerate a slow model; lower it to keep response times tight. Capped at 600.",
+    rf_deadline_default: "30",
+    yaml_note:
+      "The following capabilities are currently configured only via the YAML view: routing.rules' planning rule (only takes effect for the plan_execute workflow), vision.fallbacks (the vision-model fallback chain), and base_url / azure_deployment / azure_api_version (Azure and self-hosted wiring). api_key_ref is deprecated: setting it in the manifest is ignored, with a warning.",
+  },
   model_select: {
     provider_label: "Provider",
     provider_placeholder: "Select a configured provider",
@@ -3596,7 +3643,7 @@ const en: TranslationKeys = {
     mcp_servers_load_failed: "Could not load servers",
     section_reflection_evaluator: "Reflection evaluator (optional)",
     reflection_evaluator_hint:
-      "When reflection is on, which model judges whether the task is actually done.\nLeave empty to use the agent's own model.\nPrefer a different model: not necessarily stronger — a fresh vantage keeps the model from assuming its own answer is right and missing blind spots.\nPick a stronger one for deep-reasoning tasks.",
+      "Only picks the model — doesn't turn reflection on. The switch lives in the \"Reflection self-assessment\" panel.",
     reflection_evaluator_clear: "Clear (use the agent's own model)",
     section_vision: "Image understanding (VL model)",
     vision_hint:
@@ -3626,7 +3673,7 @@ const en: TranslationKeys = {
     memory_topk_help:
       "How many of the most relevant memories to pull in per chat.\nToo many crowd the context; too few miss info.\nExample: 5",
     section_reflection_evaluator_help:
-      "Optional. Let the agent self-reflect and score before replying to raise quality; skip to disable.\nExample: leave empty, or pick a light model for evaluation",
+      "Specifies which model judges reflection self-assessment (a routing rule). Only takes effect once \"Reflection self-assessment\" above is turned on; when unset, reflection reuses the main model.",
     section_defenses: "Defenses",
     section_defenses_help:
       "Configure this agent's safety posture: input injection defense, output screening/redaction, and tool-action review.",

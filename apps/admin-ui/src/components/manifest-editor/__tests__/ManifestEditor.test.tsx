@@ -172,6 +172,24 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("af-memory-toggle")).toBeInTheDocument();
   });
 
+  it("the 'model' group renders ModelRoutingSection instead of a plain stacked FormView", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-nav-model"));
+    // "model" still lists a real ``sections`` entry in CONFIG_GROUPS (like
+    // "security"/"memory"), so the distinguishing signal is the curated
+    // pane's own wrapper + its YAML-guidance note, which a plain stacked
+    // FormView never renders.
+    expect(screen.getByTestId("model-routing-section")).toBeInTheDocument();
+    expect(screen.getByTestId("model-yaml-note")).toBeInTheDocument();
+    // The embedded "model" FormView section (af-model controls) still
+    // renders underneath.
+    expect(screen.getByTestId("af-model")).toBeInTheDocument();
+  });
+
   it("the 'sandbox' group renders SandboxSection instead of the pending hint", async () => {
     const user = userEvent.setup();
     render(
