@@ -137,6 +137,7 @@ from orchestrator.llm import LLMCaller
 from orchestrator.llm.structured_output import correction_message, validate_structured_output
 from orchestrator.output_judge import ActionJudge, OutputJudge
 from orchestrator.state import AgentState
+from orchestrator.tools._worker_events import WORKER_EVENT_SINK_KEY
 from orchestrator.tools.error_classifier import (
     ClassifiedToolError,
     classified_invalid_arguments,
@@ -2543,6 +2544,9 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
     # pool. ``None`` when absent (no OAuth identity).
     oauth_raw = configurable.get("oauth_user_id")
     oauth_user_id = oauth_raw if isinstance(oauth_raw, str) and oauth_raw else None
+    # B2 — worker 事件 sink(镜像 worker_spawn_budget 的 config 读取)。
+    sink_raw = configurable.get(WORKER_EVENT_SINK_KEY)
+    worker_event_sink = sink_raw if callable(sink_raw) else None
     return ToolContext(
         tenant_id=tenant_id,
         run_id=run_id,
@@ -2552,6 +2556,7 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
         plan=plan,
         deadline_at=deadline_at,
         worker_spawn_budget=worker_spawn_budget,
+        worker_event_sink=worker_event_sink,
     )
 
 
@@ -2602,6 +2607,8 @@ async def _invoke_tool(
     spotlight_nonce: str | None = None,
     budget_enabled: bool = True,
 ) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
+    # B2 — 让工具知道自己服务的 tool_call id(worker 帧挂前端工具卡用)。
+    ctx = replace(ctx, tool_call_id=call_id)
     schema_error = _validate_tool_args(tool, args)
     if schema_error is not None:
         return (

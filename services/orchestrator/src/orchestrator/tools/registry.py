@@ -16,7 +16,7 @@ reasons about retry / different args / final answer.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
@@ -195,6 +195,16 @@ class ToolContext:
     #: feature is unwired (tests / eval) — workers still run, bounded by
     #: depth + iteration cap + deadline + the per-tenant quota engine.
     worker_spawn_budget: WorkerSpawnBudget | None = None
+    #: B2 worker 可观测性 — async sink publishing ``worker`` SSE frames into
+    #: the parent run's bridge + event store. Injected per-run by
+    #: ``sse.run_agent`` via ``WORKER_EVENT_SINK_KEY``; ``None`` when unwired
+    #: (tests / eval) — child runs then emit no frames.
+    worker_event_sink: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+    #: B2 — id of the tool_call this invocation serves (AIMessage
+    #: ``tool_calls[].id``), set per-dispatch in ``_invoke_tool`` via
+    #: ``dataclasses.replace``. Worker frames carry it so the frontend can
+    #: attach the worker sub-timeline to the pending tool card.
+    tool_call_id: str | None = None
 
 
 #: Stream K.K8 — keys a tool is allowed to write back to ``AgentState``

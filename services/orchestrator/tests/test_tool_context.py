@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+import pytest
 from langchain_core.runnables import RunnableConfig
 
 from expert_work.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
-from orchestrator.graph_builder.builder import _build_tool_context
+from orchestrator import ToolContext, ToolResult, ToolSpec
+from orchestrator.graph_builder.builder import _build_tool_context, _invoke_tool
+from orchestrator.tools._worker_events import WORKER_EVENT_SINK_KEY
 
 
 def test_build_tool_context_carries_run_cancellation_token() -> None:
@@ -27,3 +34,64 @@ def test_build_tool_context_supplies_fresh_token_when_absent() -> None:
 
     assert isinstance(ctx.cancellation_token, CancellationToken)
     assert not ctx.cancellation_token.cancelled()
+
+
+# --- B2 worker_event_sink / tool_call_id ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tool_context_reads_worker_event_sink_from_config() -> None:
+    async def _sink(frame: dict[str, Any]) -> None:
+        del frame
+        return None
+
+    config: RunnableConfig = {"configurable": {WORKER_EVENT_SINK_KEY: _sink}}
+    ctx = _build_tool_context(config)
+    assert ctx.worker_event_sink is _sink
+
+
+def test_tool_context_worker_event_sink_defaults_none() -> None:
+    ctx = _build_tool_context({"configurable": {}})
+    assert ctx.worker_event_sink is None
+    assert ctx.tool_call_id is None
+
+
+def test_tool_context_ignores_non_callable_worker_sink() -> None:
+    ctx = _build_tool_context({"configurable": {WORKER_EVENT_SINK_KEY: "not-callable"}})
+    assert ctx.worker_event_sink is None
+
+
+@dataclass
+class _ProbeTool:
+    """Minimal ``Tool`` stub — mirrors ``_SchemaTool`` in
+    ``test_tool_arg_validation.py``, parameterized over ``call`` so a test
+    can observe the ``ctx`` it's dispatched with."""
+
+    name: str
+    call_fn: Any
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name=self.name, description="probe", parameters=self.parameters)
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        return await self.call_fn(args, ctx=ctx)
+
+
+def _make_tool(*, name: str, call: Any) -> _ProbeTool:
+    return _ProbeTool(name=name, call_fn=call)
+
+
+@pytest.mark.asyncio
+async def test_invoke_tool_threads_tool_call_id_into_ctx() -> None:
+    seen: dict[str, Any] = {}
+
+    async def _call(args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        del args
+        seen["tool_call_id"] = ctx.tool_call_id
+        return ToolResult(content="ok")
+
+    tool = _make_tool(name="probe", call=_call)  # 按文件内现有工具构造惯例
+    await _invoke_tool(tool, {}, "call-42", ToolContext())
+    assert seen["tool_call_id"] == "call-42"
