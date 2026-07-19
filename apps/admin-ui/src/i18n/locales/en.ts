@@ -591,9 +591,9 @@ export interface TranslationKeys {
     field_impact_label: string;
     field_default_badge: string;
   };
-  // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Five
+  // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Six
   // FieldRow-rendered knobs living in three manifest locations
-  // (workflow.max_iterations / policies.max_no_progress+run_deadline_s /
+  // (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
   // top-level spec.stream_deadline_s+idle_timeout_s).
   run_budget: {
     max_iterations_label: string;
