@@ -384,7 +384,11 @@ export function setFallback(m: unknown, chain: ModelFields[]): AgentManifest {
 export function normalizeForSubmit(m: unknown): AgentManifest {
   const primary = readModel(m);
   const seen = new Set<string>();
-  const key = (e: ModelFields): string => `${e.provider} ${e.name}`;
+  // JSON-array key: collision-proof (JSON escaping separates the parts)
+  // and plain ASCII — an earlier NUL-byte separator made grep/file
+  // classify this whole module as binary, silently exempting it from
+  // line-oriented tooling.
+  const key = (e: ModelFields): string => JSON.stringify([e.provider, e.name]);
   if (primary.provider && primary.name) seen.add(key(primary));
   const pruned = readFallback(m).filter((e) => {
     if (!e.provider || !e.name || seen.has(key(e))) return false;
