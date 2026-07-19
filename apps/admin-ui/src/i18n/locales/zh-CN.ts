@@ -602,7 +602,6 @@ const zhCN: TranslationKeys = {
     group_security: "安全与防护",
     group_sandbox: "沙箱与资源",
     group_observability: "触发器与可观测",
-    group_pending_hint: "本组设置将在后续版本可视化,当前请用 YAML 编辑",
     field_impact_label: "影响说明",
     field_default_badge: "默认 {{value}}",
   },
@@ -821,6 +820,16 @@ const zhCN: TranslationKeys = {
     yaml_note:
       "以下能力暂经 YAML 视图配置:routing.rules 的 planning 规则(仅 plan_execute 工作流生效)、vision.fallbacks(视觉模型回退链)、base_url / azure_deployment / azure_api_version(azure 与自托管接线)。api_key_ref 已废弃:manifest 中设置会被忽略并告警。",
   },
+  observability_group: {
+    resp_cache_label: "LLM 响应缓存",
+    resp_cache_brief: "相同请求命中缓存直接复用完整回答,不再调用模型——省钱提速",
+    resp_cache_impact:
+      "命中即跳过模型调用(含路由与回退链)。提示词含时效内容(当前日期、实时数据等)的 Agent 应关闭,否则可能返回过期答案。与模型组的「提示词缓存」(Anthropic prompt caching)是两回事:那个只省输入 token,本开关直接复用整条回答。",
+    triggers_note:
+      "manifest 的 triggers 声明当前未接线:在清单里写 cron/webhook 触发器不会生效。定时与 webhook 自动化请通过触发器管理 API(/v1/triggers)创建,该路径的调度与触发正常工作。",
+    declarative_note:
+      "observability 的 trace / log_level / redact_fields 当前为声明性字段:通过校验但运行时不读取——追踪始终按平台配置开启,日志级别由各服务部署环境决定,PII 脱敏由平台防御链负责。轨迹录制同理:是否录制由部署的对象存储配置决定。",
+  },
   model_select: {
     provider_label: "提供方",
     provider_placeholder: "选择已配置密钥的提供方",
@@ -1003,7 +1012,7 @@ const zhCN: TranslationKeys = {
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",
     trajectory_recording: "记录对话留档",
     trajectory_recording_help:
-      "开启后,每次完整对话会被保存下来,用于质量评测和模型优化。\n如果对话内容不能留存,就关掉。\n默认开启。\n示例:开启",
+      "当前未接线:是否录制由平台对象存储配置决定,本开关暂不生效(字段保留待后端接线)。",
     section_knowledge: "知识库(RAG)",
     section_knowledge_help:
       "Agent 可以检索的知识库,用来给回答找依据。\n选已有的库,或输入名称。\n示例:hr-policies、eng-handbook",

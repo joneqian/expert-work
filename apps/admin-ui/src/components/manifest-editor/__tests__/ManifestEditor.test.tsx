@@ -98,22 +98,6 @@ describe("ManifestEditor", () => {
     ).toBeInTheDocument();
   });
 
-  it("a group with no curated sections yet (Phase 2) shows the pending hint", async () => {
-    const user = userEvent.setup();
-    render(
-      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
-    );
-    await screen.findByTestId("af-basic");
-    // "budget"/"context"/"sandbox" all got real curated panes (RunBudgetSection
-    // Task 6 / ContextGatesSection Task 3 / SandboxSection Task 2) — use
-    // "observability" (still statically empty, Phase 2) to exercise the
-    // generic pending-hint pathway.
-    await user.click(screen.getByTestId("cfg-nav-observability"));
-    expect(screen.getByTestId("cfg-pane-pending")).toHaveTextContent(
-      en.manifest_editor.group_pending_hint,
-    );
-  });
-
   it("the 'budget' group renders RunBudgetSection instead of the pending hint", async () => {
     const user = userEvent.setup();
     render(
@@ -198,6 +182,17 @@ describe("ManifestEditor", () => {
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-sandbox"));
     expect(screen.getByTestId("sandbox-section")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
+  });
+
+  it("the 'observability' group renders ObservabilitySection instead of the pending hint", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-nav-observability"));
+    expect(screen.getByTestId("observability-section")).toBeInTheDocument();
     expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
@@ -369,42 +364,6 @@ describe("ManifestEditor", () => {
     // hidden entirely — there's no way to re-render the section a second
     // time via the tree (see the dedicated hidden-group test below).
     expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
-  });
-
-  it("a leading tab with mergeSection hides the fully-merged-away group node, keeping statically-empty groups", async () => {
-    const user = userEvent.setup();
-    render(
-      <ManifestEditor
-        mode="create"
-        initialYaml={SEED}
-        onChange={vi.fn()}
-        leadingTabs={[
-          {
-            value: "meta",
-            label: "Basic info",
-            content: <div data-testid="meta-form">meta</div>,
-            mergeSection: "basic",
-          },
-        ]}
-      />,
-    );
-    await screen.findByTestId("meta-form");
-
-    // "basic" group's only section is folded into the leading tab — its
-    // node must not be reachable at all, or clicking it would render
-    // FormView with an empty sections array (a blank pane).
-    expect(screen.queryByTestId("cfg-nav-basic")).not.toBeInTheDocument();
-
-    // A statically-empty group (no sections registered yet) is unaffected —
-    // it keeps showing with the "pending" hint. ("budget"/"context"/"sandbox"
-    // are also statically empty but special-cased to a curated pane — see
-    // the dedicated tests above — so "observability" exercises the generic
-    // pending-hint pathway here.)
-    expect(screen.getByTestId("cfg-nav-observability")).toBeInTheDocument();
-    await user.click(screen.getByTestId("cfg-nav-observability"));
-    expect(screen.getByTestId("cfg-pane-pending")).toHaveTextContent(
-      en.manifest_editor.group_pending_hint,
-    );
   });
 
   it("clicking a group node while YAML is invalid keeps the tree highlight unchanged and stays on YAML with the error shown", async () => {

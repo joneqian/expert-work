@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../../../i18n";
 
@@ -207,5 +213,27 @@ describe("SecuritySection", () => {
     expect(screen.getByTestId("security-gates-dict-note")).toHaveTextContent(
       "Rate limiting / PII / security policy are still a free-form dict",
     );
+  });
+
+  // Task 2 (PR7) — trajectory_recording's hint copy was corrected to state
+  // it's not wired up (recording is decided by the deployment's ObjectStore
+  // config, not this manifest switch). It lives in the embedded "governance"
+  // FormView section's collapsed "Advanced" panel.
+  it("renders the corrected trajectory-recording hint inside the governance Advanced panel", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    const header = within(document.body)
+      .getByText("Advanced", { selector: ".ant-collapse-header-text" })
+      .closest(".ant-collapse-header") as HTMLElement;
+    await user.click(header);
+
+    fireEvent.mouseEnter(
+      screen.getByTestId("field-help-af-trajectory-recording"),
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByText(/object-store configuration/),
+      ).toBeInTheDocument();
+    });
   });
 });
