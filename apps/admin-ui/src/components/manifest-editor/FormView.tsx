@@ -249,6 +249,13 @@ export function FormView({
             />
           </div>
         )}
+        <Text
+          type="secondary"
+          data-testid="af-basic-yaml-note"
+          style={{ display: "block" }}
+        >
+          {t("agent_form.basic_yaml_note")}
+        </Text>
       </section>
     ),
 
@@ -484,6 +491,13 @@ export function FormView({
             />
           </span>
         </div>
+        <Text
+          type="secondary"
+          data-testid="af-tools-config-note"
+          style={{ display: "block", marginTop: 12 }}
+        >
+          {t("agent_form.tools_config_note")}
+        </Text>
       </section>
     ),
 

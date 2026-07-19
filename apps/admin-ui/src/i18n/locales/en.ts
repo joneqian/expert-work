@@ -851,6 +851,7 @@ export interface TranslationKeys {
     field_name_required: string;
     field_name_placeholder: string;
     field_description: string;
+    basic_yaml_note: string;
     section_model: string;
     section_prompt: string;
     field_prompt_placeholder: string;
@@ -940,6 +941,7 @@ export interface TranslationKeys {
     tool_web_search_help: string;
     tool_http_help: string;
     tool_mcp_help: string;
+    tools_config_note: string;
     section_approval: string;
     section_approval_help: string;
     approval_hint: string;
@@ -3648,6 +3650,8 @@ const en: TranslationKeys = {
     field_name_required: "Name is required",
     field_name_placeholder: "my-agent",
     field_description: "Description",
+    basic_yaml_note:
+      "extends (template inheritance) is edited in the YAML view. tenant_config's compliance_pack / isolation_level / data_residency are reserved fields: they pass validation but aren't read at runtime (sandbox isolation is currently always shared); audit_retention_days is decided by a platform-wide global default for now.",
     section_model: "Model",
     section_prompt: "System prompt",
     field_prompt_placeholder: "You are a helpful assistant.",
@@ -3769,6 +3773,8 @@ const en: TranslationKeys = {
       "Let the agent call external APIs (through the audited egress proxy).\nExample: weather, internal services",
     tool_mcp_help:
       "Let the agent use tools provided by MCP servers (databases, business systems).\nOnce checked, pick the specific servers and tools below.\nExample: connect your company's CRM",
+    tools_config_note:
+      "Per-tool configuration for built-in tools (tools[].config, e.g. search engine / result count) and built-in tool entries other than web_search are edited in the YAML view.",
     section_approval: "Human approval",
     section_approval_help:
       "For the tools you check, every run pauses before they execute and waits for a human to approve.\nBase abilities like code execution are on by default and can't be turned off — use this to add a human checkpoint before they run.\nExample: add approval for exec_python, http",

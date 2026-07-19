@@ -872,6 +872,8 @@ const zhCN: TranslationKeys = {
     field_name_required: "名称必填",
     field_name_placeholder: "my-agent",
     field_description: "描述",
+    basic_yaml_note:
+      "extends(模板继承)在 YAML 视图编辑。tenant_config 的 compliance_pack / isolation_level / data_residency 为保留字段:通过校验但运行时不读取(沙箱隔离当前恒为 shared);audit_retention_days 暂由平台全局配置决定。",
     section_model: "模型",
     section_prompt: "系统提示词",
     field_prompt_placeholder: "你是一个有帮助的助手。",
@@ -991,6 +993,8 @@ const zhCN: TranslationKeys = {
       "允许 Agent 调外部 API(经审计代理出网)。\n示例:查天气、调内部服务",
     tool_mcp_help:
       "允许 Agent 用 MCP 服务器提供的工具(数据库、业务系统等)。\n勾选后在下面选具体服务器和工具。\n示例:接公司 CRM",
+    tools_config_note:
+      "内置工具的 per-tool 配置(tools[].config,如搜索引擎/结果数)与 web_search 之外的内置工具项请在 YAML 视图编辑。",
     section_approval: "人工审批",
     section_approval_help:
       "勾选的工具,每次执行前都会暂停,等人工批准后才继续。\n代码执行等基础能力默认开着、关不掉,用这个在执行前加一道人工关卡。\n示例:给 exec_python、http 加审批",

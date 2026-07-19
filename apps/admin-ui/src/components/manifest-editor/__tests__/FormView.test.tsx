@@ -364,6 +364,16 @@ describe("FormView", () => {
     expect(screen.getByTestId("af-dynamic-context-note")).toBeInTheDocument();
   });
 
+  it("renders the basic-section note about extends and tenant_config reserved fields", () => {
+    renderSection("basic");
+    expect(screen.getByTestId("af-basic-yaml-note")).toBeInTheDocument();
+  });
+
+  it("renders the tools-section note about per-tool YAML config", () => {
+    renderSection("tools");
+    expect(screen.getByTestId("af-tools-config-note")).toBeInTheDocument();
+  });
+
   it("renders the defenses section with every switch/select", () => {
     renderSection("defenses");
     expect(screen.getByTestId("af-defenses")).toBeInTheDocument();
