@@ -816,6 +816,18 @@ const zhCN: TranslationKeys = {
     context_window_hint: "token 数；决定压缩触发阈值。留空 = 用模型目录默认窗口。",
     thinking_label: "思考模式",
     thinking_cannot_disable: "该模型仅能最小化思考，无法完全关闭。",
+    effort_label: "努力程度",
+    effort_hint:
+      "推理深度档位。留空=提供商默认。仅模型目录标注支持思考的模型可设,否则构建报错。",
+    adaptive_label: "自适应思考",
+    adaptive_hint:
+      "由模型按任务难度自行决定思考深度(Anthropic 4.6+)。仅 Anthropic 生效。",
+    cache_label: "提示词缓存",
+    cache_hint:
+      "Anthropic prompt caching,长会话显著省钱。默认开;提示词含时效内容的 Agent 可关。仅 Anthropic 生效。",
+    max_tokens_hint:
+      "单次回复输出 token 上限。仅 Anthropic 路径生效(qwen/doubao 借它推导思考预算);OpenAI 系提供商忽略此值。",
+    rate_limit_hint: "对该模型的请求速率上限(次/分钟)。超限请求排队等待,不报错。",
   },
   agent_form: {
     section_basic: "基本",

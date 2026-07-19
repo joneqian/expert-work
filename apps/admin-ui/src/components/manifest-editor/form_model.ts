@@ -11,6 +11,16 @@ export interface ModelFields {
   context_window?: number;
   // Thinking-Toggle — tri-state on/off (undefined = inherit vendor default).
   thinking_enabled?: boolean;
+  // Reasoning effort tier (low/medium/high/max). Undefined = provider
+  // default. Only meaningful when the catalog entry has a thinking knob —
+  // the ModelSelect widget gates the control on that same condition.
+  effort?: string;
+  // Adaptive thinking (Anthropic 4.6+) — model decides its own depth.
+  // Anthropic-only; undefined (default) = off.
+  adaptive_thinking?: boolean;
+  // Anthropic prompt caching. Anthropic-only; default TRUE (undefined = on),
+  // explicit ``false`` = off.
+  cache_enabled?: boolean;
   // E.11 — provider fallback chain, flat + ordered: primary → fallback[0] →
   // fallback[1] → …. The backend pre-order-flattens the tree
   // (agent_factory._flatten_chain), so a hand-authored nested sub-chain on an

@@ -30,6 +30,20 @@ async function pickOption(
 const CATALOG: ModelCatalog = {
   providers: [
     {
+      provider: "anthropic",
+      models: [
+        {
+          name: "claude-4.6-sonnet",
+          vision: false,
+          embeddings: false,
+          context_window: 500000,
+          deprecated: false,
+          thinking: "toggle",
+          thinking_default: true,
+        },
+      ],
+    },
+    {
       provider: "deepseek",
       models: [
         {
@@ -339,5 +353,171 @@ describe("ModelSelect", () => {
     expect(
       screen.queryByText(optionContent("text-embedding-3-large")),
     ).not.toBeInTheDocument();
+  });
+
+  // ---- effort / adaptive_thinking / cache_enabled (advanced panel) ----
+
+  async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(
+      within(screen.getByTestId("model-select-advanced")).getByText(
+        "Advanced",
+      ),
+    );
+  }
+
+  it("shows effort/adaptive/cache for an anthropic thinking-capable model", async () => {
+    const user = userEvent.setup();
+    renderSelect({ provider: "anthropic", name: "claude-4.6-sonnet" });
+    await openAdvanced(user);
+    expect(screen.getByTestId("model-select-effort")).toBeInTheDocument();
+    expect(screen.getByTestId("model-select-adaptive")).toBeInTheDocument();
+    expect(screen.getByTestId("model-select-cache")).toBeInTheDocument();
+  });
+
+  it("effort follows the same catalog gate as the thinking switch — shown for a non-anthropic thinking-capable model, but adaptive/cache stay hidden", async () => {
+    const user = userEvent.setup();
+    renderSelect({ provider: "openai", name: "gpt-5.5" });
+    await openAdvanced(user);
+    expect(screen.getByTestId("model-select-effort")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("model-select-adaptive"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("model-select-cache")).not.toBeInTheDocument();
+  });
+
+  it("hides effort/adaptive/cache entirely for an OpenAI-family model with no thinking knob", async () => {
+    const user = userEvent.setup();
+    renderSelect({ provider: "openai", name: "text-embedding-3-large" });
+    await openAdvanced(user);
+    expect(screen.queryByTestId("model-select-effort")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("model-select-adaptive"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("model-select-cache")).not.toBeInTheDocument();
+  });
+
+  it("effort select writes value.effort on pick", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "anthropic", name: "claude-4.6-sonnet" },
+      onChange,
+    );
+    await openAdvanced(user);
+    const effortSel = within(
+      screen.getByTestId("model-select-effort"),
+    ).getByRole("combobox");
+    await pickOption(user, effortSel, "high");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ effort: "high" }),
+    );
+  });
+
+  it("clearing the effort select removes the key", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "anthropic", name: "claude-4.6-sonnet", effort: "high" },
+      onChange,
+    );
+    await openAdvanced(user);
+    const clearIcon = within(
+      screen.getByTestId("model-select-effort"),
+    ).getByLabelText("close-circle");
+    await user.click(clearIcon);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ effort: undefined }),
+    );
+  });
+
+  it("adaptive_thinking switch on writes true", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "anthropic", name: "claude-4.6-sonnet" },
+      onChange,
+    );
+    await openAdvanced(user);
+    const sw = within(
+      screen.getByTestId("model-select-adaptive"),
+    ).getByRole("switch");
+    await user.click(sw);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ adaptive_thinking: true }),
+    );
+  });
+
+  it("adaptive_thinking switch off (=default) removes the key", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      {
+        provider: "anthropic",
+        name: "claude-4.6-sonnet",
+        adaptive_thinking: true,
+      },
+      onChange,
+    );
+    await openAdvanced(user);
+    const sw = within(
+      screen.getByTestId("model-select-adaptive"),
+    ).getByRole("switch");
+    await user.click(sw);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ adaptive_thinking: undefined }),
+    );
+  });
+
+  it("cache_enabled defaults to checked (on) and turning off writes false", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "anthropic", name: "claude-4.6-sonnet" },
+      onChange,
+    );
+    await openAdvanced(user);
+    const sw = within(
+      screen.getByTestId("model-select-cache"),
+    ).getByRole("switch");
+    expect(sw).toBeChecked();
+    await user.click(sw);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ cache_enabled: false }),
+    );
+  });
+
+  it("cache_enabled: turning back on (=default) removes the key", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      {
+        provider: "anthropic",
+        name: "claude-4.6-sonnet",
+        cache_enabled: false,
+      },
+      onChange,
+    );
+    await openAdvanced(user);
+    const sw = within(
+      screen.getByTestId("model-select-cache"),
+    ).getByRole("switch");
+    expect(sw).not.toBeChecked();
+    await user.click(sw);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ cache_enabled: undefined }),
+    );
+  });
+
+  it("renders max_tokens and rate_limit_rpm hint text in the advanced panel", async () => {
+    const user = userEvent.setup();
+    renderSelect({ provider: "openai", name: "gpt-5.5" });
+    await openAdvanced(user);
+    const advanced = screen.getByTestId("model-select-advanced");
+    expect(
+      within(advanced).getByText(/Output token ceiling for a single reply/),
+    ).toBeInTheDocument();
+    expect(
+      within(advanced).getByText(/Request-rate ceiling for this model/),
+    ).toBeInTheDocument();
   });
 });

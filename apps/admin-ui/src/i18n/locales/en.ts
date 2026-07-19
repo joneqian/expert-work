@@ -790,6 +790,14 @@ export interface TranslationKeys {
     context_window_hint: string;
     thinking_label: string;
     thinking_cannot_disable: string;
+    effort_label: string;
+    effort_hint: string;
+    adaptive_label: string;
+    adaptive_hint: string;
+    cache_label: string;
+    cache_hint: string;
+    max_tokens_hint: string;
+    rate_limit_hint: string;
   };
   agent_form: {
     section_basic: string;
@@ -3529,6 +3537,19 @@ const en: TranslationKeys = {
     thinking_label: "Thinking mode",
     thinking_cannot_disable:
       "This model can only minimise thinking, not fully disable it.",
+    effort_label: "Effort",
+    effort_hint:
+      "Reasoning depth tier. Empty = the provider default. Only settable when the model catalog marks the model as thinking-capable — otherwise the build fails.",
+    adaptive_label: "Adaptive thinking",
+    adaptive_hint:
+      "Lets the model decide its own thinking depth based on task difficulty (Anthropic 4.6+). Anthropic-only.",
+    cache_label: "Prompt caching",
+    cache_hint:
+      "Anthropic prompt caching — significant savings on long sessions. On by default; turn off for agents whose prompt holds time-sensitive content. Anthropic-only.",
+    max_tokens_hint:
+      "Output token ceiling for a single reply. Only effective on the Anthropic path (qwen/doubao borrow it to derive the thinking budget); OpenAI-family providers ignore this value.",
+    rate_limit_hint:
+      "Request-rate ceiling for this model (per minute). Requests over the limit queue instead of erroring.",
   },
   agent_form: {
     section_basic: "Basics",

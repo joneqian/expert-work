@@ -175,6 +175,16 @@ export function ModelSelect({
                     }
                     style={{ width: "100%" }}
                   />
+                  <span
+                    style={{
+                      display: "block",
+                      marginTop: 4,
+                      fontSize: 12,
+                      color: "var(--ew-text-muted, #888)",
+                    }}
+                  >
+                    {t("model_select.max_tokens_hint")}
+                  </span>
                 </label>
                 <label style={{ display: "block", marginBottom: 8 }}>
                   <span style={{ display: "block", marginBottom: 4 }}>
@@ -187,6 +197,16 @@ export function ModelSelect({
                     }
                     style={{ width: "100%" }}
                   />
+                  <span
+                    style={{
+                      display: "block",
+                      marginTop: 4,
+                      fontSize: 12,
+                      color: "var(--ew-text-muted, #888)",
+                    }}
+                  >
+                    {t("model_select.rate_limit_hint")}
+                  </span>
                 </label>
                 <label style={{ display: "block", marginBottom: 8 }}>
                   <span style={{ display: "block", marginBottom: 4 }}>
@@ -213,6 +233,107 @@ export function ModelSelect({
                     {t("model_select.context_window_hint")}
                   </span>
                 </label>
+                {hasThinkingKnob && (
+                  <label
+                    data-testid="model-select-effort"
+                    style={{ display: "block", marginBottom: 8 }}
+                  >
+                    <span style={{ display: "block", marginBottom: 4 }}>
+                      {t("model_select.effort_label")}
+                    </span>
+                    <Select
+                      allowClear
+                      aria-label={t("model_select.effort_label")}
+                      value={value.effort}
+                      onChange={(v) =>
+                        onChange({ ...value, effort: v ?? undefined })
+                      }
+                      options={[
+                        { label: "low", value: "low" },
+                        { label: "medium", value: "medium" },
+                        { label: "high", value: "high" },
+                        { label: "max", value: "max" },
+                      ]}
+                      style={{ width: "100%" }}
+                    />
+                    <span
+                      style={{
+                        display: "block",
+                        marginTop: 4,
+                        fontSize: 12,
+                        color: "var(--ew-text-muted, #888)",
+                      }}
+                    >
+                      {t("model_select.effort_hint")}
+                    </span>
+                  </label>
+                )}
+                {value.provider === "anthropic" && (
+                  <div
+                    data-testid="model-select-adaptive"
+                    style={{ marginBottom: 8 }}
+                  >
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      <Switch
+                        size="small"
+                        checked={value.adaptive_thinking === true}
+                        aria-label={t("model_select.adaptive_label")}
+                        onChange={(checked) =>
+                          onChange({
+                            ...value,
+                            adaptive_thinking: checked ? true : undefined,
+                          })
+                        }
+                      />
+                      <span>{t("model_select.adaptive_label")}</span>
+                    </div>
+                    <span
+                      style={{
+                        display: "block",
+                        marginTop: 4,
+                        fontSize: 12,
+                        color: "var(--ew-text-muted, #888)",
+                      }}
+                    >
+                      {t("model_select.adaptive_hint")}
+                    </span>
+                  </div>
+                )}
+                {value.provider === "anthropic" && (
+                  <div
+                    data-testid="model-select-cache"
+                    style={{ marginBottom: 8 }}
+                  >
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      <Switch
+                        size="small"
+                        checked={value.cache_enabled !== false}
+                        aria-label={t("model_select.cache_label")}
+                        onChange={(checked) =>
+                          onChange({
+                            ...value,
+                            cache_enabled: checked ? undefined : false,
+                          })
+                        }
+                      />
+                      <span>{t("model_select.cache_label")}</span>
+                    </div>
+                    <span
+                      style={{
+                        display: "block",
+                        marginTop: 4,
+                        fontSize: 12,
+                        color: "var(--ew-text-muted, #888)",
+                      }}
+                    >
+                      {t("model_select.cache_hint")}
+                    </span>
+                  </div>
+                )}
               </>
             ),
           },
