@@ -78,6 +78,10 @@ import {
   patchSecurity,
   readSandboxFs,
   patchSandboxFs,
+  readMemoryBudgets,
+  patchMemoryBudgets,
+  readConsolidation,
+  patchConsolidation,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -1319,5 +1323,262 @@ describe("sandbox filesystem group (spec.sandbox.filesystem.persistent_workspace
 
   it("readSandboxFs returns undefined for persistentWorkspace on an empty manifest", () => {
     expect(readSandboxFs({})).toEqual({ persistentWorkspace: undefined });
+  });
+});
+
+describe("memory injection budgets (spec.memory.long_term token budgets)", () => {
+  it("both budget fields round-trip through YAML", () => {
+    const m: AgentManifest = { spec: { memory: { long_term: {} } } };
+    const next = patchMemoryBudgets(m, {
+      injectionTokenBudget: 3000,
+      correctionTokenBudget: 800,
+    });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("injection_token_budget: 3000");
+    expect(yaml).toContain("correction_token_budget: 800");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readMemoryBudgets(roundTripped)).toEqual({
+      injectionTokenBudget: 3000,
+      correctionTokenBudget: 800,
+    });
+  });
+
+  it("preserves long_term's existing sibling keys (retrieve_top_k, write_back) when patching budgets", () => {
+    const base: AgentManifest = {
+      spec: {
+        memory: {
+          long_term: { retrieve_top_k: 5, write_back: true },
+        },
+      },
+    };
+    const next = patchMemoryBudgets(base, { injectionTokenBudget: 1500 });
+    expect(next.spec?.memory?.long_term).toEqual({
+      retrieve_top_k: 5,
+      write_back: true,
+      injection_token_budget: 1500,
+    });
+  });
+
+  it("preserves memory's own unrelated unknown keys when patching budgets", () => {
+    const base: AgentManifest = {
+      spec: {
+        memory: {
+          short_term: { enabled: true },
+          long_term: { retrieve_top_k: 5 },
+        },
+      },
+    };
+    const next = patchMemoryBudgets(base, { correctionTokenBudget: 400 });
+    expect(next.spec?.memory?.short_term).toEqual({ enabled: true });
+  });
+
+  it("explicit undefined deletes a budget key but keeps long_term as {} when it only held budget keys (memory stays ON)", () => {
+    // memory.long_term's PRESENCE is the runtime memory on/off switch — an
+    // emptied block must survive as `{}` (on with defaults), never dropped,
+    // or clearing a budget would silently deactivate memory.
+    const base: AgentManifest = {
+      spec: { memory: { long_term: { injection_token_budget: 3000 } } },
+    };
+    const cleared = patchMemoryBudgets(base, {
+      injectionTokenBudget: undefined,
+    });
+    expect(cleared.spec?.memory?.long_term).toEqual({});
+    expect(cleared.spec?.memory).toEqual({ long_term: {} });
+  });
+
+  it("clearing one budget key preserves the other budget key and long_term siblings", () => {
+    const base: AgentManifest = {
+      spec: {
+        memory: {
+          long_term: {
+            retrieve_top_k: 5,
+            injection_token_budget: 3000,
+            correction_token_budget: 800,
+          },
+        },
+      },
+    };
+    const next = patchMemoryBudgets(base, {
+      injectionTokenBudget: undefined,
+    });
+    expect(next.spec?.memory?.long_term).toEqual({
+      retrieve_top_k: 5,
+      correction_token_budget: 800,
+    });
+  });
+
+  it("does not materialize memory when the patch nets out empty and memory was absent", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchMemoryBudgets(base, {
+      injectionTokenBudget: undefined,
+    });
+    expect(next.spec?.memory).toBeUndefined();
+  });
+
+  it("an empty patch does not materialize memory at all", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchMemoryBudgets(base, {});
+    expect(next.spec?.memory).toBeUndefined();
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m: AgentManifest = {
+      spec: { memory: { long_term: { retrieve_top_k: 5 } } },
+    };
+    const snapshot = JSON.stringify(m);
+    patchMemoryBudgets(m, { injectionTokenBudget: 3000 });
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("readMemoryBudgets returns undefined for both fields on an empty manifest", () => {
+    expect(readMemoryBudgets({})).toEqual({
+      injectionTokenBudget: undefined,
+      correctionTokenBudget: undefined,
+    });
+  });
+
+  it("coexists with readMemoryOn / patchLongTerm's existing long_term knobs without disturbing them", () => {
+    const base: AgentManifest = {
+      spec: {
+        memory: { long_term: { retrieve_top_k: 5, write_back: true } },
+      },
+    };
+    expect(readMemoryOn(base)).toBe(true);
+
+    const withBudgets = patchMemoryBudgets(base, {
+      injectionTokenBudget: 3000,
+      correctionTokenBudget: 800,
+    });
+    expect(readMemoryOn(withBudgets)).toBe(true);
+    expect(withBudgets.spec?.memory?.long_term).toEqual({
+      retrieve_top_k: 5,
+      write_back: true,
+      injection_token_budget: 3000,
+      correction_token_budget: 800,
+    });
+
+    // setTopK (built on the pre-existing patchLongTerm) still works untouched.
+    const withTopK = setTopK(withBudgets, 8);
+    expect(withTopK.spec?.memory?.long_term).toEqual({
+      retrieve_top_k: 8,
+      write_back: true,
+      injection_token_budget: 3000,
+      correction_token_budget: 800,
+    });
+    expect(readMemoryOn(withTopK)).toBe(true);
+  });
+});
+
+describe("memory consolidation (policies.memory_consolidation.enabled)", () => {
+  it("consolidationEnabled=false round-trips through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchConsolidation(m, { consolidationEnabled: false });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("memory_consolidation:");
+    expect(yaml).toContain("enabled: false");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readConsolidation(roundTripped).consolidationEnabled).toBe(false);
+  });
+
+  it("preserves unrelated policies keys (approval_required_tools) when patching", () => {
+    const base: AgentManifest = {
+      spec: { policies: { approval_required_tools: ["exec_python"] } },
+    };
+    const next = patchConsolidation(base, { consolidationEnabled: false });
+    expect(next.spec?.policies?.approval_required_tools).toEqual([
+      "exec_python",
+    ]);
+    expect(next.spec?.policies?.memory_consolidation).toEqual({
+      enabled: false,
+    });
+  });
+
+  it("explicit undefined deletes enabled, dropping memory_consolidation and policies when both empty", () => {
+    const base: AgentManifest = {
+      spec: { policies: { memory_consolidation: { enabled: false } } },
+    };
+    const cleared = patchConsolidation(base, {
+      consolidationEnabled: undefined,
+    });
+    expect(cleared.spec?.policies?.memory_consolidation).toBeUndefined();
+    expect(cleared.spec?.policies).toBeUndefined();
+  });
+
+  it("clearing enabled preserves aux_model sibling inside memory_consolidation", () => {
+    const base: AgentManifest = {
+      spec: {
+        policies: {
+          memory_consolidation: {
+            enabled: false,
+            aux_model: { provider: "glm", name: "glm-4-flash" },
+          },
+        },
+      },
+    };
+    const next = patchConsolidation(base, { consolidationEnabled: undefined });
+    expect(next.spec?.policies?.memory_consolidation).toEqual({
+      aux_model: { provider: "glm", name: "glm-4-flash" },
+    });
+  });
+
+  it("preserves aux_model unknown key when patching enabled", () => {
+    const base: AgentManifest = {
+      spec: {
+        policies: {
+          memory_consolidation: {
+            aux_model: { provider: "glm", name: "glm-4-flash" },
+          },
+        },
+      },
+    };
+    const next = patchConsolidation(base, { consolidationEnabled: true });
+    expect(next.spec?.policies?.memory_consolidation).toEqual({
+      aux_model: { provider: "glm", name: "glm-4-flash" },
+      enabled: true,
+    });
+  });
+
+  it("does not materialize policies when the patch is empty", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchConsolidation(base, {});
+    expect(next.spec?.policies).toBeUndefined();
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m: AgentManifest = {
+      spec: { policies: { memory_consolidation: { enabled: true } } },
+    };
+    const snapshot = JSON.stringify(m);
+    patchConsolidation(m, { consolidationEnabled: false });
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("readConsolidation returns undefined on an empty manifest", () => {
+    expect(readConsolidation({})).toEqual({ consolidationEnabled: undefined });
+  });
+
+  it("coexists with PR2's four policies sub-blocks without disturbing them", () => {
+    const base: AgentManifest = {
+      spec: {
+        policies: {
+          approval_required_tools: ["exec_python"],
+          max_no_progress: 3,
+          context_compression: { enabled: false },
+          working_memory: { enabled: true },
+          tool_result_prune: { enabled: true },
+          tool_output_budget: { enabled: false },
+        },
+      },
+    };
+    const next = patchConsolidation(base, { consolidationEnabled: false });
+    expect(next.spec?.policies?.memory_consolidation).toEqual({
+      enabled: false,
+    });
+    expect(next.spec?.policies?.approval_required_tools).toEqual([
+      "exec_python",
+    ]);
+    expect(next.spec?.policies?.max_no_progress).toBe(3);
+    expect(readContextGates(next).ccEnabled).toBe(false);
+    expect(readContextGates(next).wmEnabled).toBe(true);
   });
 });
