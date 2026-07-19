@@ -27,6 +27,7 @@ import { SettingsSearch } from "./SettingsSearch";
 import { CONFIG_GROUPS } from "./groups";
 import { RunBudgetSection } from "./groups/RunBudgetSection";
 import { ContextGatesSection } from "./groups/ContextGatesSection";
+import { MemorySection } from "./groups/MemorySection";
 import { SecuritySection } from "./groups/SecuritySection";
 import { SandboxSection } from "./groups/SandboxSection";
 import type { McpPickerSource } from "./widgets/McpToolPicker";
@@ -34,11 +35,12 @@ import type { McpPickerSource } from "./widgets/McpToolPicker";
 /** Curated group panes — a hand-written component that replaces FormView's
  * registered-sections pathway for that group entirely (checked BEFORE the
  * ``sections.length === 0`` pending-hint branch below, so it wins even for
- * "security", whose ``CONFIG_GROUPS`` entry still lists real sections —
- * ``SecuritySection`` embeds those itself). "budget"/"context"/"sandbox"
- * instead have a statically-empty entry (``sections: []``); either way, a
- * group absent from this map (observability, pending Phase 2) falls through
- * to the generic "pending" hint. */
+ * "security"/"memory", whose ``CONFIG_GROUPS`` entries still list real
+ * sections — ``SecuritySection``/``MemorySection`` embed those themselves).
+ * "budget"/"context"/"sandbox" instead have a statically-empty entry
+ * (``sections: []``); either way, a group absent from this map
+ * (observability, pending Phase 2) falls through to the generic "pending"
+ * hint. */
 interface CuratedPaneProps {
   formData: unknown;
   onChange: (data: unknown) => void;
@@ -49,6 +51,7 @@ const CURATED_GROUP_PANES: Record<
 > = {
   budget: RunBudgetSection,
   context: ContextGatesSection,
+  memory: MemorySection,
   security: SecuritySection,
   sandbox: SandboxSection,
 };

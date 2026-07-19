@@ -779,6 +779,30 @@ const zhCN: TranslationKeys = {
     declarative_note:
       "manifest 中的 runtime / image / image_build / resources / readonly_root / writable / mounts 及 code 块当前为声明性字段:通过校验但运行时不读取,留在 YAML 中无害。调整实际资源限额请修改平台部署配置(sandbox-supervisor 环境变量)。",
   },
+  memory_group: {
+    panel_injection: "①注入预算",
+    panel_consolidation: "②后台记忆整理",
+    inj_budget_label: "记忆注入 token 预算",
+    inj_budget_brief:
+      "召回记忆渲染进提示词的 token 上限——按相关性顺序贪心装入,超出截断",
+    inj_budget_impact:
+      "召回条数由 retrieve_top_k 限制,但单条超长记忆可能撑爆注入块,本预算兜底(边界条目截断并加标记)。调大=更多记忆上下文、每轮更贵;调小=省 token 但长记忆可能被截。",
+    inj_budget_default: "2000",
+    corr_budget_label: "用户纠正保底预算",
+    corr_budget_brief: "用户明确纠正类记忆(confidence=1.0)优先占用的专属 token 配额",
+    corr_budget_impact:
+      "保证普通记忆挤不掉用户的明确纠正:纠正类条目优先划拨最多这些 token,再轮到普通记忆分配剩余预算。设 0 = 不保底。",
+    corr_budget_default: "500",
+    consolidation_label: "后台记忆整理",
+    consolidation_brief:
+      "控制面后台任务(默认每 4 小时一轮)聚类合并相似临时记忆、清理噪音条目——非运行路径,不影响会话延迟",
+    consolidation_impact:
+      "关闭后该 Agent 的长期记忆不再自动去重、沉淀与降噪,临时记忆会持续堆积。整理由辅助模型执行并按 memory_consolidation 用途计费;聚类阈值为租户级配置,不在本 manifest。",
+    aux_model_note:
+      "整理所用辅助模型默认为平台配置(claude-sonnet-4-6);如需为本 Agent 单独指定,请在 YAML 视图编辑 policies.memory_consolidation.aux_model(完整 ModelSpec 块)。",
+    reserved_note:
+      "memory.short_term 与 dynamic_context.inject_memory 当前为保留字段:通过校验但运行时不读取。记忆是否启用只由 memory.long_term 是否声明决定(上方开关)。",
+  },
   model_select: {
     provider_label: "提供方",
     provider_placeholder: "选择已配置密钥的提供方",
