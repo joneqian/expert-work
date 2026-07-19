@@ -154,6 +154,24 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("af-approval")).toBeInTheDocument();
   });
 
+  it("the 'memory' group renders MemorySection instead of a plain stacked FormView", async () => {
+    const user = userEvent.setup();
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await screen.findByTestId("af-basic");
+    await user.click(screen.getByTestId("cfg-nav-memory"));
+    // "memory" still lists a real ``sections`` entry in CONFIG_GROUPS (like
+    // "security"), so the distinguishing signal is the curated pane's own
+    // wrapper + its reserved-fields note, which a plain stacked FormView
+    // never renders.
+    expect(screen.getByTestId("memory-section")).toBeInTheDocument();
+    expect(screen.getByTestId("memory-reserved-note")).toBeInTheDocument();
+    // The embedded "memory" FormView section still renders underneath.
+    expect(screen.getByTestId("af-memory")).toBeInTheDocument();
+    expect(screen.getByTestId("af-memory-toggle")).toBeInTheDocument();
+  });
+
   it("the 'sandbox' group renders SandboxSection instead of the pending hint", async () => {
     const user = userEvent.setup();
     render(

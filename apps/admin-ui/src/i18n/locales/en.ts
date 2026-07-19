@@ -750,6 +750,33 @@ export interface TranslationKeys {
     platform_note_body: string;
     declarative_note: string;
   };
+  // Task 2 (PR5) — "Memory" group (MemorySection), embedded after the
+  // existing "memory" FormView section (the on/off toggle + retrieve_top_k
+  // + write-back/advanced knobs). Two default-collapsed panels: ① injection
+  // budgets (spec.memory.long_term.injection_token_budget /
+  // correction_token_budget — only rendered while memory is on, since a
+  // budget is meaningless with no long_term block to inject from) and ②
+  // background consolidation (policies.memory_consolidation.enabled — a
+  // control-plane job, not on the run path, so it stays available even with
+  // memory off). A closing note flags memory.short_term / dynamic_context
+  // .inject_memory as reserved (schema-valid, runtime no-op) fields.
+  memory_group: {
+    panel_injection: string;
+    panel_consolidation: string;
+    inj_budget_label: string;
+    inj_budget_brief: string;
+    inj_budget_impact: string;
+    inj_budget_default: string;
+    corr_budget_label: string;
+    corr_budget_brief: string;
+    corr_budget_impact: string;
+    corr_budget_default: string;
+    consolidation_label: string;
+    consolidation_brief: string;
+    consolidation_impact: string;
+    aux_model_note: string;
+    reserved_note: string;
+  };
   model_select: {
     provider_label: string;
     provider_placeholder: string;
@@ -3461,6 +3488,31 @@ const en: TranslationKeys = {
       "The sandbox's actual runtime parameters are decided by the platform deployment; the manifest has no say: image = the platform's unified image (Python + the full office/data/media stack); resources = the supervisor's environment configuration (default 1.0 CPU / 1024 MB memory / 128 processes); per-command timeout defaults to 30s, tool calls may specify their own, capped at 300s; the root filesystem is always read-only, writable paths are always /workspace and /tmp; the container runtime (gVisor/runc) is set by a deployment environment variable.",
     declarative_note:
       "The manifest's runtime / image / image_build / resources / readonly_root / writable / mounts fields and the code block are currently declarative: they pass validation but aren't read at runtime, and are harmless left in the YAML. To change the actual resource limits, edit the platform deployment config (the sandbox-supervisor environment variables).",
+  },
+  memory_group: {
+    panel_injection: "① Injection budget",
+    panel_consolidation: "② Background memory consolidation",
+    inj_budget_label: "Memory injection token budget",
+    inj_budget_brief:
+      "Token ceiling for recalled memories rendered into the prompt — packed greedily in relevance order, truncated once the ceiling is hit",
+    inj_budget_impact:
+      "The number of recalled items is capped by retrieve_top_k, but a single oversized memory can still blow out the injection block — this budget is the backstop (the boundary entry is truncated and flagged). Raise it for more memory context at a higher per-turn cost; lower it to save tokens at the risk of truncating long memories.",
+    inj_budget_default: "2000",
+    corr_budget_label: "User-correction reserve budget",
+    corr_budget_brief:
+      "A dedicated token allowance that explicit user-correction memories (confidence=1.0) get priority claim on",
+    corr_budget_impact:
+      "Guarantees ordinary memories can't crowd out a user's explicit corrections: correction entries are allocated up to this many tokens first, then ordinary memories fill the remaining budget. Set to 0 to disable the reserve.",
+    corr_budget_default: "500",
+    consolidation_label: "Background memory consolidation",
+    consolidation_brief:
+      "A control-plane background job (every 4 hours by default) that clusters and merges similar short-term memories and prunes noisy entries — not on the run path, so it never affects session latency",
+    consolidation_impact:
+      "Turning it off stops this agent's long-term memory from being auto-deduplicated, distilled, and denoised — short-term memories will keep accumulating unchecked. Consolidation runs on the auxiliary model and is billed under the memory_consolidation purpose; the clustering threshold is a tenant-level setting, not part of this manifest.",
+    aux_model_note:
+      "The auxiliary model used for consolidation defaults to the platform configuration (claude-sonnet-4-6); to set one specifically for this agent, edit policies.memory_consolidation.aux_model (a full ModelSpec block) in the YAML view.",
+    reserved_note:
+      "memory.short_term and dynamic_context.inject_memory are currently reserved fields: they pass validation but aren't read at runtime. Whether memory is enabled is decided solely by whether memory.long_term is declared (the toggle above).",
   },
   model_select: {
     provider_label: "Provider",

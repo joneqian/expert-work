@@ -28,6 +28,12 @@ export interface LongTermFields {
   write_min_importance?: number;
   // Stream CM-7 — Mem0-style reconcile (dedup/supersede) at write-back.
   reconcile_writes?: boolean;
+  // Stream RT-2 PR-2 (RT-ADR-10) — token ceiling for the injected
+  // recalled-memory block (LongTermMemorySpec.injection_token_budget).
+  injection_token_budget?: number;
+  // Stream RT-2 PR-2 — guaranteed token slice for user-corrected
+  // (confidence=1.0) memories within the injection budget.
+  correction_token_budget?: number;
 }
 export interface RouteRuleFields {
   when?: string;
@@ -137,6 +143,10 @@ export interface AgentManifest {
         recent_tool_results_kept?: number;
         [k: string]: unknown;
       };
+      // Capability Uplift Sprint #7 (Mini-ADR U-39) — per-agent
+      // MemoryConsolidator master switch (default_factory ⇒ absent block =
+      // enabled with the platform-default aux_model).
+      memory_consolidation?: { enabled?: boolean; [k: string]: unknown };
       [k: string]: unknown;
     } | null;
     // Group 6 试点(运行预算与超时) — ReAct loop step budget + free-form knobs
@@ -1027,4 +1037,95 @@ export function patchSandboxFs(
   }
 
   return patchSpec(m, updates);
+}
+
+// ---- memory injection budgets (spec.memory.long_term token budgets) ----
+// Stream RT-2 PR-2 (RT-ADR-10) — curated "记忆注入预算" pair over
+// LongTermMemorySpec.injection_token_budget / correction_token_budget.
+// Reader returns the raw stored values (``undefined`` when unset — the
+// backend Pydantic defaults, 2000 / 500, apply). Unlike the optional
+// ``policies`` sub-blocks, ``memory.long_term``'s PRESENCE is the memory
+// on/off switch at runtime (``{}`` = on with defaults, absent/``null`` =
+// off — see ``readMemoryOn``/``setMemoryOn``), so an emptied ``long_term``
+// must survive as ``{}`` instead of being dropped (mirrors ``patchSecurity``
+// / ``patchSandboxFs``'s REQUIRED-block handling, not PR2's optional-block
+// drop-empty). ``patchMemoryBudgets`` only touches ``long_term`` when the
+// patch carries a budget key, never materializes an absent ``memory`` block
+// for a patch that nets out empty, and preserves every other ``long_term``
+// key (``retrieve_top_k`` etc.) and ``memory``'s own unknown keys untouched.
+// Leaves the pre-existing ``readMemoryOn``/``patchLongTerm`` untouched.
+export interface MemoryBudgetFields {
+  injectionTokenBudget?: number;
+  correctionTokenBudget?: number;
+}
+
+export const readMemoryBudgets = (m: unknown): MemoryBudgetFields => ({
+  injectionTokenBudget: specOf(m).memory?.long_term?.injection_token_budget,
+  correctionTokenBudget: specOf(m).memory?.long_term?.correction_token_budget,
+});
+
+export function patchMemoryBudgets(
+  m: unknown,
+  patch: Partial<MemoryBudgetFields>,
+): AgentManifest {
+  const memory = specOf(m).memory;
+  const updates: Record<string, unknown> = {};
+
+  const longTermPatch: Record<string, unknown> = {};
+  if ("injectionTokenBudget" in patch) {
+    longTermPatch.injection_token_budget = patch.injectionTokenBudget;
+  }
+  if ("correctionTokenBudget" in patch) {
+    longTermPatch.correction_token_budget = patch.correctionTokenBudget;
+  }
+  if (Object.keys(longTermPatch).length > 0) {
+    const existingLongTerm = (memory?.long_term ?? undefined) as
+      | Record<string, unknown>
+      | undefined;
+    const mergedLongTerm = mergeBlock(existingLongTerm, longTermPatch) ?? {};
+    if (memory !== undefined || Object.keys(mergedLongTerm).length > 0) {
+      updates.memory = { ...(memory ?? {}), long_term: mergedLongTerm };
+    }
+  }
+
+  return patchSpec(m, updates);
+}
+
+// ---- memory consolidation (policies.memory_consolidation.enabled) ----
+// Capability Uplift Sprint #7 (Mini-ADR U-39) — per-agent MemoryConsolidator
+// master switch (MemoryConsolidationPolicy.enabled). Unlike ``long_term``,
+// ``policies.memory_consolidation`` has a backend ``default_factory`` (an
+// absent block ⇒ ``enabled: True`` + platform-default ``aux_model``), so it
+// follows the standard optional-block ``mergeBlock`` idiom — mirrors PR2's
+// ``patchContextGates`` policies sub-block handling: an emptied
+// ``memory_consolidation`` (and ``policies``, if that empties too) is
+// dropped rather than kept as ``{}``. The block's own unknown keys
+// (``aux_model``) survive untouched when patching ``enabled``.
+export interface ConsolidationFields {
+  consolidationEnabled?: boolean;
+}
+
+export const readConsolidation = (m: unknown): ConsolidationFields => ({
+  consolidationEnabled: specOf(m).policies?.memory_consolidation?.enabled,
+});
+
+export function patchConsolidation(
+  m: unknown,
+  patch: Partial<ConsolidationFields>,
+): AgentManifest {
+  const policies = specOf(m).policies ?? {};
+  const updates: Record<string, unknown> = { ...policies };
+
+  if ("consolidationEnabled" in patch) {
+    const merged = mergeBlock(
+      policies.memory_consolidation as Record<string, unknown> | undefined,
+      { enabled: patch.consolidationEnabled },
+    );
+    if (merged === undefined) delete updates.memory_consolidation;
+    else updates.memory_consolidation = merged;
+  }
+
+  return patchSpec(m, {
+    policies: Object.keys(updates).length > 0 ? updates : undefined,
+  });
 }
