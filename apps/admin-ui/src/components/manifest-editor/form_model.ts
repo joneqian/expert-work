@@ -214,6 +214,11 @@ export interface AgentManifest {
     // Template this agent extends (AgentSpecBody.extends). Presence drives the
     // "template may enforce stricter defenses" hint in the defenses section.
     extends?: string;
+    // Stream K.K4 (Mini-ADR K-3) — per-agent LLM response cache opt-out
+    // (CacheSpec). DISTINCT from ``model.cache_enabled`` (ModelFields,
+    // Anthropic prompt caching) — see ``ResponseCacheFields`` below. Backend
+    // default_factory ⇒ absent block = defaults (enabled=true).
+    cache?: { enabled?: boolean; [k: string]: unknown };
     [k: string]: unknown;
   };
   [k: string]: unknown;
@@ -1206,4 +1211,37 @@ export function patchReflectionTuning(
     return patchSpec(m, { reflection: merged });
   }
   return patchSpec(m, {});
+}
+
+// ---- LLM response cache (spec.cache — Stream K.K4 / Mini-ADR K-3) ----
+// Per-agent opt-out of the orchestrator's LLM response cache (CacheSpec).
+// NOTE the naming trap: ``ModelFields.cache_enabled`` (``model.cache_enabled``)
+// is a DIFFERENT, pre-existing field — Anthropic prompt caching. This block is
+// the LLM RESPONSE cache (``spec.cache.enabled``); the two live at different
+// paths, are independently toggled, and must never be confused. Like
+// ``policies.memory_consolidation`` (``patchConsolidation``), ``spec.cache``
+// has a backend ``default_factory`` (an absent block ⇒ ``enabled: True``), so
+// it follows the same standard optional-block ``mergeBlock`` idiom: absent ≡
+// defaults, and an emptied block is dropped rather than kept as ``{}``
+// (dropping is harmless here — unlike the REQUIRED ``sandbox.network`` /
+// ``sandbox.filesystem`` blocks, or the presence-semantic ``memory.long_term``
+// / ``reflection`` blocks). Reader is RAW — no default substitution.
+export interface ResponseCacheFields {
+  responseCacheEnabled?: boolean;
+}
+
+export const readResponseCache = (m: unknown): ResponseCacheFields => ({
+  responseCacheEnabled: specOf(m).cache?.enabled,
+});
+
+export function patchResponseCache(
+  m: unknown,
+  patch: Partial<ResponseCacheFields>,
+): AgentManifest {
+  if (!("responseCacheEnabled" in patch)) return patchSpec(m, {});
+  const merged = mergeBlock(
+    specOf(m).cache as Record<string, unknown> | undefined,
+    { enabled: patch.responseCacheEnabled },
+  );
+  return patchSpec(m, { cache: merged });
 }
