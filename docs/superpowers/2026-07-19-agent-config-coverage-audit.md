@@ -39,7 +39,7 @@ max_iterations/max_no_progress/run_deadline_s/stream_deadline_s/idle_timeout_s F
 context_compression×10 + working_memory×4 + tool_result_prune×3 + tool_output_budget 全 FORM。
 
 ### 安全与防护(security,PR3+#1017)
-defenses×7 + approval×2 + sandbox.network×3 + tool_use_enforcement FORM;rate_limit/pii/safety 字典 NOTE(dict-note);trajectory_recording FORM+INERT-DOC(假开关已纠偏,PR7)。
+defenses×7 + approval×2 + sandbox.network×3 + tool_use_enforcement FORM;rate_limit/pii/safety 字典 NOTE(dict-note);trajectory_recording FORM(**收尾波已接线**:per-agent opt-out 经 BuiltAgent→run_agent 生效,开关是真的了)。
 
 ### 沙箱与资源(sandbox,PR4)
 persistent_workspace FORM(唯一活字段);runtime/image/image_build/resources×4/readonly_root/writable/mounts/code 块 INERT-DOC(declarative-note + platform-note)。
@@ -58,6 +58,6 @@ spec.hooks(自由字典)YAML-ONLY(合理,不处理)。
 
 ## 死字段总账(运行时零消费者,全部已 in-form 说明)
 
-sandbox 13 字段、spec.code 块、memory.short_term、dynamic_context.inject_memory、observability×3、spec.triggers(manifest 路径)、policies.trajectory_recording(标志位)、model.api_key_ref(强制忽略)、workflow.early_stop/builder、workflow.type="custom" 分支、tenant_config.compliance_pack/isolation_level/data_residency。
+sandbox 13 字段、spec.code 块、memory.short_term、dynamic_context.inject_memory、observability×3、spec.triggers(manifest 路径)、model.api_key_ref(强制忽略)、workflow.early_stop/builder、workflow.type="custom" 分支、tenant_config.compliance_pack/isolation_level/data_residency。~~policies.trajectory_recording(标志位)~~——**收尾波已接线,移出死字段账**。
 
-**Backlog(产品决策)**:triggers 走 user 维度重设计(独立 epic,brainstorm 中);trajectory opt-out 接线;死字段批量处置(接线或 schema 弃用)。
+**Backlog(产品决策)**:triggers 走 user 维度重设计(独立 epic,brainstorm 中);自适应规划(react/plan_execute 死开关→规划作工具或复杂度路由);死字段批量处置(接线或 schema 弃用)。

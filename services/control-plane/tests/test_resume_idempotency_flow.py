@@ -107,7 +107,12 @@ class _FakeRuntime:
         self._graph = graph if graph is not None else _FakeGraph()
 
     async def get_agent(self, **_kw: object) -> SimpleNamespace:
-        return SimpleNamespace(graph=self._graph, bound_distilled_skills=(), tool_replay_safe=None)
+        return SimpleNamespace(
+            graph=self._graph,
+            bound_distilled_skills=(),
+            tool_replay_safe=None,
+            trajectory_recording=True,
+        )
 
     def new_worker_spawn_budget(self) -> None:
         return None

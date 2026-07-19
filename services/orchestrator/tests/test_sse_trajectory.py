@@ -131,6 +131,38 @@ async def test_run_agent_records_success_outcome_on_clean_finish() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_agent_manifest_optout_skips_recording() -> None:
+    """``trajectory_enabled=False`` (policies.trajectory_recording) drops the
+    recorder for the run even though the deployment configured one."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    store = InMemoryObjectStore()
+    recorder = TrajectoryRecorder(object_store=store)
+    graph = _ScriptedGraph(
+        chunks=[{"agent": {"step_count": 1}}],
+        final_messages=[HumanMessage(content="hi"), AIMessage(content="hello")],
+    )
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={},
+        config={"configurable": {"thread_id": str(record.thread_id)}},
+        trajectory_recorder=recorder,
+        trajectory_enabled=False,
+    )
+    await _drain(bridge, record.run_id)
+    await _drain_trajectory_tasks()
+
+    assert await store.list_prefix(f"trajectories/{record.tenant_id}/") == []
+    # Only the J.8 pause-check read — no trajectory read happened.
+    assert graph.aget_state_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_run_agent_records_failed_outcome_on_generic_exception() -> None:
     """An arbitrary exception lands in the ``failed/`` bucket — distinct
     from ``max_steps/``."""

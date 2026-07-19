@@ -239,6 +239,12 @@ class BuiltAgent:
     prompt_variables: tuple[PromptVariableSpec, ...] = ()
     prompt_base: str = ""
     prompt_suffix: str = ""
+    #: Stream L.L7 — per-agent trajectory-recording opt-out
+    #: (``policies.trajectory_recording``). Callers gate
+    #: ``sse.run_agent(trajectory_enabled=...)`` on this; ``False`` means
+    #: the run is never serialised to ObjectStore even when the deployment
+    #: has a recorder configured.
+    trajectory_recording: bool = True
 
 
 def _tool_replay_safe(registry: ToolRegistry) -> Callable[[str], bool]:
@@ -1053,6 +1059,7 @@ async def build_agent(
         prompt_variables=tuple(spec.spec.system_prompt.variables),
         prompt_base=base_prompt,
         prompt_suffix=final_system_prompt[len(base_prompt) :],
+        trajectory_recording=spec.spec.policies.trajectory_recording,
     )
 
 

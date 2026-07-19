@@ -232,7 +232,7 @@ describe("SecuritySection", () => {
     );
     await waitFor(() => {
       expect(
-        screen.getByText(/object-store configuration/),
+        screen.getByText(/no longer recorded as trajectories/),
       ).toBeInTheDocument();
     });
   });

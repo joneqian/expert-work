@@ -53,7 +53,12 @@ class _FakeRuntime:
         self.trajectory_recorder = None
 
     async def get_agent(self, **_kw: object) -> SimpleNamespace:
-        return SimpleNamespace(graph=_FakeGraph(), bound_distilled_skills=(), tool_replay_safe=None)
+        return SimpleNamespace(
+            graph=_FakeGraph(),
+            bound_distilled_skills=(),
+            tool_replay_safe=None,
+            trajectory_recording=True,
+        )
 
     def new_worker_spawn_budget(self) -> None:
         return None
