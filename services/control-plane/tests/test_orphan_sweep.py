@@ -73,7 +73,11 @@ class _FakeRuntime:
 
     async def get_agent(self, **_kw):
         return SimpleNamespace(
-            graph=object(), bound_distilled_skills=(), tool_replay_safe=None, run_deadline_s=0
+            graph=object(),
+            bound_distilled_skills=(),
+            tool_replay_safe=None,
+            run_deadline_s=0,
+            trajectory_recording=True,
         )
 
     def new_worker_spawn_budget(self):

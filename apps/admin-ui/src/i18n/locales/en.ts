@@ -3613,7 +3613,7 @@ const en: TranslationKeys = {
     triggers_note:
       "The manifest's triggers declaration is currently not wired up: cron/webhook triggers written into the manifest have no effect. For scheduled and webhook automation, create them via the trigger-management API (/v1/triggers) instead — that path's scheduling and firing work correctly.",
     declarative_note:
-      "observability's trace / log_level / redact_fields are currently declarative fields: they pass validation but aren't read at runtime — tracing is always on per the platform configuration, the log level is decided by each service's deployment environment, and PII redaction is handled by the platform's defense chain. Trajectory recording works the same way: whether it's recorded is decided by the deployment's object-store configuration.",
+      "observability's trace / log_level / redact_fields are currently declarative fields: they pass validation but aren't read at runtime — tracing is always on per the platform configuration, the log level is decided by each service's deployment environment, and PII redaction is handled by the platform's defense chain.",
   },
   model_select: {
     provider_label: "Provider",
@@ -3807,7 +3807,7 @@ const en: TranslationKeys = {
       "How long a pending approval may wait (seconds) before it is auto-rejected, so it doesn't tie up resources.\nDefault 24h (86400).\nExample: 86400",
     trajectory_recording: "Keep a record of conversations",
     trajectory_recording_help:
-      "Not wired up yet: whether recording happens is decided by the platform's object-store configuration, so this switch currently has no effect (the field is kept for a future backend wiring).",
+      "When off, this agent's runs are no longer recorded as trajectories (ShareGPT format, used for curation and evals). If the platform has no object store configured, nothing is recorded regardless of this switch.",
     section_knowledge: "Knowledge bases (RAG)",
     section_knowledge_help:
       "Knowledge bases the agent can search to back up its answers.\nPick existing bases, or type a name.\nExample: hr-policies, eng-handbook",

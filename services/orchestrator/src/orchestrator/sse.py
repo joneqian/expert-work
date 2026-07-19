@@ -268,6 +268,7 @@ async def run_agent(
     audit_logger: AuditLogger | None = None,
     stream_mode: str = DEFAULT_STREAM_MODE,
     trajectory_recorder: TrajectoryRecorder | None = None,
+    trajectory_enabled: bool = True,
     skill_run_usage_recorder: SkillRunUsageRecorder | None = None,
     approval_store: ApprovalStore | None = None,
     event_store: RunEventStore | None = None,
@@ -294,7 +295,13 @@ async def run_agent(
     :class:`asyncio.CancelledError` path is *not* audited: awaiting the
     logger during loop teardown is unreliable. Audit-write failures are
     logged and swallowed — they never fail the run.
+
+    ``trajectory_enabled`` is the per-agent manifest opt-out
+    (``policies.trajectory_recording`` via ``BuiltAgent``): ``False``
+    drops the recorder for this run even when the deployment has one.
     """
+    if not trajectory_enabled:
+        trajectory_recorder = None
     run_id = record.run_id
     # Stream HX-4 (Mini-ADR HX-D4) — bind the run id for the structured
     # log formatter; every log line from this worker (and tasks it

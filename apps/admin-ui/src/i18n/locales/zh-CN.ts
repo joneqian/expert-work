@@ -838,7 +838,7 @@ const zhCN: TranslationKeys = {
     triggers_note:
       "manifest 的 triggers 声明当前未接线:在清单里写 cron/webhook 触发器不会生效。定时与 webhook 自动化请通过触发器管理 API(/v1/triggers)创建,该路径的调度与触发正常工作。",
     declarative_note:
-      "observability 的 trace / log_level / redact_fields 当前为声明性字段:通过校验但运行时不读取——追踪始终按平台配置开启,日志级别由各服务部署环境决定,PII 脱敏由平台防御链负责。轨迹录制同理:是否录制由部署的对象存储配置决定。",
+      "observability 的 trace / log_level / redact_fields 当前为声明性字段:通过校验但运行时不读取——追踪始终按平台配置开启,日志级别由各服务部署环境决定,PII 脱敏由平台防御链负责。",
   },
   model_select: {
     provider_label: "提供方",
@@ -1026,7 +1026,7 @@ const zhCN: TranslationKeys = {
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",
     trajectory_recording: "记录对话留档",
     trajectory_recording_help:
-      "当前未接线:是否录制由平台对象存储配置决定,本开关暂不生效(字段保留待后端接线)。",
+      "关闭后本 Agent 的运行不再录制轨迹(ShareGPT 格式,供策展与评测)。平台未配置对象存储时整体不录制,与本开关无关。",
     section_knowledge: "知识库(RAG)",
     section_knowledge_help:
       "Agent 可以检索的知识库,用来给回答找依据。\n选已有的库,或输入名称。\n示例:hr-policies、eng-handbook",

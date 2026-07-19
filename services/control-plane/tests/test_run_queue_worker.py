@@ -60,6 +60,7 @@ class _FakeRuntime:
             system_prompt="you are a test agent",
             supports_vision=False,
             spotlight_nonce=None,
+            trajectory_recording=True,
             max_steps=8,
             max_no_progress=0,
         )

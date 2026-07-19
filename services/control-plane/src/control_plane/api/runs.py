@@ -725,6 +725,7 @@ async def resolve_approval_decision(
             skill_run_usage_recorder=runtime.skill_run_usage_recorder,
             # Stream L.L7 — record the trajectory (curation / eval-gate source).
             trajectory_recorder=runtime.trajectory_recorder,
+            trajectory_enabled=built.trajectory_recording,
             worker_spawn_budget=runtime.new_worker_spawn_budget(),
             # Stream HX-3 — replay-safety resolver for transient retry.
             tool_replay_safe=built.tool_replay_safe,
@@ -873,6 +874,7 @@ async def spawn_run(
             event_store=runtime.run_event_store,
             skill_run_usage_recorder=runtime.skill_run_usage_recorder,
             trajectory_recorder=runtime.trajectory_recorder,
+            trajectory_enabled=built.trajectory_recording,
             worker_spawn_budget=runtime.new_worker_spawn_budget(),
             tool_replay_safe=built.tool_replay_safe,
         )
