@@ -38,6 +38,14 @@ from expert_work.runtime.cancellation import (
     RunCancelledError,
 )
 from orchestrator.errors import MaxStepsExceededError
+from orchestrator.tools._worker_events import (
+    WORKER_EVENT_SINK_KEY,
+    WorkerEventSink,
+    WorkerIdentity,
+    build_worker_end_frame,
+    build_worker_start_frame,
+    build_worker_update_frame,
+)
 from orchestrator.tools.registry import ToolContext, ToolResult
 from orchestrator.trajectory import (
     TrajectoryOutcome,
@@ -103,8 +111,63 @@ async def run_child_to_result(
     result: Any = None
     raised_max_steps = False
 
+    # B2 worker 可观测性 — 帧身份 + 局部序。sink 为 None(未接线:eval /
+    # 单测)时零帧零开销。depth>1 说明"发起方自己就是 worker",其
+    # ctx.run_id 即父 worker 的 sub_run_id。
+    sink = ctx.worker_event_sink
+    role_raw = (extra_meta or {}).get("role")
+    ident = WorkerIdentity(
+        worker_id=str(sub_run_id),
+        parent_worker_id=str(ctx.run_id) if child_depth > 1 and ctx.run_id else None,
+        parent_tool_call_id=ctx.tool_call_id,
+        label=label,
+        agent_ref=agent_ref,
+        depth=child_depth,
+    )
+    wseq = 0
+    if sink is not None:
+        await _emit_worker_frame(
+            sink,
+            build_worker_start_frame(
+                ident,
+                wseq=wseq,
+                task=task,
+                role=str(role_raw) if role_raw else None,
+                max_steps=child.max_steps,
+            ),
+        )
+        wseq += 1
+
     try:
-        result = await child.graph.ainvoke(child_input, child_config)
+        # B2 — ainvoke → astream:同一 compiled graph、同一 config,
+        # updates chunk 逐个截断成 worker 帧;最后一个 values chunk 即
+        # ainvoke 的返回值(LangGraph 语义),异常时缺失 → 下方
+        # _fetch_partial 兜底(原语义)。
+        last_chunk = time.monotonic()
+        async for part in child.graph.astream(
+            child_input, child_config, stream_mode=["updates", "values"]
+        ):
+            mode, chunk = part
+            if mode == "values":
+                result = chunk
+                continue
+            now = time.monotonic()
+            duration_ms = int((now - last_chunk) * 1000)
+            last_chunk = now
+            if sink is None or not isinstance(chunk, Mapping):
+                continue
+            for node, writes in chunk.items():
+                await _emit_worker_frame(
+                    sink,
+                    build_worker_update_frame(
+                        ident,
+                        wseq=wseq,
+                        node=str(node),
+                        writes=writes if isinstance(writes, Mapping) else {},
+                        duration_ms=duration_ms,
+                    ),
+                )
+                wseq += 1
         outcome: TrajectoryOutcome = "success"
     except MaxStepsExceededError:
         outcome = "max_steps"
@@ -125,6 +188,18 @@ async def run_child_to_result(
             recorder=trajectory_recorder,
             metadata=trajectory_metadata,
         )
+        if sink is not None:
+            await _emit_worker_frame(
+                sink,
+                build_worker_end_frame(
+                    ident,
+                    wseq=wseq,
+                    outcome="cancelled",
+                    iteration_used=partial_steps,
+                    llm_call_count=sum(1 for m in partial_msgs if isinstance(m, AIMessage)),
+                    wall_clock_ms=int((time.monotonic() - start_monotonic) * 1000),
+                ),
+            )
         raise
 
     wall_clock_ms = int((time.monotonic() - start_monotonic) * 1000)
@@ -136,6 +211,19 @@ async def run_child_to_result(
         messages, step_count = await _fetch_partial(child.graph, child_config, label=label)
 
     llm_call_count = sum(1 for msg in messages if isinstance(msg, AIMessage))
+
+    if sink is not None:
+        await _emit_worker_frame(
+            sink,
+            build_worker_end_frame(
+                ident,
+                wseq=wseq,
+                outcome="max_steps" if raised_max_steps else "success",
+                iteration_used=step_count,
+                llm_call_count=llm_call_count,
+                wall_clock_ms=wall_clock_ms,
+            ),
+        )
 
     _dispatch_trajectory(
         tenant_id=ctx.tenant_id,
@@ -282,6 +370,18 @@ async def _fetch_partial(
     return msgs, step_count
 
 
+async def _emit_worker_frame(sink: WorkerEventSink, frame: dict[str, Any]) -> None:
+    """Best-effort — 桥接故障绝不影响 worker 本体执行(spec 红线)."""
+    try:
+        await sink(frame)
+    except Exception as exc:
+        logger.warning(
+            "child_run.worker_frame_failed kind=%s err=%s",
+            frame.get("kind", "?"),
+            type(exc).__name__,
+        )
+
+
 def _dispatch_trajectory(
     *,
     tenant_id: UUID | None,
@@ -355,4 +455,7 @@ def _child_config(ctx: ToolContext, *, sub_thread_id: UUID, sub_run_id: UUID) ->
         configurable["oauth_user_id"] = ctx.oauth_user_id
     if ctx.deadline_at is not None:
         configurable["deadline_at"] = ctx.deadline_at
+    # B2 — 向下透传 worker 事件 sink,孙 worker 帧直达父 run bridge。
+    if ctx.worker_event_sink is not None:
+        configurable[WORKER_EVENT_SINK_KEY] = ctx.worker_event_sink
     return {"configurable": configurable}

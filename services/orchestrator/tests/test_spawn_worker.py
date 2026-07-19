@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,6 +34,13 @@ class _FakeGraph:
         if self.raises is not None:
             raise self.raises
         return self.result
+
+    async def astream(
+        self, state: Any, config: Any = None, *, stream_mode: Any = None
+    ) -> AsyncIterator[Any]:
+        del stream_mode
+        result = await self.ainvoke(state, config)
+        yield ("values", result)
 
 
 @dataclass
@@ -200,6 +208,13 @@ async def test_budget_semaphore_bounds_concurrency() -> None:
     class _SlowGraph:
         async def ainvoke(self, state: Any, config: Any) -> Any:
             return await _slow_ainvoke(state, config)
+
+        async def astream(
+            self, state: Any, config: Any = None, *, stream_mode: Any = None
+        ) -> AsyncIterator[Any]:
+            del stream_mode
+            result = await self.ainvoke(state, config)
+            yield ("values", result)
 
     builder = _RecordingWorkerBuilder(built=_built(_SlowGraph()))  # type: ignore[arg-type]
     tool = _tool(builder)

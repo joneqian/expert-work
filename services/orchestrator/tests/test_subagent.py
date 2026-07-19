@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
@@ -56,6 +57,13 @@ class _FakeGraph:
         if self.raises is not None:
             raise self.raises
         return self.result
+
+    async def astream(
+        self, state: Any, config: Any = None, *, stream_mode: Any = None
+    ) -> AsyncIterator[Any]:
+        del stream_mode
+        result = await self.ainvoke(state, config)
+        yield ("values", result)
 
 
 @dataclass
@@ -422,6 +430,13 @@ class _StatefulGraph:
         if self.raises is not None:
             raise self.raises
         return self.result
+
+    async def astream(
+        self, state: Any, config: Any = None, *, stream_mode: Any = None
+    ) -> AsyncIterator[Any]:
+        del stream_mode
+        result = await self.ainvoke(state, config)
+        yield ("values", result)
 
     async def aget_state(self, config: Any) -> Any:
         del config
