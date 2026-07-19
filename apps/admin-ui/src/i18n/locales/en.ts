@@ -591,15 +591,23 @@ export interface TranslationKeys {
     field_impact_label: string;
     field_default_badge: string;
   };
-  // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Five
+  // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Six
   // FieldRow-rendered knobs living in three manifest locations
-  // (workflow.max_iterations / policies.max_no_progress+run_deadline_s /
+  // (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
   // top-level spec.stream_deadline_s+idle_timeout_s).
   run_budget: {
     max_iterations_label: string;
     max_iterations_brief: string;
     max_iterations_impact: string;
     max_iterations_default: string;
+    wf_type_label: string;
+    wf_type_brief: string;
+    wf_type_impact: string;
+    wf_type_default: string;
+    wf_type_opt_react: string;
+    wf_type_opt_plan_execute: string;
+    wf_type_opt_custom: string;
+    workflow_note: string;
     max_no_progress_label: string;
     max_no_progress_brief: string;
     max_no_progress_impact: string;
@@ -843,6 +851,7 @@ export interface TranslationKeys {
     field_name_required: string;
     field_name_placeholder: string;
     field_description: string;
+    basic_yaml_note: string;
     section_model: string;
     section_prompt: string;
     field_prompt_placeholder: string;
@@ -932,6 +941,7 @@ export interface TranslationKeys {
     tool_web_search_help: string;
     tool_http_help: string;
     tool_mcp_help: string;
+    tools_config_note: string;
     section_approval: string;
     section_approval_help: string;
     approval_hint: string;
@@ -995,6 +1005,9 @@ export interface TranslationKeys {
     section_output_schema_help: string;
     output_schema_on_hint: string;
     output_schema_off_hint: string;
+    inject_date_label: string;
+    inject_date_hint: string;
+    dynamic_context_note: string;
   };
   playground: {
     session_label: string;
@@ -3343,6 +3356,17 @@ const en: TranslationKeys = {
     max_iterations_impact:
       "Once exceeded, the run is forced to wrap up: the model must summarize directly and stop calling tools, so the output may be incomplete. Raise it for research or long multi-tool tasks (heavy tasks typically need 40-60); lower it to control cost. A sub-worker's actual step budget = min(this value, the platform's worker ceiling).",
     max_iterations_default: "30",
+    wf_type_label: "Workflow type",
+    wf_type_brief:
+      "react = the classic think-then-act loop; plan_execute = a planning model produces a full plan up front, then execution proceeds step by step",
+    wf_type_impact:
+      "plan_execute: every task first gets a full plan before execution — more stable for long-chain tasks (e.g. report generation), but even trivial tasks can't skip the forced planning step (one extra planning-model call, slower and costlier). For agents whose tasks vary widely in complexity, react is recommended. The model used for planning is set by the model group's routing planning rule; when no rule is set, the main model is used. custom currently has no dedicated implementation — it behaves the same as react.",
+    wf_type_default: "react",
+    wf_type_opt_react: "react (think, then act)",
+    wf_type_opt_plan_execute: "plan_execute (plan, then execute)",
+    wf_type_opt_custom: "custom (not wired up)",
+    workflow_note:
+      "workflow's early_stop and builder are reserved fields: they pass validation but are never read at runtime — leaving them in the YAML is harmless.",
     max_no_progress_label: "No-progress stop",
     max_no_progress_brief:
       "Stop early after N consecutive steps with no real progress; 0 = off",
@@ -3626,6 +3650,8 @@ const en: TranslationKeys = {
     field_name_required: "Name is required",
     field_name_placeholder: "my-agent",
     field_description: "Description",
+    basic_yaml_note:
+      "extends (template inheritance) is edited in the YAML view. tenant_config's compliance_pack / isolation_level / data_residency are reserved fields: they pass validation but aren't read at runtime (sandbox isolation is currently always shared); audit_retention_days is decided by a platform-wide global default for now.",
     section_model: "Model",
     section_prompt: "System prompt",
     field_prompt_placeholder: "You are a helpful assistant.",
@@ -3747,6 +3773,8 @@ const en: TranslationKeys = {
       "Let the agent call external APIs (through the audited egress proxy).\nExample: weather, internal services",
     tool_mcp_help:
       "Let the agent use tools provided by MCP servers (databases, business systems).\nOnce checked, pick the specific servers and tools below.\nExample: connect your company's CRM",
+    tools_config_note:
+      "Per-tool configuration for built-in tools (tools[].config, e.g. search engine / result count) and built-in tool entries other than web_search are edited in the YAML view.",
     section_approval: "Human approval",
     section_approval_help:
       "For the tools you check, every run pauses before they execute and waits for a human to approve.\nBase abilities like code execution are on by default and can't be turned off — use this to add a human checkpoint before they run.\nExample: add approval for exec_python, http",
@@ -3831,6 +3859,11 @@ const en: TranslationKeys = {
       "Enforced - final replies must validate against the '{{name}}' schema (spec.output_schema, editable in the YAML view).",
     output_schema_off_hint:
       "Not configured - final replies are free text. Add spec.output_schema in the YAML view to require a machine-readable JSON reply.",
+    inject_date_label: "Inject current date",
+    inject_date_hint:
+      "Writes today's date into the system prompt at build time (on by default, cache-stable per calendar day). When off, the agent doesn't know today's date - only suitable for agents whose behavior doesn't depend on the date.",
+    dynamic_context_note:
+      "Custom reminders (dynamic_context.custom_reminders) are a structured list - edit them in the YAML view.",
   },
   playground: {
     session_label: "Session",

@@ -81,6 +81,12 @@ export interface AgentManifest {
       variables?: PromptVariableFields[];
       [k: string]: unknown;
     };
+    // DynamicContextSpec — build-time context injected alongside the system
+    // prompt. Only ``inject_current_date`` is form-curated; ``inject_memory``
+    // (reserved, not read at runtime — see ``MemorySection``) and
+    // ``custom_reminders`` (a structured list, YAML-only) survive as unknown
+    // keys.
+    dynamic_context?: { inject_current_date?: boolean; [k: string]: unknown };
     memory?: { long_term?: LongTermFields | null; [k: string]: unknown } | null;
     // Stream J.11 — reflect-node config. PRESENCE is the on/off switch: `{}`
     // = on with defaults (budget 2 / deadline_s 30), absent OR explicit
@@ -164,9 +170,9 @@ export interface AgentManifest {
       [k: string]: unknown;
     } | null;
     // Group 6 试点(运行预算与超时) — ReAct loop step budget + free-form knobs
-    // (early_stop, builder) authored via YAML. The curated form only surfaces
-    // max_iterations.
-    workflow?: { max_iterations?: number; [k: string]: unknown };
+    // (early_stop, builder) authored via YAML. The curated form surfaces
+    // max_iterations and type (react/plan_execute/custom).
+    workflow?: { max_iterations?: number; type?: string; [k: string]: unknown };
     // Stream L (P1) — time-to-first-token budget for a single LLM provider
     // call (0 = disabled). Top-level spec key (sibling of policies), not
     // nested under policies.
@@ -422,6 +428,30 @@ export function setPromptVariables(
   }
   return patchSpec(m, { system_prompt: { ...sp, variables: rows } });
 }
+
+// ---- dynamic context — inject_current_date (DynamicContextSpec) ----
+// Whether the build writes today's date into the system prompt
+// (agent_factory reads ``dynamic_context.inject_current_date`` — a
+// day-granular, cache-stable injection). Like ``policies
+// .memory_consolidation`` / ``spec.cache``, ``spec.dynamic_context`` has a
+// backend ``default_factory`` (an absent block ⇒ every field at its Pydantic
+// default, ``inject_current_date: True`` among them), so it follows the
+// standard optional-block ``mergeBlock`` idiom: ``true`` (the default) drops
+// the key entirely (js-yaml omits ``undefined``), ``false`` writes it.
+// ``custom_reminders`` and any other unknown key already in the block
+// survive untouched. Reader is RAW — no default substitution (the FormView
+// widget supplies the effective default, true).
+export const readInjectCurrentDate = (m: unknown): boolean | undefined =>
+  specOf(m).dynamic_context?.inject_current_date;
+
+export function setInjectCurrentDate(m: unknown, v: boolean): AgentManifest {
+  const merged = mergeBlock(
+    specOf(m).dynamic_context as Record<string, unknown> | undefined,
+    { inject_current_date: v === true ? undefined : v },
+  );
+  return patchSpec(m, { dynamic_context: merged });
+}
+
 export function setMemoryOn(m: unknown, on: boolean): AgentManifest {
   const memory = specOf(m).memory ?? {};
   if (!on) return patchSpec(m, { memory: { ...memory, long_term: null } });
@@ -603,9 +633,10 @@ export const readTrajectoryRecording = (m: unknown): boolean =>
 export const setTrajectoryRecording = (m: unknown, on: boolean): AgentManifest =>
   patchPolicies(m, { trajectory_recording: on });
 
-// ---- run budget (Group 6 试点: workflow.max_iterations + policies.max_no_progress
-// + policies.run_deadline_s + top-level stream_deadline_s / idle_timeout_s) ----
-// Aggregates five knobs that live in three different places in the manifest
+// ---- run budget (Group 6 试点: workflow.max_iterations + workflow.type
+// + policies.max_no_progress + policies.run_deadline_s + top-level
+// stream_deadline_s / idle_timeout_s) ----
+// Aggregates six knobs that live in three different places in the manifest
 // (workflow block / policies block / top-level spec) behind one curated
 // "运行预算与超时" reader+writer pair. Readers return the raw stored value
 // (``undefined`` when unset — the FieldRow widgets show the backend default
@@ -615,6 +646,9 @@ export const setTrajectoryRecording = (m: unknown, on: boolean): AgentManifest =
 // the whole block if that empties it).
 export interface RunBudgetFields {
   maxIterations?: number;
+  // workflow.type (react/plan_execute/custom) — RAW reader, no default
+  // substitution (the FieldRow widget shows the effective default itself).
+  workflowType?: string;
   maxNoProgress?: number;
   runDeadlineS?: number;
   streamDeadlineS?: number;
@@ -623,6 +657,7 @@ export interface RunBudgetFields {
 
 export const readRunBudget = (m: unknown): RunBudgetFields => ({
   maxIterations: specOf(m).workflow?.max_iterations,
+  workflowType: specOf(m).workflow?.type,
   maxNoProgress: specOf(m).policies?.max_no_progress,
   runDeadlineS: specOf(m).policies?.run_deadline_s,
   streamDeadlineS: specOf(m).stream_deadline_s,
@@ -650,10 +685,11 @@ export function patchRunBudget(
   const spec = specOf(m);
   const updates: Record<string, unknown> = {};
 
-  if ("maxIterations" in patch) {
-    updates.workflow = mergeBlock(spec.workflow, {
-      max_iterations: patch.maxIterations,
-    });
+  const workflowPatch: Record<string, unknown> = {};
+  if ("maxIterations" in patch) workflowPatch.max_iterations = patch.maxIterations;
+  if ("workflowType" in patch) workflowPatch.type = patch.workflowType;
+  if (Object.keys(workflowPatch).length > 0) {
+    updates.workflow = mergeBlock(spec.workflow, workflowPatch);
   }
 
   const policiesPatch: Record<string, unknown> = {};

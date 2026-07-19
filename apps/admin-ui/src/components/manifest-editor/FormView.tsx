@@ -38,6 +38,7 @@ import {
   readDynamicWorkersOn,
   readExtends,
   readFallback,
+  readInjectCurrentDate,
   readMainSupportsVision,
   readMemoryOn,
   readModel,
@@ -71,6 +72,7 @@ import {
   setDescription,
   setDynamicWorkersOn,
   setFallback,
+  setInjectCurrentDate,
   setMcp,
   setMemoryOn,
   setModel,
@@ -247,6 +249,13 @@ export function FormView({
             />
           </div>
         )}
+        <Text
+          type="secondary"
+          data-testid="af-basic-yaml-note"
+          style={{ display: "block" }}
+        >
+          {t("agent_form.basic_yaml_note")}
+        </Text>
       </section>
     ),
 
@@ -410,6 +419,32 @@ export function FormView({
               : t("agent_form.output_schema_off_hint")}
           </Text>
         </section>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 8,
+          }}
+        >
+          <Switch
+            checked={readInjectCurrentDate(formData) ?? true}
+            data-testid="af-inject-current-date"
+            aria-label={t("agent_form.inject_date_label")}
+            onChange={(on) => onChange(setInjectCurrentDate(formData, on))}
+          />
+          <Text>{t("agent_form.inject_date_label")}</Text>
+        </div>
+        <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+          {t("agent_form.inject_date_hint")}
+        </Text>
+        <Text
+          type="secondary"
+          data-testid="af-dynamic-context-note"
+          style={{ display: "block" }}
+        >
+          {t("agent_form.dynamic_context_note")}
+        </Text>
       </>
     ),
 
@@ -456,6 +491,13 @@ export function FormView({
             />
           </span>
         </div>
+        <Text
+          type="secondary"
+          data-testid="af-tools-config-note"
+          style={{ display: "block", marginTop: 12 }}
+        >
+          {t("agent_form.tools_config_note")}
+        </Text>
       </section>
     ),
 

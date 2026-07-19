@@ -12,6 +12,7 @@ import {
   readName,
   readPromptJinja,
   readPromptVariables,
+  readInjectCurrentDate,
   readReflectionEvaluator,
   readReflectionEvaluatorOn,
   readSystemPrompt,
@@ -22,6 +23,7 @@ import {
   setDescription,
   setPromptJinja,
   setPromptVariables,
+  setInjectCurrentDate,
   setMcpAllowTools,
   setMcp,
   setMcpServers,
@@ -703,6 +705,67 @@ describe("form_model — dynamic prompt (jinja + variables)", () => {
   });
 });
 
+describe("form_model — dynamic context (inject_current_date)", () => {
+  it("readInjectCurrentDate is RAW: undefined when absent, not defaulted", () => {
+    expect(readInjectCurrentDate(seed)).toBeUndefined();
+  });
+
+  it("false round-trips through YAML", () => {
+    const m = setInjectCurrentDate(seed, false);
+    expect(m.spec?.dynamic_context?.inject_current_date).toBe(false);
+    const yaml = dumpYaml(m);
+    expect(yaml).toContain("dynamic_context:");
+    expect(yaml).toContain("inject_current_date: false");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readInjectCurrentDate(roundTripped)).toBe(false);
+  });
+
+  it("back to true deletes the key (backend default), dropping the now-empty block", () => {
+    const off = setInjectCurrentDate(seed, false);
+    const on = setInjectCurrentDate(off, true);
+    expect(on.spec?.dynamic_context).toBeUndefined();
+    expect(readInjectCurrentDate(on)).toBeUndefined();
+  });
+
+  it("does not materialize dynamic_context when absent and set to true (the default)", () => {
+    const m = setInjectCurrentDate(seed, true);
+    expect(m.spec?.dynamic_context).toBeUndefined();
+  });
+
+  it("preserves custom_reminders (and other unknown keys) when toggling off then back on", () => {
+    const base: AgentManifest = {
+      spec: {
+        dynamic_context: {
+          inject_current_date: false,
+          custom_reminders: [{ source: "policy", template: "Be nice." }],
+        },
+      },
+    };
+    const on = setInjectCurrentDate(base, true);
+    expect(on.spec?.dynamic_context).toEqual({
+      custom_reminders: [{ source: "policy", template: "Be nice." }],
+    });
+
+    const off = setInjectCurrentDate(on, false);
+    expect(off.spec?.dynamic_context).toEqual({
+      inject_current_date: false,
+      custom_reminders: [{ source: "policy", template: "Be nice." }],
+    });
+  });
+
+  it("preserves sibling spec keys when patching", () => {
+    const m = setInjectCurrentDate(seed, false);
+    expect(m.spec?.model).toEqual(seed.spec.model);
+    expect(m.spec?.system_prompt).toEqual(seed.spec.system_prompt);
+  });
+
+  it("does not mutate the input manifest", () => {
+    const snapshot = JSON.stringify(seed);
+    setInjectCurrentDate(seed, false);
+    expect(JSON.stringify(seed)).toBe(snapshot);
+  });
+});
+
 describe("form_model defenses readers (default-aware)", () => {
   it("reads effective DefenseSpec defaults when defenses absent", () => {
     const m: AgentManifest = { spec: {} };
@@ -883,6 +946,26 @@ describe("run budget (workflow.max_iterations + policies.max_no_progress/run_dea
     const snapshot = JSON.stringify(m);
     patchRunBudget(m, { maxIterations: 50 });
     expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("workflow.type round-trips via YAML (workflowType)", () => {
+    const m = parse(`spec:\n  workflow:\n    max_iterations: 40\n`);
+    expect(readRunBudget(m).workflowType).toBeUndefined();
+    const next = patchRunBudget(m, { workflowType: "plan_execute" });
+    expect(next.spec?.workflow?.type).toBe("plan_execute");
+    const dumped = dumpYaml(next);
+    const reparsed = parse(dumped);
+    expect(readRunBudget(reparsed).workflowType).toBe("plan_execute");
+    expect(readRunBudget(reparsed).maxIterations).toBe(40);
+  });
+
+  it("selecting back to react deletes workflow.type while max_iterations survives", () => {
+    const m: AgentManifest = {
+      spec: { workflow: { max_iterations: 40, type: "plan_execute" } },
+    };
+    const next = patchRunBudget(m, { workflowType: undefined });
+    expect(next.spec?.workflow?.type).toBeUndefined();
+    expect(next.spec?.workflow?.max_iterations).toBe(40);
   });
 });
 

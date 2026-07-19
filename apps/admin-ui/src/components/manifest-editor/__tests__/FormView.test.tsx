@@ -342,6 +342,38 @@ describe("FormView", () => {
     expect(within(block).getByText(/review_verdict/)).toBeInTheDocument();
   });
 
+  // inject_current_date (DynamicContextSpec) — default-on switch at the tail
+  // of the prompt tab, plus a static note about custom_reminders being
+  // YAML-only.
+  it("the inject-current-date switch defaults to on (value absent)", () => {
+    renderSection("prompt");
+    expect(screen.getByTestId("af-inject-current-date")).toBeChecked();
+  });
+
+  it("toggling inject-current-date off writes spec.dynamic_context.inject_current_date=false", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection("prompt", SEED, onChange);
+    await user.click(screen.getByTestId("af-inject-current-date"));
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.dynamic_context?.inject_current_date).toBe(false);
+  });
+
+  it("renders the dynamic-context note about custom_reminders", () => {
+    renderSection("prompt");
+    expect(screen.getByTestId("af-dynamic-context-note")).toBeInTheDocument();
+  });
+
+  it("renders the basic-section note about extends and tenant_config reserved fields", () => {
+    renderSection("basic");
+    expect(screen.getByTestId("af-basic-yaml-note")).toBeInTheDocument();
+  });
+
+  it("renders the tools-section note about per-tool YAML config", () => {
+    renderSection("tools");
+    expect(screen.getByTestId("af-tools-config-note")).toBeInTheDocument();
+  });
+
   it("renders the defenses section with every switch/select", () => {
     renderSection("defenses");
     expect(screen.getByTestId("af-defenses")).toBeInTheDocument();
