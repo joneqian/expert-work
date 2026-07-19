@@ -82,6 +82,10 @@ import {
   patchMemoryBudgets,
   readConsolidation,
   patchConsolidation,
+  readReflectionOn,
+  setReflectionOn,
+  readReflectionTuning,
+  patchReflectionTuning,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -1580,5 +1584,150 @@ describe("memory consolidation (policies.memory_consolidation.enabled)", () => {
     expect(next.spec?.policies?.max_no_progress).toBe(3);
     expect(readContextGates(next).ccEnabled).toBe(false);
     expect(readContextGates(next).wmEnabled).toBe(true);
+  });
+});
+
+describe("reflection (spec.reflection — presence-semantic block)", () => {
+  it("readReflectionOn is false when reflection is absent, false when explicit null, true when an object", () => {
+    expect(readReflectionOn({ spec: {} })).toBe(false);
+    expect(readReflectionOn({ spec: { reflection: null } })).toBe(false);
+    expect(readReflectionOn({ spec: { reflection: {} } })).toBe(true);
+    expect(readReflectionOn({ spec: { reflection: { budget: 5 } } })).toBe(
+      true,
+    );
+  });
+
+  it("setReflectionOn(true) on an absent block materializes {}", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = setReflectionOn(m, true);
+    expect(next.spec?.reflection).toEqual({});
+    expect(readReflectionOn(next)).toBe(true);
+  });
+
+  it("setReflectionOn(true) on an already-present block preserves it unchanged", () => {
+    const m: AgentManifest = { spec: { reflection: { budget: 5 } } };
+    const next = setReflectionOn(m, true);
+    expect(next.spec?.reflection).toEqual({ budget: 5 });
+  });
+
+  it("setReflectionOn(false) deletes the reflection key entirely (existence IS the switch)", () => {
+    const m: AgentManifest = { spec: { reflection: { budget: 5 } } };
+    const next = setReflectionOn(m, false);
+    expect(next.spec?.reflection).toBeUndefined();
+    const yaml = dumpYaml(next);
+    expect(yaml).not.toContain("reflection");
+  });
+
+  it("setReflectionOn(false) preserves sibling spec keys", () => {
+    const m: AgentManifest = {
+      spec: {
+        reflection: { budget: 5 },
+        description: "an agent",
+        model: { provider: "anthropic", name: "claude-sonnet-4-6" },
+      },
+    };
+    const next = setReflectionOn(m, false);
+    expect(next.spec?.description).toBe("an agent");
+    expect(next.spec?.model).toEqual({
+      provider: "anthropic",
+      name: "claude-sonnet-4-6",
+    });
+  });
+
+  it("budget and deadlineS round-trip through YAML", () => {
+    const m: AgentManifest = { spec: { reflection: {} } };
+    const next = patchReflectionTuning(m, { budget: 3, deadlineS: 45 });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("budget: 3");
+    expect(yaml).toContain("deadline_s: 45");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readReflectionTuning(roundTripped)).toEqual({
+      budget: 3,
+      deadlineS: 45,
+    });
+  });
+
+  it("clearing the last tuning key preserves reflection as {} (stays ON)", () => {
+    const base: AgentManifest = { spec: { reflection: { budget: 3 } } };
+    const cleared = patchReflectionTuning(base, { budget: undefined });
+    expect(cleared.spec?.reflection).toEqual({});
+    expect(readReflectionOn(cleared)).toBe(true);
+  });
+
+  it("clearing one tuning key preserves the other", () => {
+    const base: AgentManifest = {
+      spec: { reflection: { budget: 3, deadline_s: 45 } },
+    };
+    const next = patchReflectionTuning(base, { budget: undefined });
+    expect(next.spec?.reflection).toEqual({ deadline_s: 45 });
+  });
+
+  it("preserves reflection's own unrelated unknown key when patching a tuning field", () => {
+    const base: AgentManifest = {
+      spec: { reflection: { budget: 3, custom_flag: true } },
+    };
+    const next = patchReflectionTuning(base, { deadlineS: 10 });
+    expect(next.spec?.reflection).toEqual({
+      budget: 3,
+      custom_flag: true,
+      deadline_s: 10,
+    });
+  });
+
+  it("does not materialize reflection when absent and the patch nets out empty", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchReflectionTuning(base, { budget: undefined });
+    expect(next.spec?.reflection).toBeUndefined();
+  });
+
+  it("an empty patch does not materialize reflection at all", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchReflectionTuning(base, {});
+    expect(next.spec?.reflection).toBeUndefined();
+  });
+
+  it("leaves an explicit-null reflection untouched when the patch nets out empty", () => {
+    const base: AgentManifest = { spec: { reflection: null } };
+    const next = patchReflectionTuning(base, { budget: undefined });
+    expect(next.spec?.reflection).toBeNull();
+  });
+
+  it("coexists with other spec keys without disturbing them", () => {
+    const base: AgentManifest = {
+      spec: {
+        description: "an agent",
+        model: { provider: "anthropic", name: "claude-sonnet-4-6" },
+        reflection: { budget: 3 },
+      },
+    };
+    const next = patchReflectionTuning(base, { deadlineS: 20 });
+    expect(next.spec?.description).toBe("an agent");
+    expect(next.spec?.model).toEqual({
+      provider: "anthropic",
+      name: "claude-sonnet-4-6",
+    });
+    expect(next.spec?.reflection).toEqual({ budget: 3, deadline_s: 20 });
+  });
+
+  it("readReflectionTuning returns undefined for both fields on an empty manifest", () => {
+    expect(readReflectionTuning({})).toEqual({
+      budget: undefined,
+      deadlineS: undefined,
+    });
+  });
+
+  it("setReflectionOn does not mutate the input manifest", () => {
+    const m: AgentManifest = { spec: { reflection: { budget: 5 } } };
+    const snapshot = JSON.stringify(m);
+    setReflectionOn(m, false);
+    setReflectionOn(m, true);
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("patchReflectionTuning does not mutate the input manifest", () => {
+    const m: AgentManifest = { spec: { reflection: { budget: 5 } } };
+    const snapshot = JSON.stringify(m);
+    patchReflectionTuning(m, { deadlineS: 30 });
+    expect(JSON.stringify(m)).toBe(snapshot);
   });
 });
