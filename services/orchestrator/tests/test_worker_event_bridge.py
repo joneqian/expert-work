@@ -18,14 +18,25 @@ from orchestrator.tools.registry import ToolContext
 
 
 class _StreamingGraph:
-    """吐 updates chunk 再吐最终 values 的脚本图."""
+    """吐 updates chunk 再吐最终 values 的脚本图.
+
+    ``values_before_raise`` — 可选:在 ``raise_with`` 之前先吐一个
+    ``("values", ...)`` chunk,钉住"较早 superstep 的 values chunk 在
+    随后一步抛错时仍留在 ``result`` 里"这条路径(finding 1)。
+    """
 
     def __init__(
-        self, updates: list[Any], final: dict[str, Any], raise_with: BaseException | None = None
+        self,
+        updates: list[Any],
+        final: dict[str, Any],
+        raise_with: BaseException | None = None,
+        values_before_raise: dict[str, Any] | None = None,
     ) -> None:
         self.updates = updates
         self.final = final
         self.raise_with = raise_with
+        self.values_before_raise = values_before_raise
+        self.aget_state_calls = 0
 
     async def astream(
         self, state: Any, config: Any = None, *, stream_mode: Any = None
@@ -33,12 +44,15 @@ class _StreamingGraph:
         del state, config, stream_mode
         for chunk in self.updates:
             yield ("updates", chunk)
+        if self.values_before_raise is not None:
+            yield ("values", self.values_before_raise)
         if self.raise_with is not None:
             raise self.raise_with
         yield ("values", self.final)
 
     async def aget_state(self, config: Any) -> Any:
         del config
+        self.aget_state_calls += 1
 
         @dataclass
         class _Snap:
@@ -186,3 +200,58 @@ async def test_no_sink_no_frames_still_works() -> None:
         trajectory_metadata={},
     )
     assert result.content == "done"
+
+
+@pytest.mark.asyncio
+async def test_max_steps_uses_stale_values_chunk_not_fetch_partial() -> None:
+    """Finding 1 — 一个更早 superstep 的 values chunk 在随后一步抛
+    ``MaxStepsExceededError`` 时仍留在 ``result`` 里。LangGraph 的
+    superstep-checkpoint 语义下这个 chunk 就等于 ``aget_state`` 会
+    返回的东西,所以是合法 partial —— 代码直接用它,不再兜底调用
+    ``_fetch_partial`` / ``aget_state``。"""
+    frames: list[dict[str, Any]] = []
+    partial_state = {"messages": [AIMessage(content="partial thought")], "step_count": 1}
+    graph = _StreamingGraph(
+        _UPDATES[:1],
+        _FINAL,
+        raise_with=MaxStepsExceededError(step_count=8, max_steps=5),
+        values_before_raise=partial_state,
+    )
+    result = await run_child_to_result(
+        child=_built(graph),
+        task="t",
+        ctx=_collecting_ctx(frames),
+        child_depth=1,
+        label="spawn_worker",
+        agent_ref="dynamic:general",
+        trajectory_recorder=None,
+        trajectory_metadata={},
+    )
+    assert "step limit" in str(result.content)
+    assert frames[-1]["kind"] == "end"
+    assert frames[-1]["data"]["outcome"] == "max_steps"
+    assert frames[-1]["data"]["iteration_used"] == 1
+    assert graph.aget_state_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_sink_failure_does_not_swallow_cancel_reraise() -> None:
+    """Finding 2 — sink 在 update 帧和 end(cancelled) 帧上都炸,
+    ``_emit_worker_frame`` 吞掉 sink 自己的异常(best-effort),但绝不能
+    连带吞掉 ``RunCancelledError`` 的 re-raise。"""
+
+    async def _boom(frame: dict[str, Any]) -> None:
+        raise RuntimeError("sink down")
+
+    ctx = ToolContext(tenant_id=uuid4(), run_id=uuid4(), worker_event_sink=_boom)
+    with pytest.raises(RunCancelledError):
+        await run_child_to_result(
+            child=_built(_StreamingGraph(_UPDATES[:1], _FINAL, raise_with=RunCancelledError())),
+            task="t",
+            ctx=ctx,
+            child_depth=1,
+            label="spawn_worker",
+            agent_ref="dynamic:general",
+            trajectory_recorder=None,
+            trajectory_metadata={},
+        )
