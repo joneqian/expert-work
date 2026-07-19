@@ -884,6 +884,26 @@ describe("run budget (workflow.max_iterations + policies.max_no_progress/run_dea
     patchRunBudget(m, { maxIterations: 50 });
     expect(JSON.stringify(m)).toBe(snapshot);
   });
+
+  it("workflow.type round-trips via YAML (workflowType)", () => {
+    const m = parse(`spec:\n  workflow:\n    max_iterations: 40\n`);
+    expect(readRunBudget(m).workflowType).toBeUndefined();
+    const next = patchRunBudget(m, { workflowType: "plan_execute" });
+    expect(next.spec?.workflow?.type).toBe("plan_execute");
+    const dumped = dumpYaml(next);
+    const reparsed = parse(dumped);
+    expect(readRunBudget(reparsed).workflowType).toBe("plan_execute");
+    expect(readRunBudget(reparsed).maxIterations).toBe(40);
+  });
+
+  it("selecting back to react deletes workflow.type while max_iterations survives", () => {
+    const m: AgentManifest = {
+      spec: { workflow: { max_iterations: 40, type: "plan_execute" } },
+    };
+    const next = patchRunBudget(m, { workflowType: undefined });
+    expect(next.spec?.workflow?.type).toBeUndefined();
+    expect(next.spec?.workflow?.max_iterations).toBe(40);
+  });
 });
 
 describe("context gates (policies.context_compression / working_memory / tool_result_prune / tool_output_budget)", () => {

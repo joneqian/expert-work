@@ -1,9 +1,9 @@
 /**
  * RunBudgetSection — pilot "运行预算与超时" (Run Budget & Timeouts) group,
  * Task 6 of the agent-config-page redesign (PR1). The first ``budget`` group
- * pane that renders real controls instead of the group-pending hint: five
+ * pane that renders real controls instead of the group-pending hint: six
  * knobs that live in three different manifest locations
- * (workflow.max_iterations / policies.max_no_progress+run_deadline_s /
+ * (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
  * top-level spec.stream_deadline_s+idle_timeout_s) behind one screen.
  *
  * Rendering itself is delegated to ``PolicyFieldList`` (Task 1's FieldDef
@@ -15,11 +15,26 @@
  * platform default: the patch carries an explicit ``undefined``, which
  * ``patchRunBudget`` treats as "delete this key" (dropping the parent block
  * too when that empties it) rather than writing the default value into the
- * manifest. A switch field would follow the same rule (value === default →
- * delete the key) but this pilot group has none yet.
+ * manifest. A select field follows the same rule (selecting back to
+ * ``effectiveDefault`` → the patch carries ``undefined`` → key deleted) —
+ * see ``workflow.type`` below, PR8 Task 1 (field_defs.tsx's select kind,
+ * PR3 Task 1).
+ *
+ * A closing note (PR8 Task 1) flags ``workflow``'s other two YAML-only keys
+ * (``early_stop``/``builder``) that pass schema validation but the runtime
+ * never reads — left untouched, so authoring them by hand is harmless.
  */
+import { Typography } from "antd";
+import { useTranslation } from "react-i18next";
+
 import { PolicyFieldList, type FieldDef } from "./field_defs";
-import { patchRunBudget, readRunBudget } from "../form_model";
+import {
+  patchRunBudget,
+  readRunBudget,
+  type RunBudgetFields,
+} from "../form_model";
+
+const { Text } = Typography;
 
 interface RunBudgetSectionProps {
   formData: unknown;
@@ -38,6 +53,15 @@ const RUN_BUDGET_DEFS: readonly FieldDef[] = [
     kind: "number",
     effectiveDefault: 30,
     min: 1,
+  },
+  {
+    fieldId: "workflow.type",
+    i18nKey: "run_budget.wf_type",
+    valueKey: "workflowType",
+    kind: "select",
+    effectiveDefault: "react",
+    options: ["react", "plan_execute", "custom"],
+    optionLabelKey: "run_budget.wf_type_opt",
   },
   {
     fieldId: "policies.max_no_progress",
@@ -77,9 +101,10 @@ const RUN_BUDGET_DEFS: readonly FieldDef[] = [
 ];
 
 export function RunBudgetSection({ formData, onChange }: RunBudgetSectionProps) {
+  const { t } = useTranslation();
   const budget = readRunBudget(formData);
 
-  const handlePatch = (patch: Record<string, number | boolean | undefined>): void => {
+  const handlePatch = (patch: Partial<RunBudgetFields>): void => {
     onChange(patchRunBudget(formData, patch));
   };
 
@@ -87,9 +112,16 @@ export function RunBudgetSection({ formData, onChange }: RunBudgetSectionProps) 
     <div data-testid="run-budget-section" style={{ maxWidth: 760 }}>
       <PolicyFieldList
         defs={RUN_BUDGET_DEFS}
-        values={budget as Record<string, number | boolean | undefined>}
+        values={budget as Record<string, number | string | undefined>}
         onPatch={handlePatch}
       />
+      <Text
+        type="secondary"
+        data-testid="budget-workflow-note"
+        style={{ display: "block", marginTop: 16 }}
+      >
+        {t("run_budget.workflow_note")}
+      </Text>
     </div>
   );
 }

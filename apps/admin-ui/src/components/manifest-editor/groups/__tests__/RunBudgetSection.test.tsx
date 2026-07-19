@@ -8,6 +8,7 @@ import type { AgentManifest } from "../../form_model";
 
 const FIELD_IDS = [
   "workflow.max_iterations",
+  "workflow.type",
   "policies.max_no_progress",
   "policies.run_deadline_s",
   "spec.stream_deadline_s",
@@ -21,14 +22,89 @@ function renderSection(
   return render(<RunBudgetSection formData={formData} onChange={onChange} />);
 }
 
+function rowFor(fieldId: string): HTMLElement {
+  return document.querySelector(`[data-field-id="${fieldId}"]`) as HTMLElement;
+}
+
+/**
+ * In jsdom, Antd's Select renders each option twice: a visible, clickable
+ * ``.ant-select-item-option`` div and a hidden ARIA ``role="option"`` mirror
+ * with the same text. This opens the given combobox and clicks the real
+ * ``.ant-select-item-option-content`` carrying the requested label (mirrors
+ * ``SecuritySection.test.tsx``'s helper of the same shape).
+ */
+async function pickOption(
+  user: ReturnType<typeof userEvent.setup>,
+  combobox: HTMLElement,
+  label: string,
+): Promise<void> {
+  await user.click(combobox);
+  const item = await screen.findByText(optionContent(label));
+  await user.click(item);
+}
+
+const optionContent =
+  (label: string) => (_content: string, el: Element | null) =>
+    el?.classList.contains("ant-select-item-option-content") === true &&
+    el.textContent === label;
+
 describe("RunBudgetSection", () => {
-  it("renders all five FieldRows, one per manifest path", () => {
+  it("renders all six FieldRows, one per manifest path", () => {
     const { container } = renderSection();
     for (const id of FIELD_IDS) {
       expect(
         container.querySelector(`[data-field-id="${id}"]`),
       ).toBeInTheDocument();
     }
+  });
+
+  it("workflow.type select renders with 3 options", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    const combobox = within(rowFor("workflow.type")).getByRole("combobox");
+    await user.click(combobox);
+    expect(
+      await screen.findByText(optionContent("react (think, then act)")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(optionContent("plan_execute (plan, then execute)")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(optionContent("custom (not wired up)")),
+    ).toBeInTheDocument();
+  });
+
+  it("picking plan_execute writes spec.workflow.type", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+
+    const combobox = within(rowFor("workflow.type")).getByRole("combobox");
+    await pickOption(user, combobox, "plan_execute (plan, then execute)");
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.workflow?.type).toBe("plan_execute");
+  });
+
+  it("picking react (the default) back deletes workflow.type but keeps max_iterations", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const seed: AgentManifest = {
+      spec: { workflow: { max_iterations: 40, type: "plan_execute" } },
+    };
+    renderSection(seed, onChange);
+
+    const combobox = within(rowFor("workflow.type")).getByRole("combobox");
+    await pickOption(user, combobox, "react (think, then act)");
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.workflow?.type).toBeUndefined();
+    expect(last.spec?.workflow?.max_iterations).toBe(40);
+  });
+
+  it("renders the workflow reserved-fields note", () => {
+    renderSection();
+    expect(screen.getByTestId("budget-workflow-note")).toBeInTheDocument();
   });
 
   it("changing max_iterations writes spec.workflow.max_iterations", async () => {

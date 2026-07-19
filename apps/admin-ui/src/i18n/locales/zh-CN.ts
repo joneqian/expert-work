@@ -611,6 +611,16 @@ const zhCN: TranslationKeys = {
     max_iterations_impact:
       "超限后强制收尾:模型被要求直接总结、不再调用工具,产出可能不完整。调大适合研究/多工具长任务(参考:重任务 40-60),调小控制成本。子 worker 实际步数 = min(本值, 平台 worker 上限)",
     max_iterations_default: "30",
+    wf_type_label: "工作流类型",
+    wf_type_brief: "react=边想边做的经典循环;plan_execute=先由规划模型出完整计划再逐步执行",
+    wf_type_impact:
+      "plan_execute=每个任务都先出完整计划再执行,长链条任务(报告生成等)更稳,但简单任务也逃不过强制规划(多一次规划模型调用,更慢更贵)——任务复杂度差异大的 Agent 建议保持 react。规划所用模型由模型组的 routing planning 规则指定,无规则时用主模型。custom 当前无专属实现,行为等同 react。",
+    wf_type_default: "react",
+    wf_type_opt_react: "react(边想边做)",
+    wf_type_opt_plan_execute: "plan_execute(先规划后执行)",
+    wf_type_opt_custom: "custom(未接线)",
+    workflow_note:
+      "workflow 的 early_stop 与 builder 为保留字段:通过校验但运行时不读取,留在 YAML 中无害。",
     max_no_progress_label: "无进展停机",
     max_no_progress_brief: "连续 N 步无实质进展即提前收尾,0 = 关闭",
     max_no_progress_impact:

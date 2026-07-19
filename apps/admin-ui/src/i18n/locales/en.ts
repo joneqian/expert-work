@@ -600,6 +600,14 @@ export interface TranslationKeys {
     max_iterations_brief: string;
     max_iterations_impact: string;
     max_iterations_default: string;
+    wf_type_label: string;
+    wf_type_brief: string;
+    wf_type_impact: string;
+    wf_type_default: string;
+    wf_type_opt_react: string;
+    wf_type_opt_plan_execute: string;
+    wf_type_opt_custom: string;
+    workflow_note: string;
     max_no_progress_label: string;
     max_no_progress_brief: string;
     max_no_progress_impact: string;
@@ -3343,6 +3351,17 @@ const en: TranslationKeys = {
     max_iterations_impact:
       "Once exceeded, the run is forced to wrap up: the model must summarize directly and stop calling tools, so the output may be incomplete. Raise it for research or long multi-tool tasks (heavy tasks typically need 40-60); lower it to control cost. A sub-worker's actual step budget = min(this value, the platform's worker ceiling).",
     max_iterations_default: "30",
+    wf_type_label: "Workflow type",
+    wf_type_brief:
+      "react = the classic think-then-act loop; plan_execute = a planning model produces a full plan up front, then execution proceeds step by step",
+    wf_type_impact:
+      "plan_execute: every task first gets a full plan before execution — more stable for long-chain tasks (e.g. report generation), but even trivial tasks can't skip the forced planning step (one extra planning-model call, slower and costlier). For agents whose tasks vary widely in complexity, react is recommended. The model used for planning is set by the model group's routing planning rule; when no rule is set, the main model is used. custom currently has no dedicated implementation — it behaves the same as react.",
+    wf_type_default: "react",
+    wf_type_opt_react: "react (think, then act)",
+    wf_type_opt_plan_execute: "plan_execute (plan, then execute)",
+    wf_type_opt_custom: "custom (not wired up)",
+    workflow_note:
+      "workflow's early_stop and builder are reserved fields: they pass validation but are never read at runtime — leaving them in the YAML is harmless.",
     max_no_progress_label: "No-progress stop",
     max_no_progress_brief:
       "Stop early after N consecutive steps with no real progress; 0 = off",
