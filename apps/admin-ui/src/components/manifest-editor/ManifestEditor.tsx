@@ -31,17 +31,20 @@ import { MemorySection } from "./groups/MemorySection";
 import { ModelRoutingSection } from "./groups/ModelRoutingSection";
 import { SecuritySection } from "./groups/SecuritySection";
 import { SandboxSection } from "./groups/SandboxSection";
+import { ObservabilitySection } from "./groups/ObservabilitySection";
 import type { McpPickerSource } from "./widgets/McpToolPicker";
 
 /** Curated group panes — a hand-written component that replaces FormView's
- * registered-sections pathway for that group entirely (checked BEFORE the
- * ``sections.length === 0`` pending-hint branch below, so it wins even for
+ * registered-sections pathway for that group entirely, checked BEFORE the
+ * plain ``FormView`` stacked-sections fallback below — so it wins even for
  * "security"/"memory"/"model", whose ``CONFIG_GROUPS`` entries still list
  * real sections — ``SecuritySection``/``MemorySection``/``ModelRoutingSection``
- * embed those themselves). "budget"/"context"/"sandbox" instead have a
- * statically-empty entry (``sections: []``); either way, a group absent from
- * this map (observability, pending Phase 2) falls through to the generic
- * "pending" hint. */
+ * embed those themselves. "budget"/"context"/"sandbox"/"observability"
+ * instead have a statically-empty entry (``sections: []``) and render ONLY
+ * their curated pane. Every ``CONFIG_GROUPS`` entry now has either real
+ * sections or a curated pane here, so there's no longer a group that can
+ * fall through to a generic "pending" hint (that branch — and its
+ * ``cfg-pane-pending`` testid — has been removed). */
 interface CuratedPaneProps {
   formData: unknown;
   onChange: (data: unknown) => void;
@@ -56,6 +59,7 @@ const CURATED_GROUP_PANES: Record<
   model: ModelRoutingSection,
   security: SecuritySection,
   sandbox: SandboxSection,
+  observability: ObservabilitySection,
 };
 
 /** A caller-supplied node rendered ABOVE the registered groups in the tree —
@@ -251,11 +255,10 @@ export function ManifestEditor({
   // leading tab renders nothing on its own — e.g. "basic" once its only
   // section is merged. Its node must be unreachable, or clicking it would
   // show FormView with an empty sections array (a blank pane). Groups that
-  // are statically empty to begin with (observability, pending Phase 2) are
-  // untouched — they keep showing with the pending hint. "budget"/"context"/
-  // "sandbox" are also statically empty (``sections: []``) but are
+  // are statically empty to begin with ("budget"/"context"/"sandbox"/
+  // "observability", ``sections: []``) are untouched — they're all
   // special-cased below via ``CURATED_GROUP_PANES`` to render a hand-written
-  // component instead (Task 6 / Task 3 / Task 2 pilots).
+  // component instead (Task 6 / Task 3 / Task 2 pilots / Task 2 PR7).
   const hiddenGroups = CONFIG_GROUPS.filter(
     (g) =>
       g.sections.length > 0 &&
@@ -287,14 +290,6 @@ export function ManifestEditor({
     <YamlView value={yamlText} onChange={handleYamlChange} />
   ) : CuratedPane ? (
     <CuratedPane formData={manifestObject} onChange={handleFormChange} />
-  ) : activeConfigGroup && activeConfigGroup.sections.length === 0 ? (
-    <div data-testid="cfg-pane-pending" style={{ padding: 24 }}>
-      <Alert
-        type="info"
-        showIcon
-        message={t("manifest_editor.group_pending_hint")}
-      />
-    </div>
   ) : activeConfigGroup ? (
     <FormView
       formData={manifestObject}

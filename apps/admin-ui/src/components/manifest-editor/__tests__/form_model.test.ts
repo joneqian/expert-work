@@ -86,6 +86,8 @@ import {
   setReflectionOn,
   readReflectionTuning,
   patchReflectionTuning,
+  readResponseCache,
+  patchResponseCache,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -1729,5 +1731,101 @@ describe("reflection (spec.reflection — presence-semantic block)", () => {
     const snapshot = JSON.stringify(m);
     patchReflectionTuning(m, { deadlineS: 30 });
     expect(JSON.stringify(m)).toBe(snapshot);
+  });
+});
+
+// ---- LLM response cache (spec.cache — Stream K.K4, DISTINCT from
+// ModelFields.cache_enabled / model.cache_enabled, which is Anthropic prompt
+// caching) ----
+describe("response cache (spec.cache — LLM response cache opt-out, K.K4)", () => {
+  it("responseCacheEnabled=false round-trips through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchResponseCache(m, { responseCacheEnabled: false });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("cache:");
+    expect(yaml).toContain("enabled: false");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readResponseCache(roundTripped).responseCacheEnabled).toBe(false);
+  });
+
+  it("explicit undefined deletes enabled, dropping the cache block entirely", () => {
+    const base: AgentManifest = { spec: { cache: { enabled: false } } };
+    const cleared = patchResponseCache(base, {
+      responseCacheEnabled: undefined,
+    });
+    expect(cleared.spec?.cache).toBeUndefined();
+    const yaml = dumpYaml(cleared);
+    expect(yaml).not.toContain("cache:");
+  });
+
+  it("preserves cache's own unknown key when patching enabled", () => {
+    const base: AgentManifest = {
+      spec: { cache: { custom_flag: true } },
+    };
+    const next = patchResponseCache(base, { responseCacheEnabled: true });
+    expect(next.spec?.cache).toEqual({ custom_flag: true, enabled: true });
+  });
+
+  it("does not materialize cache when absent and the patch nets out empty", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchResponseCache(base, { responseCacheEnabled: undefined });
+    expect(next.spec?.cache).toBeUndefined();
+  });
+
+  it("an empty patch does not materialize cache at all", () => {
+    const base: AgentManifest = { spec: {} };
+    const next = patchResponseCache(base, {});
+    expect(next.spec?.cache).toBeUndefined();
+  });
+
+  it("preserves sibling spec keys when patching", () => {
+    const base: AgentManifest = {
+      spec: {
+        description: "an agent",
+        model: { provider: "anthropic", name: "claude-sonnet-4-6" },
+      },
+    };
+    const next = patchResponseCache(base, { responseCacheEnabled: false });
+    expect(next.spec?.description).toBe("an agent");
+    expect(next.spec?.model).toEqual({
+      provider: "anthropic",
+      name: "claude-sonnet-4-6",
+    });
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m: AgentManifest = { spec: { cache: { enabled: true } } };
+    const snapshot = JSON.stringify(m);
+    patchResponseCache(m, { responseCacheEnabled: false });
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("readResponseCache returns undefined on an empty manifest (RAW — no default substitution)", () => {
+    expect(readResponseCache({})).toEqual({ responseCacheEnabled: undefined });
+  });
+
+  it("readResponseCache is RAW: a stored enabled:true is not collapsed away", () => {
+    expect(
+      readResponseCache({ spec: { cache: { enabled: true } } })
+        .responseCacheEnabled,
+    ).toBe(true);
+  });
+
+  it("is independent of ModelFields.cache_enabled (Anthropic prompt cache) — both persist on the same manifest", () => {
+    let m: AgentManifest = {
+      spec: { model: { provider: "anthropic", name: "claude-sonnet-4-6" } },
+    };
+    m = setModel(m, { cache_enabled: false });
+    m = patchResponseCache(m, { responseCacheEnabled: false });
+
+    expect(readModel(m).cache_enabled).toBe(false);
+    expect(readResponseCache(m).responseCacheEnabled).toBe(false);
+
+    const yaml = dumpYaml(m);
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readModel(roundTripped).cache_enabled).toBe(false);
+    expect(readResponseCache(roundTripped).responseCacheEnabled).toBe(false);
+    expect(roundTripped.spec?.model?.cache_enabled).toBe(false);
+    expect(roundTripped.spec?.cache?.enabled).toBe(false);
   });
 });

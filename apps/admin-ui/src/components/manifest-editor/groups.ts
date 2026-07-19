@@ -24,7 +24,7 @@ export const CONFIG_GROUPS: readonly ConfigGroup[] = [
   { id: "context", labelKey: "manifest_editor.group_context", sections: [], keywords: ["压缩", "上下文", "compression", "working memory", "prune"] },
   { id: "security", labelKey: "manifest_editor.group_security", sections: ["defenses", "governance"], keywords: ["防护", "审批", "安全", "defense", "approval", "egress"] },
   { id: "sandbox", labelKey: "manifest_editor.group_sandbox", sections: [], keywords: ["沙箱", "资源", "镜像", "sandbox", "cpu", "image"] },
-  { id: "observability", labelKey: "manifest_editor.group_observability", sections: [], keywords: ["触发器", "可观测", "trigger", "trace", "log"] },
+  { id: "observability", labelKey: "manifest_editor.group_observability", sections: [], keywords: ["触发器", "可观测", "trigger", "trace", "log", "缓存", "cache", "响应缓存", "录制"] },
 ];
 
 /**

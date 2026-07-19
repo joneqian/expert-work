@@ -588,7 +588,6 @@ export interface TranslationKeys {
     group_security: string;
     group_sandbox: string;
     group_observability: string;
-    group_pending_hint: string;
     field_impact_label: string;
     field_default_badge: string;
   };
@@ -801,6 +800,20 @@ export interface TranslationKeys {
     rf_deadline_impact: string;
     rf_deadline_default: string;
     yaml_note: string;
+  };
+  // Task 2 (PR7) — "Triggers & Observability" group (ObservabilitySection).
+  // One live field (spec.cache.enabled, the per-agent LLM response cache
+  // opt-out) plus two note blocks: manifest ``triggers`` declared but not
+  // wired up (the trigger-management API is the real path), and
+  // trace/log_level/redact_fields (plus trajectory_recording, whose hint
+  // copy is corrected in ``agent_form`` below) declarative-only — validated
+  // but not read at runtime.
+  observability_group: {
+    resp_cache_label: string;
+    resp_cache_brief: string;
+    resp_cache_impact: string;
+    triggers_note: string;
+    declarative_note: string;
   };
   model_select: {
     provider_label: string;
@@ -3321,8 +3334,6 @@ const en: TranslationKeys = {
     group_security: "Security & Defenses",
     group_sandbox: "Sandbox & Resources",
     group_observability: "Triggers & Observability",
-    group_pending_hint:
-      "Settings in this group will be visualized in a later release — edit them via YAML for now.",
     field_impact_label: "Impact",
     field_default_badge: "Default {{value}}",
   },
@@ -3569,6 +3580,17 @@ const en: TranslationKeys = {
     yaml_note:
       "The following capabilities are currently configured only via the YAML view: routing.rules' planning rule (only takes effect for the plan_execute workflow), vision.fallbacks (the vision-model fallback chain), and base_url / azure_deployment / azure_api_version (Azure and self-hosted wiring). api_key_ref is deprecated: setting it in the manifest is ignored, with a warning.",
   },
+  observability_group: {
+    resp_cache_label: "LLM response cache",
+    resp_cache_brief:
+      "A repeated request hits the cache and reuses the full answer directly, without calling the model — saves cost and speeds up responses",
+    resp_cache_impact:
+      "A cache hit skips the model call entirely (including routing and the fallback chain). Turn this off for an agent whose prompt has time-sensitive content (the current date, live data, etc.), or it may return a stale answer. This is a different thing from the model group's \"prompt caching\" (Anthropic prompt caching): that only saves input tokens, while this switch reuses the entire answer verbatim.",
+    triggers_note:
+      "The manifest's triggers declaration is currently not wired up: cron/webhook triggers written into the manifest have no effect. For scheduled and webhook automation, create them via the trigger-management API (/v1/triggers) instead — that path's scheduling and firing work correctly.",
+    declarative_note:
+      "observability's trace / log_level / redact_fields are currently declarative fields: they pass validation but aren't read at runtime — tracing is always on per the platform configuration, the log level is decided by each service's deployment environment, and PII redaction is handled by the platform's defense chain. Trajectory recording works the same way: whether it's recorded is decided by the deployment's object-store configuration.",
+  },
   model_select: {
     provider_label: "Provider",
     provider_placeholder: "Select a configured provider",
@@ -3757,7 +3779,7 @@ const en: TranslationKeys = {
       "How long a pending approval may wait (seconds) before it is auto-rejected, so it doesn't tie up resources.\nDefault 24h (86400).\nExample: 86400",
     trajectory_recording: "Keep a record of conversations",
     trajectory_recording_help:
-      "When on, each completed conversation is saved, used for quality evaluation and model improvement.\nTurn off if conversation content must not be retained.\nOn by default.\nExample: on",
+      "Not wired up yet: whether recording happens is decided by the platform's object-store configuration, so this switch currently has no effect (the field is kept for a future backend wiring).",
     section_knowledge: "Knowledge bases (RAG)",
     section_knowledge_help:
       "Knowledge bases the agent can search to back up its answers.\nPick existing bases, or type a name.\nExample: hr-policies, eng-handbook",
