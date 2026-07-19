@@ -803,6 +803,24 @@ const zhCN: TranslationKeys = {
     reserved_note:
       "memory.short_term 与 dynamic_context.inject_memory 当前为保留字段:通过校验但运行时不读取。记忆是否启用只由 memory.long_term 是否声明决定(上方开关)。",
   },
+  model_group: {
+    panel_reflection: "反思自评",
+    rf_enable_label: "反思自评",
+    rf_enable_brief: "回答前由评判模型自我反思打分,不达标自动重试改进",
+    rf_enable_impact:
+      "每轮反思多一次 LLM 调用:质量更高,延迟与成本上升。评判所用模型由下方「反思评判模型」规则指定;未配置规则时复用主模型。",
+    rf_budget_label: "反思次数上限",
+    rf_budget_brief: "单次运行最多反思调用次数,到顶接受当前答案",
+    rf_budget_impact: "调大=多轮自我改进、成本延迟线性涨;1=只评一次。",
+    rf_budget_default: "2",
+    rf_deadline_label: "单次反思时限(秒)",
+    rf_deadline_brief: "每次反思调用的墙钟上限,超时强制接受当前答案",
+    rf_deadline_impact:
+      "防评判模型卡死拖垮整个运行。调大容忍慢模型,调小保响应速度。上限 600。",
+    rf_deadline_default: "30",
+    yaml_note:
+      "以下能力暂经 YAML 视图配置:routing.rules 的 planning 规则(仅 plan_execute 工作流生效)、vision.fallbacks(视觉模型回退链)、base_url / azure_deployment / azure_api_version(azure 与自托管接线)。api_key_ref 已废弃:manifest 中设置会被忽略并告警。",
+  },
   model_select: {
     provider_label: "提供方",
     provider_placeholder: "选择已配置密钥的提供方",
@@ -816,6 +834,18 @@ const zhCN: TranslationKeys = {
     context_window_hint: "token 数；决定压缩触发阈值。留空 = 用模型目录默认窗口。",
     thinking_label: "思考模式",
     thinking_cannot_disable: "该模型仅能最小化思考，无法完全关闭。",
+    effort_label: "努力程度",
+    effort_hint:
+      "推理深度档位。留空=提供商默认。仅模型目录标注支持思考的模型可设,否则构建报错。",
+    adaptive_label: "自适应思考",
+    adaptive_hint:
+      "由模型按任务难度自行决定思考深度(Anthropic 4.6+)。仅 Anthropic 生效。",
+    cache_label: "提示词缓存",
+    cache_hint:
+      "Anthropic prompt caching,长会话显著省钱。默认开;提示词含时效内容的 Agent 可关。仅 Anthropic 生效。",
+    max_tokens_hint:
+      "单次回复输出 token 上限。仅 Anthropic 路径生效(qwen/doubao 借它推导思考预算);OpenAI 系提供商忽略此值。",
+    rate_limit_hint: "对该模型的请求速率上限(次/分钟)。超限请求排队等待,不报错。",
   },
   agent_form: {
     section_basic: "基本",
@@ -860,8 +890,7 @@ const zhCN: TranslationKeys = {
     mcp_servers_loading: "加载服务器中…",
     mcp_servers_load_failed: "服务器加载失败",
     section_reflection_evaluator: "反思评判者（可选）",
-    reflection_evaluator_hint:
-      "反思开启时,由谁来判断任务是不是真的完成了。\n留空 = 用 Agent 自己的模型。\n建议换一个模型:不用更强,关键是换个视角,避免模型总觉得自己答得对、漏掉盲点。\n深度推理任务可以选更强的。",
+    reflection_evaluator_hint: "只选模型,不开启反思——开关在「反思自评」面板。",
     reflection_evaluator_clear: "清除（改用 agent 自己的模型）",
     section_vision: "图像理解(VL 模型)",
     vision_hint:
@@ -891,7 +920,7 @@ const zhCN: TranslationKeys = {
     memory_topk_help:
       "每次对话最多调取几条最相关的记忆。\n太多会挤占上下文,太少会漏信息。\n示例:5",
     section_reflection_evaluator_help:
-      "可选。让 Agent 回答前先自我反思、打分,提升质量;不配则跳过。\n示例:留空(不启用),或选一个轻量模型做评估",
+      "指定反思自评所用的评判模型(routing 规则)。仅在上方「反思自评」开启后生效;未指定时反思复用主模型。",
     section_defenses: "防御守卫",
     section_defenses_help:
       "配置该 agent 的安全守卫姿态:输入注入防护、输出筛查/脱敏、工具行为审查。",

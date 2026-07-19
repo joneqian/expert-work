@@ -11,6 +11,16 @@ export interface ModelFields {
   context_window?: number;
   // Thinking-Toggle — tri-state on/off (undefined = inherit vendor default).
   thinking_enabled?: boolean;
+  // Reasoning effort tier (low/medium/high/max). Undefined = provider
+  // default. Only meaningful when the catalog entry has a thinking knob —
+  // the ModelSelect widget gates the control on that same condition.
+  effort?: string;
+  // Adaptive thinking (Anthropic 4.6+) — model decides its own depth.
+  // Anthropic-only; undefined (default) = off.
+  adaptive_thinking?: boolean;
+  // Anthropic prompt caching. Anthropic-only; default TRUE (undefined = on),
+  // explicit ``false`` = off.
+  cache_enabled?: boolean;
   // E.11 — provider fallback chain, flat + ordered: primary → fallback[0] →
   // fallback[1] → …. The backend pre-order-flattens the tree
   // (agent_factory._flatten_chain), so a hand-authored nested sub-chain on an
@@ -72,6 +82,10 @@ export interface AgentManifest {
       [k: string]: unknown;
     };
     memory?: { long_term?: LongTermFields | null; [k: string]: unknown } | null;
+    // Stream J.11 — reflect-node config. PRESENCE is the on/off switch: `{}`
+    // = on with defaults (budget 2 / deadline_s 30), absent OR explicit
+    // `null` = off. See ``readReflectionOn``/``setReflectionOn``.
+    reflection?: { budget?: number; deadline_s?: number; [k: string]: unknown } | null;
     tools?: ToolEntry[];
     // Sandbox egress policy (NetworkSpec) — nested two levels under spec.
     // ``sandbox`` itself commonly carries unrelated unknown keys authored in
@@ -1128,4 +1142,68 @@ export function patchConsolidation(
   return patchSpec(m, {
     policies: Object.keys(updates).length > 0 ? updates : undefined,
   });
+}
+
+// ---- reflection (spec.reflection — presence-semantic block) ----
+// Stream J.11 — whether the runtime reflect node runs. Unlike the optional
+// ``policies`` sub-blocks (absent ⇒ backend default applies), ``reflection``'s
+// PRESENCE IS the on/off switch: ``{}`` = on with defaults (budget 2 /
+// deadline_s 30), absent OR explicit ``null`` = off — mirrors
+// ``long_term``'s on/off semantics (``readMemoryOn``/``setMemoryOn``), but
+// ``reflection`` is a TOP-LEVEL spec key (one level, not nested two levels
+// like ``memory.long_term``).
+export const readReflectionOn = (m: unknown): boolean =>
+  (specOf(m).reflection ?? null) !== null;
+
+// ``on``: an already-present block (incl. explicit ``null``, via ``?? {}``)
+// is preserved unchanged / activated with defaults. ``off``: the whole
+// ``reflection`` key is deleted via explicit ``undefined`` (js-yaml omits
+// it) — existence IS this switch's semantics, so deleting is how you turn it
+// off (there is no separate ``enabled`` flag to flip).
+export function setReflectionOn(m: unknown, on: boolean): AgentManifest {
+  if (!on) return patchSpec(m, { reflection: undefined });
+  const existing = specOf(m).reflection;
+  return patchSpec(m, { reflection: existing ?? {} });
+}
+
+export interface ReflectionTuningFields {
+  budget?: number;
+  deadlineS?: number;
+}
+
+// RAW reader — no default substitution; an unset field reads as ``undefined``
+// (the caller/backend supplies the effective default, 2 / 30s).
+export const readReflectionTuning = (m: unknown): ReflectionTuningFields => ({
+  budget: specOf(m).reflection?.budget,
+  deadlineS: specOf(m).reflection?.deadline_s,
+});
+
+// Merge a partial patch into ``spec.reflection`` preserving unknown sibling
+// keys — mirrors ``patchMemoryBudgets``'s presence-block idiom, but simpler:
+// reflection is a single top-level block (no two-level nesting). ``"key" in
+// patch`` is a presence test (a key patched to ``undefined`` deletes it); an
+// emptied-but-already-present block survives as ``{}`` (``mergeBlock ?? {}``)
+// because presence — not content — is the on/off switch, so clearing the
+// last tuning key must never silently turn reflection off. When reflection
+// is absent OR explicit ``null`` and the patch nets out empty, no update is
+// made (never materializes the block) — the UI render-guard keeps tuning
+// controls hidden unless reflection is already ON, so this path shouldn't
+// occur in practice. If it did (explicit-null reflection + a real-valued
+// patch), behavior is still well-defined: it materializes ``{...patch}``
+// (mirrors what ``patchMemoryBudgets`` does for an absent parent block).
+export function patchReflectionTuning(
+  m: unknown,
+  patch: Partial<ReflectionTuningFields>,
+): AgentManifest {
+  const reflectionPatch: Record<string, unknown> = {};
+  if ("budget" in patch) reflectionPatch.budget = patch.budget;
+  if ("deadlineS" in patch) reflectionPatch.deadline_s = patch.deadlineS;
+  if (Object.keys(reflectionPatch).length === 0) return patchSpec(m, {});
+
+  const existing = specOf(m).reflection;
+  const merged = mergeBlock(existing ?? undefined, reflectionPatch) ?? {};
+  if (existing != null || Object.keys(merged).length > 0) {
+    return patchSpec(m, { reflection: merged });
+  }
+  return patchSpec(m, {});
 }

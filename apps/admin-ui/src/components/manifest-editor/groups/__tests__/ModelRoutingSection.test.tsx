@@ -1,0 +1,187 @@
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import "../../../../i18n";
+
+import * as catalog from "../../catalog";
+import { ModelRoutingSection } from "../ModelRoutingSection";
+import type { AgentManifest } from "../../form_model";
+
+vi.spyOn(catalog, "loadModelCatalog").mockResolvedValue({
+  providers: [
+    {
+      provider: "openai",
+      models: [
+        {
+          name: "gpt-4o",
+          vision: true,
+          embeddings: false,
+          context_window: 128000,
+          deprecated: false,
+        },
+      ],
+    },
+  ],
+});
+
+// A primary model already picked so the embedded FormView's "model" section
+// also renders its af-fallback sub-section (E.11) — spot-checked alongside
+// af-model below.
+const SEED: AgentManifest = {
+  spec: { model: { provider: "openai", name: "gpt-4o" } },
+};
+
+// Reflection on (a declared, empty ``reflection`` block) — required for the
+// two tuning FieldRows to render at all (see the render-guard tests below
+// for the off cases).
+const REFLECTION_ON_SEED: AgentManifest = {
+  ...SEED,
+  spec: { ...SEED.spec, reflection: {} },
+};
+
+function renderSection(
+  formData: AgentManifest = SEED,
+  onChange: (d: unknown) => void = vi.fn(),
+) {
+  return render(
+    <ModelRoutingSection formData={formData} onChange={onChange} />,
+  );
+}
+
+function rowFor(fieldId: string): HTMLElement | null {
+  return document.querySelector(`[data-field-id="${fieldId}"]`);
+}
+
+// The reflection panel is mounted (``forceRender``) but collapsed by
+// default, so its contents aren't in the accessibility tree until opened —
+// mirrors ``MemorySection.test.tsx``'s helper of the same shape.
+async function openPanel(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const header = within(document.body)
+    .getByText("Reflection self-assessment", {
+      selector: ".ant-collapse-header-text",
+    })
+    .closest(".ant-collapse-header") as HTMLElement;
+  await user.click(header);
+}
+
+describe("ModelRoutingSection", () => {
+  it("embeds the existing 'model' FormView section (model-select-provider always visible, af-fallback once a primary model is picked)", async () => {
+    renderSection();
+    expect(screen.getByTestId("af-model")).toBeInTheDocument();
+    // FormView's "model" section renders one ModelSelect per sub-section
+    // (main model / reflection evaluator / vision fallback) sharing the same
+    // internal testids, so scope the query to af-model's own instance.
+    expect(
+      within(screen.getByTestId("af-model")).getByTestId(
+        "model-select-provider",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("af-fallback")).toBeInTheDocument();
+  });
+
+  it("the reflection panel starts collapsed", async () => {
+    const { container } = renderSection();
+    const outer = container.querySelector(
+      '[data-testid="model-routing-section"] > .ant-collapse',
+    ) as HTMLElement;
+    const panelItems = Array.from(outer.children).filter((el) =>
+      el.classList.contains("ant-collapse-item"),
+    );
+    expect(panelItems).toHaveLength(1);
+    expect(panelItems[0].children[0]).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("does not render the tuning FieldRows while reflection is off (absent block)", async () => {
+    const user = userEvent.setup();
+    renderSection(SEED);
+    await openPanel(user);
+
+    expect(rowFor("reflection")).toBeInTheDocument();
+    expect(rowFor("reflection.budget")).not.toBeInTheDocument();
+    expect(rowFor("reflection.deadline_s")).not.toBeInTheDocument();
+  });
+
+  it("does not render the tuning FieldRows while reflection is off (explicit reflection: null)", async () => {
+    const user = userEvent.setup();
+    const offSeed: AgentManifest = {
+      ...SEED,
+      spec: { ...SEED.spec, reflection: null },
+    };
+    renderSection(offSeed);
+    await openPanel(user);
+
+    expect(rowFor("reflection")).toBeInTheDocument();
+    expect(rowFor("reflection.budget")).not.toBeInTheDocument();
+    expect(rowFor("reflection.deadline_s")).not.toBeInTheDocument();
+  });
+
+  it("turning the reflection switch on writes spec.reflection = {} and reveals the tuning FieldRows", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { rerender } = renderSection(SEED, onChange);
+    await openPanel(user);
+
+    const switchEl = within(rowFor("reflection") as HTMLElement).getByRole(
+      "switch",
+    );
+    await user.click(switchEl);
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.reflection).toEqual({});
+
+    rerender(<ModelRoutingSection formData={last} onChange={onChange} />);
+    expect(rowFor("reflection.budget")).toBeInTheDocument();
+    expect(rowFor("reflection.deadline_s")).toBeInTheDocument();
+  });
+
+  it("editing the reflection budget to 5 writes reflection.budget = 5", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection(REFLECTION_ON_SEED, onChange);
+    await openPanel(user);
+
+    const input = within(
+      rowFor("reflection.budget") as HTMLElement,
+    ).getByRole("spinbutton");
+    await user.clear(input);
+    await user.type(input, "5");
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.reflection?.budget).toBe(5);
+  });
+
+  it("turning the reflection switch off deletes spec.reflection and hides the tuning FieldRows", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { rerender } = renderSection(REFLECTION_ON_SEED, onChange);
+    await openPanel(user);
+    expect(rowFor("reflection.budget")).toBeInTheDocument();
+
+    const switchEl = within(rowFor("reflection") as HTMLElement).getByRole(
+      "switch",
+    );
+    await user.click(switchEl);
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.reflection).toBeUndefined();
+
+    rerender(<ModelRoutingSection formData={last} onChange={onChange} />);
+    expect(rowFor("reflection.budget")).not.toBeInTheDocument();
+    expect(rowFor("reflection.deadline_s")).not.toBeInTheDocument();
+  });
+
+  it("renders the closing YAML-guidance note", () => {
+    renderSection();
+    expect(screen.getByTestId("model-yaml-note")).toHaveTextContent(
+      "routing.rules",
+    );
+    expect(screen.getByTestId("model-yaml-note")).toHaveTextContent(
+      "api_key_ref is deprecated",
+    );
+  });
+});
