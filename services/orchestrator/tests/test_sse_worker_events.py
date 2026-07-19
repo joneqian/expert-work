@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -14,6 +14,29 @@ from expert_work.runtime.runs.event_store import InMemoryRunEventStore
 from expert_work.runtime.stream_bridge import InMemoryStreamBridge
 from orchestrator.sse import run_agent
 from orchestrator.tools._worker_events import WORKER_EVENT_SINK_KEY
+
+
+class _YieldingBridge(InMemoryStreamBridge):
+    """Test-only bridge that yields to the event loop before publishing.
+
+    ``InMemoryStreamBridge.publish`` never actually suspends (no real I/O),
+    so concurrent ``sink()`` calls under ``asyncio.gather`` never interleave
+    — the vacuous-test bug this class exists to fix. Forcing a genuine
+    ``await`` here makes concurrent ``_publish_worker`` invocations actually
+    interleave at their own internal await point, so a regression that
+    splits the ``seq`` read from its write-back across that await (a
+    classic TOCTOU: read ``event_seq``, await, then commit the increment)
+    manifests as a duplicate-seq collision the in-memory event store
+    raises on. A merely *late but still atomic* allocation (both the read
+    and the increment happening back-to-back after the await, with no
+    await between them) is not racy under single-threaded cooperative
+    asyncio — the danger is specifically a split read/write, matching
+    ``_publish_worker``'s own guarding comment in ``sse.py``.
+    """
+
+    async def publish(self, run_id: UUID, event: str, data: Any) -> None:
+        await asyncio.sleep(0)  # 让出事件循环 — 强制并发 sink 交错
+        await super().publish(run_id, event, data)
 
 
 async def _new_record(rm: RunManager) -> RunRecord:
@@ -71,7 +94,7 @@ async def test_worker_frames_published_and_persisted_with_monotonic_seq() -> Non
 
 @pytest.mark.asyncio
 async def test_concurrent_worker_frames_do_not_collide_on_seq() -> None:
-    bridge = InMemoryStreamBridge()
+    bridge = _YieldingBridge()  # 强制真交错,否则并发 sink 永不 interleave
     rm = RunManager()
     record = await _new_record(rm)
     store = InMemoryRunEventStore()  # append 对重复 (run_id, seq) 直接 raise
