@@ -46,6 +46,9 @@ export function ModelSelect({
       name: undefined,
       supports_vision: false,
       thinking_enabled: undefined,
+      effort: undefined,
+      adaptive_thinking: undefined,
+      cache_enabled: undefined,
     });
   }
   function onModel(name: string): void {
@@ -60,6 +63,10 @@ export function ModelSelect({
       // Thinking-Toggle — seed the switch from the model's real default; a
       // model with no thinking knob clears the field (manifest stays clean).
       thinking_enabled: entry?.thinking ? (entry.thinking_default ?? false) : undefined,
+      // effort only makes sense for a thinking model — scrub it on downgrade
+      // to a non-thinking model (agent_factory rejects effort with no
+      // thinking knob); survives thinking→thinking switches.
+      effort: entry?.thinking ? value.effort : undefined,
     });
   }
 

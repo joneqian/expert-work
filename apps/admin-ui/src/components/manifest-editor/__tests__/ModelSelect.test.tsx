@@ -41,6 +41,15 @@ const CATALOG: ModelCatalog = {
           thinking: "toggle",
           thinking_default: true,
         },
+        {
+          name: "claude-4.6-haiku",
+          vision: false,
+          embeddings: false,
+          context_window: 200000,
+          deprecated: false,
+          thinking: "toggle",
+          thinking_default: true,
+        },
       ],
     },
     {
@@ -288,6 +297,71 @@ describe("ModelSelect", () => {
       expect.objectContaining({
         name: "text-embedding-3-large",
         thinking_enabled: undefined,
+      }),
+    );
+  });
+
+  it("selecting a no-thinking model clears effort (was set on a thinking model)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "openai", name: "gpt-5.5", effort: "high" },
+      onChange,
+    );
+    const nameSel = within(screen.getByTestId("model-select-name")).getByRole(
+      "combobox",
+    );
+    await pickOption(user, nameSel, "text-embedding-3-large");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "text-embedding-3-large",
+        effort: undefined,
+      }),
+    );
+  });
+
+  it("selecting another thinking model preserves effort", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "anthropic", name: "claude-4.6-sonnet", effort: "high" },
+      onChange,
+    );
+    const nameSel = within(screen.getByTestId("model-select-name")).getByRole(
+      "combobox",
+    );
+    await pickOption(user, nameSel, "claude-4.6-haiku");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "claude-4.6-haiku",
+        effort: "high",
+      }),
+    );
+  });
+
+  it("switching provider clears effort, adaptive_thinking, cache_enabled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      {
+        provider: "anthropic",
+        name: "claude-4.6-sonnet",
+        effort: "high",
+        adaptive_thinking: true,
+        cache_enabled: false,
+      },
+      onChange,
+    );
+    const provider = within(
+      screen.getByTestId("model-select-provider"),
+    ).getByRole("combobox");
+    await pickOption(user, provider, "openai");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        effort: undefined,
+        adaptive_thinking: undefined,
+        cache_enabled: undefined,
       }),
     );
   });
