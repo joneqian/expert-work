@@ -81,6 +81,12 @@ export interface AgentManifest {
       variables?: PromptVariableFields[];
       [k: string]: unknown;
     };
+    // DynamicContextSpec — build-time context injected alongside the system
+    // prompt. Only ``inject_current_date`` is form-curated; ``inject_memory``
+    // (reserved, not read at runtime — see ``MemorySection``) and
+    // ``custom_reminders`` (a structured list, YAML-only) survive as unknown
+    // keys.
+    dynamic_context?: { inject_current_date?: boolean; [k: string]: unknown };
     memory?: { long_term?: LongTermFields | null; [k: string]: unknown } | null;
     // Stream J.11 — reflect-node config. PRESENCE is the on/off switch: `{}`
     // = on with defaults (budget 2 / deadline_s 30), absent OR explicit
@@ -422,6 +428,30 @@ export function setPromptVariables(
   }
   return patchSpec(m, { system_prompt: { ...sp, variables: rows } });
 }
+
+// ---- dynamic context — inject_current_date (DynamicContextSpec) ----
+// Whether the build writes today's date into the system prompt
+// (agent_factory reads ``dynamic_context.inject_current_date`` — a
+// day-granular, cache-stable injection). Like ``policies
+// .memory_consolidation`` / ``spec.cache``, ``spec.dynamic_context`` has a
+// backend ``default_factory`` (an absent block ⇒ every field at its Pydantic
+// default, ``inject_current_date: True`` among them), so it follows the
+// standard optional-block ``mergeBlock`` idiom: ``true`` (the default) drops
+// the key entirely (js-yaml omits ``undefined``), ``false`` writes it.
+// ``custom_reminders`` and any other unknown key already in the block
+// survive untouched. Reader is RAW — no default substitution (the FormView
+// widget supplies the effective default, true).
+export const readInjectCurrentDate = (m: unknown): boolean | undefined =>
+  specOf(m).dynamic_context?.inject_current_date;
+
+export function setInjectCurrentDate(m: unknown, v: boolean): AgentManifest {
+  const merged = mergeBlock(
+    specOf(m).dynamic_context as Record<string, unknown> | undefined,
+    { inject_current_date: v === true ? undefined : v },
+  );
+  return patchSpec(m, { dynamic_context: merged });
+}
+
 export function setMemoryOn(m: unknown, on: boolean): AgentManifest {
   const memory = specOf(m).memory ?? {};
   if (!on) return patchSpec(m, { memory: { ...memory, long_term: null } });

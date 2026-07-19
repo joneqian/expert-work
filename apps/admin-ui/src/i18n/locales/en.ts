@@ -1003,6 +1003,9 @@ export interface TranslationKeys {
     section_output_schema_help: string;
     output_schema_on_hint: string;
     output_schema_off_hint: string;
+    inject_date_label: string;
+    inject_date_hint: string;
+    dynamic_context_note: string;
   };
   playground: {
     session_label: string;
@@ -3850,6 +3853,11 @@ const en: TranslationKeys = {
       "Enforced - final replies must validate against the '{{name}}' schema (spec.output_schema, editable in the YAML view).",
     output_schema_off_hint:
       "Not configured - final replies are free text. Add spec.output_schema in the YAML view to require a machine-readable JSON reply.",
+    inject_date_label: "Inject current date",
+    inject_date_hint:
+      "Writes today's date into the system prompt at build time (on by default, cache-stable per calendar day). When off, the agent doesn't know today's date - only suitable for agents whose behavior doesn't depend on the date.",
+    dynamic_context_note:
+      "Custom reminders (dynamic_context.custom_reminders) are a structured list - edit them in the YAML view.",
   },
   playground: {
     session_label: "Session",

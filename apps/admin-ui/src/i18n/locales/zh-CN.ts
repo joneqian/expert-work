@@ -1072,6 +1072,11 @@ const zhCN: TranslationKeys = {
       "已启用——最终回复必须符合「{{name}}」schema(spec.output_schema,可在 YAML 视图编辑)。",
     output_schema_off_hint:
       "未配置——最终回复为自由文本。到 YAML 视图添加 spec.output_schema 可要求机器可读的 JSON 回复。",
+    inject_date_label: "注入当前日期",
+    inject_date_hint:
+      "构建时把当天日期写进系统提示词(默认开,按日缓存稳定)。关闭后 Agent 不知道今天几号——仅适合与日期无关的 Agent。",
+    dynamic_context_note:
+      "自定义提醒(dynamic_context.custom_reminders)为结构化列表,请在 YAML 视图编辑。",
   },
   playground: {
     session_label: "会话",
