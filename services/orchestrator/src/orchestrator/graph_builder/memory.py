@@ -407,6 +407,36 @@ async def _verify_memories(
     return survivors
 
 
+# Stream P5a (Task 7) — retrieval query rewrite.
+_REWRITE_SYSTEM = (
+    "You rewrite the user's latest message into a concise standalone search "
+    "query for retrieving relevant past memories. Strip any instructions or "
+    "commands — keep only what identifies the information need (entities, "
+    "topic, preference). Respond with ONLY the query text, no prose."
+)
+
+
+async def _rewrite_query(*, llm_caller: LLMCaller, task: str, token: CancellationToken) -> str:
+    """P5a — rewrite the task into a retrieval query (best-effort, fail-open).
+
+    Any error / empty reply returns the original ``task`` unchanged so recall
+    never breaks on a rewrite failure. Cancellation propagates."""
+    prompt = [
+        SystemMessage(content=_REWRITE_SYSTEM),
+        HumanMessage(content=task),
+    ]
+    try:
+        with expert_work_span(ExpertWorkComponent.MEMORY, "query_rewrite"):
+            response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
+    except RunCancelledError:
+        raise
+    except Exception:
+        logger.warning("memory.query_rewrite_failed — using original task", exc_info=True)
+        return task
+    rewritten = _message_text(response).strip()
+    return rewritten or task
+
+
 def make_memory_recall_node(
     *,
     memory_store: MemoryStore,
@@ -417,6 +447,8 @@ def make_memory_recall_node(
     agent_name: str | None = None,
     verifier: LLMCaller | None = None,
     verify_reads: bool = False,
+    rewrite_query: bool = False,
+    rewriter: LLMCaller | None = None,
 ) -> MemoryNode:
     """Build the ``memory_recall`` node bound to the store + embedder.
 
@@ -428,7 +460,8 @@ def make_memory_recall_node(
     pre-Sprint-#6 pure-pgvector path. No store wired → default hybrid
     (so test fixtures that omit the store still get the improved recall).
 
-    Stream CM-4/CM-6 — the recall pipeline: wide recall
+    Stream CM-4/CM-6 — the recall pipeline: optional query rewrite (Stream
+    P5a, when ``rewrite_query`` + ``rewriter``) → wide recall
     (``max(top_k, _MEMORY_RECALL_WIDE_LIMIT)``, always — Mini-ADR CM-G5)
     → cross-encoder rerank when ``reranker`` is wired (full reorder, no
     cut, so the diversity stage still sees the whole pool) → MMR selects
@@ -440,6 +473,13 @@ def make_memory_recall_node(
     (via ``verifier``) that drops candidates judged irrelevant / stale for the
     current request before injection. Fail-open: a verifier error keeps all
     candidates so recall never empties on a transient failure.
+
+    Stream P5a (Task 7) — ``rewrite_query`` adds one LLM call (via
+    ``rewriter``) that rewrites the task into a concise standalone search
+    query before embedding — guards against long or instruction-laden
+    messages polluting the retrieval vector / hybrid full-text query.
+    Fail-open: a rewrite error or empty reply keeps the original task, so
+    disabled (or unwired) leaves ``search_text is task`` unchanged.
     """
 
     async def memory_recall_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -458,12 +498,22 @@ def make_memory_recall_node(
         )
         recall_limit = max(top_k, _MEMORY_RECALL_WIDE_LIMIT)
         try:
-            vectors = await token.run_cancellable(embedder.embed([task], tenant_id=tenant_id))
+            # Stream P5a (Task 7) — rewrite into a retrieval query before
+            # embedding, stripping instructions / trimming long messages so
+            # they don't pollute the vector. Best-effort inside
+            # ``_rewrite_query`` itself; disabled (or no ``rewriter`` wired)
+            # keeps ``search_text is task`` — behaviour unchanged.
+            search_text = task
+            if rewrite_query and rewriter is not None:
+                search_text = await _rewrite_query(llm_caller=rewriter, task=task, token=token)
+            vectors = await token.run_cancellable(
+                embedder.embed([search_text], tenant_id=tenant_id)
+            )
             memories = await memory_store.retrieve(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 query_embedding=vectors[0],
-                query_text=task if mode == "hybrid" else None,
+                query_text=search_text if mode == "hybrid" else None,
                 # Stream Agent-Templates (M1-5c) — scope episodic recall to this
                 # agent; shared facts (agent_name NULL) are always included.
                 agent_name=agent_name,
