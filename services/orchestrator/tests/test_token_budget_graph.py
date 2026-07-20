@@ -425,8 +425,8 @@ async def test_sink_failure_does_not_break_run() -> None:
 def test_build_tool_context_reads_token_budget_and_guard_sink() -> None:
     budget = TokenBudget(limit=100)
 
-    async def _sink_fn(frame: dict[str, Any]) -> None:
-        del frame
+    async def _sink_fn(_frame: dict[str, Any]) -> None:
+        return None
 
     config: RunnableConfig = {"configurable": {TOKEN_BUDGET_KEY: budget, GUARD_SINK_KEY: _sink_fn}}
     ctx = _build_tool_context(config)
@@ -444,8 +444,8 @@ def test_build_tool_context_defaults_none_when_absent() -> None:
 def test_child_config_forwards_same_token_budget_and_guard_sink() -> None:
     budget = TokenBudget(limit=100)
 
-    async def _sink_fn(frame: dict[str, Any]) -> None:
-        del frame
+    async def _sink_fn(_frame: dict[str, Any]) -> None:
+        return None
 
     ctx = ToolContext(tenant_id=uuid4(), token_budget=budget, guard_sink=_sink_fn)
 
