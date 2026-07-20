@@ -100,6 +100,13 @@ _memory_verify_total = expert_work_counter(
     label_names=("outcome",),  # verified | degraded
 )
 
+# Stream P5a (Task 8) — recall abstention threshold gate.
+_memory_abstain_total = expert_work_counter(
+    "expert_work_memory_abstain_total",
+    "Recalls that returned empty because the top candidate's similarity fell "
+    "below the abstention threshold (P5a).",
+)
+
 # Stream CM-7 — Mem0-style reconciliation of run-end memory writes.
 _memory_reconcile_total = expert_work_counter(
     "expert_work_cm_memory_reconcile_total",
@@ -368,6 +375,11 @@ def record_memory_verify(*, outcome: str) -> None:
     enabled and there were candidates to check.
     """
     _memory_verify_total.labels(outcome=outcome).inc()
+
+
+def record_memory_abstain() -> None:
+    """Bump ``expert_work_memory_abstain_total`` (P5a abstention gate)."""
+    _memory_abstain_total.inc()
 
 
 def record_memory_reconcile(*, op: str) -> None:

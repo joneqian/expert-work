@@ -36,6 +36,7 @@ from expert_work.common.observability import ExpertWorkComponent, expert_work_sp
 from expert_work.common.search import mmr_select
 from expert_work.common.threat_patterns import scan_for_threats
 from expert_work.common.uplift_metrics import (
+    record_memory_abstain,
     record_memory_drift,
     record_memory_mmr,
     record_memory_reconcile,
@@ -449,6 +450,7 @@ def make_memory_recall_node(
     verify_reads: bool = False,
     rewrite_query: bool = False,
     rewriter: LLMCaller | None = None,
+    abstain_threshold: float = 0.0,
 ) -> MemoryNode:
     """Build the ``memory_recall`` node bound to the store + embedder.
 
@@ -480,6 +482,12 @@ def make_memory_recall_node(
     messages polluting the retrieval vector / hybrid full-text query.
     Fail-open: a rewrite error or empty reply keeps the original task, so
     disabled (or unwired) leaves ``search_text is task`` unchanged.
+
+    Stream P5a (Task 8) — ``abstain_threshold`` gates recall on the best
+    candidate's cosine similarity right after ``retrieve()``, before rerank /
+    MMR / verify: below the threshold, the node bumps ``record_memory_abstain``
+    and returns no memories rather than injecting a weak match. Default
+    ``0.0`` never abstains (observe-only until a tenant opts in).
     """
 
     async def memory_recall_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -519,6 +527,21 @@ def make_memory_recall_node(
                 agent_name=agent_name,
                 limit=recall_limit,
             )
+            # Stream P5a (Task 8) — abstention threshold gate, placed right
+            # after retrieve() and before rerank/MMR/verify so an irrelevant
+            # recall skips their cost entirely. ``_reconcile_cosine`` already
+            # returns a similarity in [-1, 1] (not a distance) — higher is
+            # more relevant. Gated on ``abstain_threshold > 0.0`` so the
+            # default (0.0) never abstains.
+            if memories and abstain_threshold > 0.0:
+                top_sim = max(
+                    (_reconcile_cosine(vectors[0], m.embedding) for m in memories),
+                    default=0.0,
+                )
+                if top_sim < abstain_threshold:
+                    record_memory_abstain()
+                    logger.info("memory.abstain top_sim=%.3f < %.3f", top_sim, abstain_threshold)
+                    return {}
             if reranker is not None and memories:
                 # Full reorder (top_k = pool size) — the MMR stage below
                 # makes the final cut, so diversity can still swap in
