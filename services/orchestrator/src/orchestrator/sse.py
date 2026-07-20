@@ -390,9 +390,7 @@ async def run_agent(
         seq = event_seq
         event_seq += 1
         await bridge.publish(run_id, "worker", frame)
-        await _persist_event(
-            event_store, run_id=run_id, seq=seq, event_name="worker", data=frame
-        )
+        await _persist_event(event_store, run_id=run_id, seq=seq, event_name="worker", data=frame)
 
     # ``configurable`` was populated in the effective_config literal above.
     effective_config["configurable"][COMPACTION_SINK_KEY] = _publish_compaction

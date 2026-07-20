@@ -41,7 +41,9 @@ class _YieldingBridge(InMemoryStreamBridge):
 
 async def _new_record(rm: RunManager) -> RunRecord:
     return await rm.create(
-        run_id=uuid4(), thread_id=uuid4(), tenant_id=uuid4(),
+        run_id=uuid4(),
+        thread_id=uuid4(),
+        tenant_id=uuid4(),
         on_disconnect=DisconnectMode.CANCEL,
     )
 
@@ -78,8 +80,11 @@ async def test_worker_frames_published_and_persisted_with_monotonic_seq() -> Non
     ]
 
     await run_agent(
-        bridge=bridge, run_manager=rm, record=record,
-        graph=_WorkerGraph(frames), graph_input={},
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_WorkerGraph(frames),
+        graph_input={},
         config={"configurable": {"thread_id": str(record.thread_id)}},
         event_store=store,
     )
@@ -102,8 +107,11 @@ async def test_concurrent_worker_frames_do_not_collide_on_seq() -> None:
     frames = [{"worker_id": w, "kind": k, "wseq": i} for i, (w, k) in enumerate(pairs)]
 
     await run_agent(
-        bridge=bridge, run_manager=rm, record=record,
-        graph=_WorkerGraph(frames, concurrent=True), graph_input={},
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_WorkerGraph(frames, concurrent=True),
+        graph_input={},
         config={"configurable": {"thread_id": str(record.thread_id)}},
         event_store=store,
     )

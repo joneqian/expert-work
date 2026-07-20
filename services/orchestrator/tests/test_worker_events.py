@@ -27,9 +27,7 @@ _IDENT = WorkerIdentity(
 
 
 def test_start_frame_envelope_and_task_excerpt() -> None:
-    frame = build_worker_start_frame(
-        _IDENT, wseq=0, task="t" * 600, role="research", max_steps=32
-    )
+    frame = build_worker_start_frame(_IDENT, wseq=0, task="t" * 600, role="research", max_steps=32)
     assert frame["worker_id"] == "w-1"
     assert frame["parent_worker_id"] is None
     assert frame["parent_tool_call_id"] == "call-1"
@@ -63,9 +61,7 @@ def test_update_frame_summarizes_ai_and_tool_messages() -> None:
         ],
         "plan": {"goal": "dropped"},
     }
-    frame = build_worker_update_frame(
-        _IDENT, wseq=1, node="agent", writes=writes, duration_ms=42
-    )
+    frame = build_worker_update_frame(_IDENT, wseq=1, node="agent", writes=writes, duration_ms=42)
     data = frame["data"]
     assert frame["kind"] == "update"
     assert data["node"] == "agent"
