@@ -62,6 +62,7 @@ import { listTenants, type TenantSummary } from "../api/tenants";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { PlatformBillingSection } from "./settings_platform/PlatformBillingSection";
+import { PlatformDynamicWorkerSection } from "./settings_platform/PlatformDynamicWorkerSection";
 import { PlatformEmbeddingSection } from "./settings_platform/PlatformEmbeddingSection";
 import { PlatformJudgeSection } from "./settings_platform/PlatformJudgeSection";
 import { PlatformQualitySection } from "./settings_platform/PlatformQualitySection";
@@ -742,6 +743,12 @@ export function SettingsPlatformConfig() {
                       title={t("settings_platform.tool_budget_heading")}
                     >
                       <PlatformToolBudgetSection />
+                    </Card>
+                    <Card
+                      size="small"
+                      title={t("settings_platform.dynamic_worker_heading")}
+                    >
+                      <PlatformDynamicWorkerSection />
                     </Card>
                   </Space>
                 ),

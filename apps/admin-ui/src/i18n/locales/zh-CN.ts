@@ -1936,6 +1936,19 @@ const zhCN: TranslationKeys = {
     tool_budget_toggle_label: "平台工具结果预算",
     tool_budget_saved: "工具结果预算设置已保存。",
     tool_budget_save_failed: "保存工具结果预算设置失败",
+    dynamic_worker_heading: "动态 worker 护栏",
+    dynamic_worker_help_title: "什么是动态 worker 护栏?",
+    dynamic_worker_help_body:
+      "spawn_worker 工具的限额:单次运行可同时创建的临时子 Agent worker 数量上限、单次运行累计可创建的数量上限,以及每个 worker 可执行的步数上限。未配置时使用进程的环境变量默认值。",
+    dynamic_worker_max_concurrent_label: "单 run 并发上限",
+    dynamic_worker_max_per_run_label: "单 run 累计生成上限",
+    dynamic_worker_max_iterations_label: "单 worker 步数上限",
+    dynamic_worker_env_default: "环境默认",
+    dynamic_worker_hint:
+      "改后对下一次运行/构建生效,无需重启;未配置时使用环境变量默认值。",
+    dynamic_worker_save: "保存",
+    dynamic_worker_saved: "动态 worker 护栏已保存。",
+    dynamic_worker_save_failed: "保存动态 worker 护栏失败",
     quality_heading: "质量监控",
     quality_help_title: "什么是质量监控？",
     quality_help_body:
