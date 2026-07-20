@@ -8,7 +8,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from expert_work.common.search.decay import temporal_decay_factor
+from expert_work.common.search.decay import (
+    frequency_boost,
+    importance_weight,
+    temporal_decay_factor,
+)
 from expert_work.common.search.rrf import rrf_fuse_scored
 from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
 from expert_work.persistence.knowledge.text_search import tokenize_for_search
@@ -152,7 +156,16 @@ class InMemoryMemoryStore(MemoryStore):
                 [vector_hits[:_HYBRID_RECALL_LIMIT], keyword_hits[:_HYBRID_RECALL_LIMIT]]
             )
             weighted = sorted(
-                ((row, score * _decay_for(row, now=now)) for row, score in scored),
+                (
+                    (
+                        row,
+                        score
+                        * _decay_for(row, now=now)
+                        * frequency_boost(row.access_count)
+                        * importance_weight(row.importance),
+                    )
+                    for row, score in scored
+                ),
                 key=lambda pair: pair[1],
                 reverse=True,
             )
@@ -164,6 +177,8 @@ class InMemoryMemoryStore(MemoryStore):
             key=lambda row: (
                 (1.0 - _cosine_distance(query_embedding, row.embedding) / 2.0)
                 * _decay_for(row, now=now)
+                * frequency_boost(row.access_count)
+                * importance_weight(row.importance)
             ),
             reverse=True,
         )
@@ -257,6 +272,18 @@ class InMemoryMemoryStore(MemoryStore):
                 self._rows[idx] = row.model_copy(update={"deleted_at": datetime.now(UTC)})
                 return True
         return False
+
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        if not ids:
+            return
+        now = datetime.now(UTC)
+        id_set = set(ids)
+        self._rows = [
+            row.model_copy(update={"last_used_at": now, "access_count": row.access_count + 1})
+            if (row.tenant_id == tenant_id and row.user_id == user_id and row.id in id_set)
+            else row
+            for row in self._rows
+        ]
 
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
@@ -389,11 +416,9 @@ class InMemoryMemoryStore(MemoryStore):
                 and row.created_at < cutoff
             ):
                 continue
-            # never retrieved: last_used_at ≤ created_at + 1 minute
-            if row.last_used_at is None:
-                candidates.append(row)
-                continue
-            if row.last_used_at <= row.created_at + timedelta(minutes=1):
+            # never retrieved: access_count == 0 (P5a T6 — exact, replaces
+            # the old last_used_at <= created_at + 1 minute approximation)
+            if row.access_count == 0:
                 candidates.append(row)
         candidates.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC))
         return candidates[:limit]

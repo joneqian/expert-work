@@ -8,11 +8,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, and_, func, or_, select, text, update
+from sqlalchemy import ColumnElement, and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from expert_work.common.search.decay import temporal_decay_factor
+from expert_work.common.search.decay import (
+    frequency_boost,
+    importance_weight,
+    temporal_decay_factor,
+)
 from expert_work.common.search.rrf import rrf_fuse_scored
 from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
 from expert_work.persistence.knowledge.text_search import tokenize_for_search
@@ -70,6 +74,7 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
         source_thread_id=row.source_thread_id,
         created_at=row.created_at,
         last_used_at=row.last_used_at,
+        access_count=row.access_count,
         deleted_at=row.deleted_at,
         # Capability Uplift Sprint #7 (Mini-ADR U-33) — lifecycle fields.
         status=row.status,  # type: ignore[arg-type]
@@ -229,6 +234,8 @@ class SqlMemoryStore(MemoryStore):
             key=lambda row: (
                 (1.0 - _cosine_distance_value(query_embedding, row.embedding) / 2.0)
                 * _decay_for(row.last_used_at, row.created_at, now=now)
+                * frequency_boost(row.access_count)
+                * importance_weight(row.importance)
             ),
             reverse=True,
         )
@@ -297,7 +304,13 @@ class SqlMemoryStore(MemoryStore):
         now = datetime.now(UTC)
         weighted = sorted(
             (
-                (mid, score * _decay_for(by_id[mid].last_used_at, by_id[mid].created_at, now=now))
+                (
+                    mid,
+                    score
+                    * _decay_for(by_id[mid].last_used_at, by_id[mid].created_at, now=now)
+                    * frequency_boost(by_id[mid].access_count)
+                    * importance_weight(by_id[mid].importance),
+                )
                 for mid, score in scored
             ),
             key=lambda pair: pair[1],
@@ -420,6 +433,23 @@ class SqlMemoryStore(MemoryStore):
                 )
             ).first()
         return exists is not None
+
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        if not ids:
+            return
+        now = datetime.now(UTC)
+        stmt = (
+            update(MemoryItemRow)
+            .where(
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.id.in_(list(ids)),
+            )
+            .values(last_used_at=now, access_count=MemoryItemRow.access_count + 1)
+        )
+        async with self._sf() as session:
+            await session.execute(stmt)
+            await session.commit()
 
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
@@ -588,13 +618,13 @@ class SqlMemoryStore(MemoryStore):
         limit: int,
     ) -> list[MemoryItem]:
         cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
-        # "Never retrieved" approximated by
-        # ``last_used_at <= created_at + 1 minute`` — writeback bump
-        # can be ~ms after insert, the minute slack soaks up clock skew
-        # without admitting "actually used" rows (Mini-ADR U-37).
-        never_used = MemoryItemRow.last_used_at <= (
-            MemoryItemRow.created_at + text("INTERVAL '1 minute'")
-        )
+        # "Never retrieved" — exact via access_count (P5a T6; supersedes the
+        # old ``last_used_at <= created_at + 1 minute`` approximation from
+        # Mini-ADR U-37, which was vacuously true before access_count
+        # existed and could misread an early-but-real hit as "never used").
+        # access_count is bumped in lockstep with last_used_at on every
+        # recall hit, so == 0 means retrieve() has never returned this row.
+        never_used = MemoryItemRow.access_count == 0
         stmt = (
             select(MemoryItemRow)
             .where(

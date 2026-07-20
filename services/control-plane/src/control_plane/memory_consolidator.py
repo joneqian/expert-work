@@ -9,8 +9,8 @@ into ``consolidated`` summaries via a two-pass periodic sweep:
   anti-mislearn rules in a single three-in-one prompt (Mini-ADR U-35).
 
 * **SUB-PASS 2 (lone-item noise purge)** — sweeps aged transient items
-  that have never been retrieved (``last_used_at <= created_at + 1 min``)
-  and have never been reviewed (``last_reviewed_at IS NULL``); a single
+  that have never been retrieved (``access_count == 0``) and have
+  never been reviewed (``last_reviewed_at IS NULL``); a single
   LLM call classifies each as ``durable`` or one of the noise
   categories; noise rows are soft-deleted, durable rows are stamped
   ``last_reviewed_at`` to skip re-review (Mini-ADR U-37).

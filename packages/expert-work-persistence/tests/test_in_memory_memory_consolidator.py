@@ -40,6 +40,7 @@ def _item(
     last_reviewed_at: object = None,
     created_at: datetime | None = None,
     last_used_at: datetime | None = None,
+    access_count: int = 0,
 ) -> MemoryItem:
     created = created_at or _NOW
     return MemoryItem(
@@ -55,6 +56,7 @@ def _item(
         status=status,  # type: ignore[arg-type]
         consolidated_into=consolidated_into,  # type: ignore[arg-type]
         last_reviewed_at=last_reviewed_at,  # type: ignore[arg-type]
+        access_count=access_count,
     )
 
 
@@ -172,6 +174,7 @@ async def test_list_purge_candidates_respects_three_guards() -> None:
         content="used",
         created_at=_NOW - timedelta(days=60),
         last_used_at=_NOW - timedelta(days=5),
+        access_count=1,
     )
     reviewed = _item(
         tenant=t,
@@ -190,6 +193,32 @@ async def test_list_purge_candidates_respects_three_guards() -> None:
     result = await store.list_purge_candidates(tenant_id=t, user_id=u, min_age_days=30, limit=10)
     contents = [r.content for r in result]
     assert contents == ["eligible"]
+
+
+@pytest.mark.asyncio
+async def test_list_purge_candidates_never_used_guard_uses_access_count() -> None:
+    """P5a Task 6 — the never-used guard must be exact (``access_count ==
+    0``), not the old ``last_used_at <= created_at + 1 minute``
+    approximation. A row hit a few times right after creation and never
+    touched again still has ``access_count > 0``: the old heuristic would
+    misread its stale-but-early ``last_used_at`` as "never used" and
+    wrongly admit it to the purge pool (this is the bug being fixed —
+    high-frequency-but-early-hit memories used to leak into purge
+    candidates)."""
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    created = _NOW - timedelta(days=60)
+    accessed_early = _item(
+        tenant=t,
+        user=u,
+        content="accessed_early",
+        created_at=created,
+        last_used_at=created + timedelta(seconds=30),
+        access_count=3,
+    )
+    store._rows.append(accessed_early)
+    result = await store.list_purge_candidates(tenant_id=t, user_id=u, min_age_days=30, limit=10)
+    assert result == []
 
 
 @pytest.mark.asyncio

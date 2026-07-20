@@ -36,6 +36,7 @@ from expert_work.common.observability import ExpertWorkComponent, expert_work_sp
 from expert_work.common.search import mmr_select
 from expert_work.common.threat_patterns import scan_for_threats
 from expert_work.common.uplift_metrics import (
+    record_memory_abstain,
     record_memory_drift,
     record_memory_mmr,
     record_memory_reconcile,
@@ -407,6 +408,36 @@ async def _verify_memories(
     return survivors
 
 
+# Stream P5a (Task 7) — retrieval query rewrite.
+_REWRITE_SYSTEM = (
+    "You rewrite the user's latest message into a concise standalone search "
+    "query for retrieving relevant past memories. Strip any instructions or "
+    "commands — keep only what identifies the information need (entities, "
+    "topic, preference). Respond with ONLY the query text, no prose."
+)
+
+
+async def _rewrite_query(*, llm_caller: LLMCaller, task: str, token: CancellationToken) -> str:
+    """P5a — rewrite the task into a retrieval query (best-effort, fail-open).
+
+    Any error / empty reply returns the original ``task`` unchanged so recall
+    never breaks on a rewrite failure. Cancellation propagates."""
+    prompt = [
+        SystemMessage(content=_REWRITE_SYSTEM),
+        HumanMessage(content=task),
+    ]
+    try:
+        with expert_work_span(ExpertWorkComponent.MEMORY, "query_rewrite"):
+            response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
+    except RunCancelledError:
+        raise
+    except Exception:
+        logger.warning("memory.query_rewrite_failed — using original task", exc_info=True)
+        return task
+    rewritten = _message_text(response).strip()
+    return rewritten or task
+
+
 def make_memory_recall_node(
     *,
     memory_store: MemoryStore,
@@ -417,6 +448,9 @@ def make_memory_recall_node(
     agent_name: str | None = None,
     verifier: LLMCaller | None = None,
     verify_reads: bool = False,
+    rewrite_query: bool = False,
+    rewriter: LLMCaller | None = None,
+    abstain_threshold: float = 0.0,
 ) -> MemoryNode:
     """Build the ``memory_recall`` node bound to the store + embedder.
 
@@ -428,7 +462,8 @@ def make_memory_recall_node(
     pre-Sprint-#6 pure-pgvector path. No store wired → default hybrid
     (so test fixtures that omit the store still get the improved recall).
 
-    Stream CM-4/CM-6 — the recall pipeline: wide recall
+    Stream CM-4/CM-6 — the recall pipeline: optional query rewrite (Stream
+    P5a, when ``rewrite_query`` + ``rewriter``) → wide recall
     (``max(top_k, _MEMORY_RECALL_WIDE_LIMIT)``, always — Mini-ADR CM-G5)
     → cross-encoder rerank when ``reranker`` is wired (full reorder, no
     cut, so the diversity stage still sees the whole pool) → MMR selects
@@ -440,6 +475,19 @@ def make_memory_recall_node(
     (via ``verifier``) that drops candidates judged irrelevant / stale for the
     current request before injection. Fail-open: a verifier error keeps all
     candidates so recall never empties on a transient failure.
+
+    Stream P5a (Task 7) — ``rewrite_query`` adds one LLM call (via
+    ``rewriter``) that rewrites the task into a concise standalone search
+    query before embedding — guards against long or instruction-laden
+    messages polluting the retrieval vector / hybrid full-text query.
+    Fail-open: a rewrite error or empty reply keeps the original task, so
+    disabled (or unwired) leaves ``search_text is task`` unchanged.
+
+    Stream P5a (Task 8) — ``abstain_threshold`` gates recall on the best
+    candidate's cosine similarity right after ``retrieve()``, before rerank /
+    MMR / verify: below the threshold, the node bumps ``record_memory_abstain``
+    and returns no memories rather than injecting a weak match. Default
+    ``0.0`` never abstains (observe-only until a tenant opts in).
     """
 
     async def memory_recall_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -458,17 +506,42 @@ def make_memory_recall_node(
         )
         recall_limit = max(top_k, _MEMORY_RECALL_WIDE_LIMIT)
         try:
-            vectors = await token.run_cancellable(embedder.embed([task], tenant_id=tenant_id))
+            # Stream P5a (Task 7) — rewrite into a retrieval query before
+            # embedding, stripping instructions / trimming long messages so
+            # they don't pollute the vector. Best-effort inside
+            # ``_rewrite_query`` itself; disabled (or no ``rewriter`` wired)
+            # keeps ``search_text is task`` — behaviour unchanged.
+            search_text = task
+            if rewrite_query and rewriter is not None:
+                search_text = await _rewrite_query(llm_caller=rewriter, task=task, token=token)
+            vectors = await token.run_cancellable(
+                embedder.embed([search_text], tenant_id=tenant_id)
+            )
             memories = await memory_store.retrieve(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 query_embedding=vectors[0],
-                query_text=task if mode == "hybrid" else None,
+                query_text=search_text if mode == "hybrid" else None,
                 # Stream Agent-Templates (M1-5c) — scope episodic recall to this
                 # agent; shared facts (agent_name NULL) are always included.
                 agent_name=agent_name,
                 limit=recall_limit,
             )
+            # Stream P5a (Task 8) — abstention threshold gate, placed right
+            # after retrieve() and before rerank/MMR/verify so an irrelevant
+            # recall skips their cost entirely. ``_reconcile_cosine`` already
+            # returns a similarity in [-1, 1] (not a distance) — higher is
+            # more relevant. Gated on ``abstain_threshold > 0.0`` so the
+            # default (0.0) never abstains.
+            if memories and abstain_threshold > 0.0:
+                top_sim = max(
+                    (_reconcile_cosine(vectors[0], m.embedding) for m in memories),
+                    default=0.0,
+                )
+                if top_sim < abstain_threshold:
+                    record_memory_abstain()
+                    logger.info("memory.abstain top_sim=%.3f < %.3f", top_sim, abstain_threshold)
+                    return {}
             if reranker is not None and memories:
                 # Full reorder (top_k = pool size) — the MMR stage below
                 # makes the final cut, so diversity can still swap in
@@ -506,6 +579,17 @@ def make_memory_recall_node(
             record_memory_retrieval(mode=mode, result="miss")
             return {}
         record_memory_retrieval(mode=mode, result="hit" if memories else "miss")
+        if memories:
+            try:
+                await memory_store.bump_access(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    ids=[m.id for m in memories],
+                )
+            except RunCancelledError:
+                raise
+            except Exception:
+                logger.warning("memory.bump_access_failed", exc_info=True)
         redacted = [_redact_memory(m) for m in memories]
         logger.info("memory.recall count=%d mode=%s", len(redacted), mode)
         return {"recalled_memories": redacted}

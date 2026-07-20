@@ -149,6 +149,13 @@ class MemoryStore(abc.ABC):
         ``False`` for unknown id / wrong tenant / wrong user."""
 
     @abc.abstractmethod
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        """P5a — mark memories as retrieved: stamp ``last_used_at=now`` and
+        increment ``access_count`` for each id. Best-effort at the call site
+        (recall must not fail on a bump error). Empty ``ids`` is a no-op.
+        Tenant- AND user-scoped as a defensive predicate."""
+
+    @abc.abstractmethod
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         """Phase 3a (purge_user) — soft-delete EVERY live memory for a user.
 
@@ -249,7 +256,7 @@ class MemoryStore(abc.ABC):
     ) -> list[MemoryItem]:
         """Sprint #7 SUB-PASS 2 candidate fetch — return live transient
         items older than ``min_age_days`` that have never been retrieved
-        (``last_used_at <= created_at + 1 minute``) and have never been
+        (``access_count == 0``) and have never been
         reviewed (``last_reviewed_at IS NULL``).
 
         Oldest first, capped at ``limit``. The 3 filters together are

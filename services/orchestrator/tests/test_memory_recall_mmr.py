@@ -41,6 +41,9 @@ class _ListStore:
         self.limits.append(int(kwargs["limit"]))  # type: ignore[call-overload]
         return list(self.items)
 
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        return None
+
 
 @dataclass
 class _ReverseReranker:
