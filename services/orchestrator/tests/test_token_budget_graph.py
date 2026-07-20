@@ -522,9 +522,7 @@ async def test_structured_resend_counts_both_calls() -> None:
             AIMessage(content='{"score": 4}', usage_metadata=_usage(30)),
         ]
     )
-    graph = build_react_graph(
-        llm_caller=llm, tool_registry=registry, output_schema=_STRUCT_SPEC
-    )
+    graph = build_react_graph(llm_caller=llm, tool_registry=registry, output_schema=_STRUCT_SPEC)
     budget = TokenBudget(limit=100_000)
 
     state = await _invoke(
