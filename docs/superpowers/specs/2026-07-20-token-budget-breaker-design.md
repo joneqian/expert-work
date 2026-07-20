@@ -98,7 +98,7 @@ run_agent(sse.py):limit = built.token_budget;limit>0 才建对象
 - 收尾轮自身不再受闸(允许小幅超支——收尾轮的 usage 照常 add,只是不再触发第二次收尾;`budget_exhausted` 现有机制天然如此)。
 - 无 budget(limit=0 / 未注入)= 零行为变化(所有检查点先判 None)。
 - 不加新 state channel、不加新 SSE 事件类型(每步 token 前端已显示;YAGNI)。
-- 留痕:超限收尾时结构化日志 + Prometheus counter `expert_work_token_budget_exhausted_total`(labels: agent);80% 预警首次跨越时日志一条。
+- 留痕:超限收尾时结构化日志 + Prometheus counter `expert_work_token_budget_exhausted_total`(无 label——实现时定,per-agent 细分靠日志);80% 预警首次跨越时日志一条。
 - 边界(声明,不修):辅助调用不进闸(本就无计量);escalated 主循环调用进闸(usage 在 agent_node 手里)。
 
 ### 护栏可见性:guard marker 帧(同 PR)
