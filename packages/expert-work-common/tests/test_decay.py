@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 
 import pytest
 
 from expert_work.common.search import DECAY_FLOOR, temporal_decay_factor
+from expert_work.common.search.decay import frequency_boost, importance_weight
 
 
 def test_zero_age_is_full_weight() -> None:
@@ -46,3 +48,24 @@ def test_monotonically_non_increasing() -> None:
     ages = [timedelta(days=d) for d in (0, 1, 7, 30, 90, 365)]
     factors = [temporal_decay_factor(age=a) for a in ages]
     assert factors == sorted(factors, reverse=True)
+
+
+def test_frequency_boost_zero_is_neutral() -> None:
+    assert frequency_boost(0) == 1.0
+
+
+def test_frequency_boost_monotone_and_capped() -> None:
+    assert frequency_boost(10) == min(1.5, 1 + math.log10(11) * 0.1)
+    assert frequency_boost(9) < frequency_boost(90)
+    assert frequency_boost(10**9) == 1.5  # cap
+
+
+def test_frequency_boost_negative_clamped() -> None:
+    # defensive: a nonsensical negative count must not blow up log10
+    assert frequency_boost(-5) == 1.0
+
+
+def test_importance_weight_neutral_and_range() -> None:
+    assert importance_weight(0.5) == 1.0
+    assert importance_weight(1.0) == 1.2
+    assert importance_weight(0.0) == 0.8

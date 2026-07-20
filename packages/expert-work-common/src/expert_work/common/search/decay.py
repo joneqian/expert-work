@@ -35,4 +35,44 @@ def temporal_decay_factor(*, age: timedelta, half_life: timedelta = DEFAULT_HALF
     return DECAY_FLOOR + (1.0 - DECAY_FLOOR) * math.pow(2.0, -age_ratio)
 
 
-__all__ = ["DECAY_FLOOR", "DEFAULT_HALF_LIFE", "temporal_decay_factor"]
+#: Frequency-reinforcement cap — a heavily-recalled memory tops out at
+#: 1.5x so an old-but-hot fact cannot permanently dominate the window.
+FREQ_BOOST_CAP = 1.5
+#: log-scale reinforcement coefficient (Ebbinghaus-style): ~10 accesses
+#: ≈ 1.1x, ~100 ≈ 1.2x. Deliberately gentle — relevance stays the axis.
+FREQ_BOOST_K = 0.1
+
+
+def frequency_boost(access_count: int) -> float:
+    """Access-reinforcement multiplier in ``[1.0, FREQ_BOOST_CAP]``.
+
+    ``1 + log10(1 + n)·k`` capped at ``FREQ_BOOST_CAP``. ``n <= 0`` returns
+    1.0 (neutral) — a never-recalled memory gets no boost, and a negative
+    count (nonsensical) is clamped rather than fed to ``log10``.
+    """
+    if access_count <= 0:
+        return 1.0
+    return min(FREQ_BOOST_CAP, 1.0 + math.log10(1 + access_count) * FREQ_BOOST_K)
+
+
+#: importance re-weight span — importance 0.5 (neutral) → 1.0x, 1.0 → 1.2x,
+#: 0.0 → 0.8x. A tie-breaker, never enough to lift a weak-relevance memory
+#: over a strong-relevance one.
+IMPORTANCE_WEIGHT_SPAN = 0.4
+
+
+def importance_weight(importance: float) -> float:
+    """Importance re-weight in ``[0.8, 1.2]`` centred on 1.0 at importance 0.5."""
+    return 1.0 + (importance - 0.5) * IMPORTANCE_WEIGHT_SPAN
+
+
+__all__ = [
+    "DECAY_FLOOR",
+    "DEFAULT_HALF_LIFE",
+    "FREQ_BOOST_CAP",
+    "FREQ_BOOST_K",
+    "IMPORTANCE_WEIGHT_SPAN",
+    "frequency_boost",
+    "importance_weight",
+    "temporal_decay_factor",
+]
