@@ -24,6 +24,7 @@
 3. **机制 = 共享 TokenBudget 对象**:每步零成本累计,deadline_at 同款下传,**主 + 静态 subagent + 动态 worker + 孙 worker 共扣一个池**。
 4. **small 搭车 = dynamic_worker 三参数全暴露**:照 platform_tool_budget_config 先例建平台配置节,一次上三参数。
 5. 设置位置:**per-Agent**,配置页运行预算组第 7 旋钮,`policies.token_budget`,0/缺省=关闭。无平台级默认、无调用级覆盖(YAGNI,用户知情后未要求)。
+6. **护栏触发可见性 = guard marker 帧,连老闸一起治**(2026-07-20 追加拍板):现状三闸触发在界面上零标记(收尾轮看着像普通步,INTERRUPTED 不标原因)——token 闸 80% 预警/超限 + max_steps/no_progress 超限统一发 `guard` 事件帧(持久化,回放同源),时间线渲染成醒目 marker 行。
 
 ## 三闸并存语义(钉死)
 
@@ -100,6 +101,30 @@ run_agent(sse.py):limit = built.token_budget;limit>0 才建对象
 - 留痕:超限收尾时结构化日志 + Prometheus counter `expert_work_token_budget_exhausted_total`(labels: agent);80% 预警首次跨越时日志一条。
 - 边界(声明,不修):辅助调用不进闸(本就无计量);escalated 主循环调用进闸(usage 在 agent_node 手里)。
 
+### 护栏可见性:guard marker 帧(同 PR)
+
+新 SSE 事件 `"guard"`(compaction sink 同款:run_agent 定义 `_publish_guard`(publish + `_persist_event`,seq 同步分配防并发——worker 树里的 guard 也走它),`GUARD_SINK_KEY` 注入 configurable,`_child_config` 下传;key 放 tools 层防包环,`WORKER_EVENT_SINK_KEY` 先例)。发射 best-effort(吞异常,不影响 run 本体)。
+
+帧格式:
+
+```json
+{
+  "kind": "warning" | "tripped",
+  "guard": "token_budget" | "max_steps" | "no_progress",
+  "detail": {"spent": 410000, "limit": 500000}      // token_budget
+            | {"steps": 30, "max": 30}               // max_steps
+            | {"streak": 3, "max": 3}                // no_progress
+}
+```
+
+发射点(全在 agent_node,budget_exhausted 判定处一次全治):
+
+- token 80% **首次跨越** → `warning` 一条(不逐步重发);
+- token 超限进收尾 → `tripped`;
+- max_steps / no_progress 超限进收尾 → 各自 `tripped`(治老盲区)。
+
+前端:`parseTimeline` marker 分支加 `"guard"` → `MarkerItem` 新 kind(warning=warn 色 / tripped=danger 色),`StepTimeline` MarkerRow 渲染文案(i18n:如「⛔ token 预算耗尽(503k/500k)→ 收尾轮」);回放同路径。声明 out-of-scope:`run_deadline_s` 触发的 INTERRUPTED 原因标注(触发在委托边界 raise 路径,另一条链,记 backlog)。
+
 ### UI(同 PR)
 
 运行预算组第 7 旋钮:`RUN_BUDGET_DEFS` 加 `{fieldId:"policies.token_budget", kind:"number", effectiveDefault:0, min:0}`;`form_model.ts` 的 `RunBudgetFields`/`readRunBudget`/`patchRunBudget` 扩展;i18n `run_budget.token_budget_*` 四键三处(label/brief/impact/default;impact 写明"全树共享一个池、80% 预警、超限优雅收尾、0=关闭");round-trip 测试。
@@ -114,6 +139,8 @@ run_agent(sse.py):limit = built.token_budget;limit>0 才建对象
   - 0=off:全链零行为变化;
   - 共扣:父 + child(经 _child_config)扣同一对象,child 超限收尾;
   - 收尾轮不二次触发。
+- guard 帧:token 80% 首跨发一条 warning(不重发)、token/max_steps/no_progress 超限各发 tripped、帧落 RunEventStore seq 单调、sink 抛异常不影响 run、无 sink(未注入)零行为变化。
+- 前端 guard marker:parseTimeline 解析 + MarkerRow 渲染(warn/danger 双态)+ 回放同源 vitest。
 - UI:旋钮渲染/读写/round-trip vitest。
 - 终门:CI 同款 pytest/ruff/mypy + admin-ui vitest+typecheck。
 
