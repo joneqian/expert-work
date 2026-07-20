@@ -297,7 +297,7 @@ class OrphanSweep:
                     trajectory_recorder=self._runtime.trajectory_recorder,
                     trajectory_enabled=built.trajectory_recording,
                     token_budget=built.token_budget,
-                    worker_spawn_budget=self._runtime.new_worker_spawn_budget(),
+                    worker_spawn_budget=await self._runtime.new_worker_spawn_budget(),
                     tool_replay_safe=built.tool_replay_safe,
                 )
             )

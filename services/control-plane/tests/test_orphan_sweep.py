@@ -81,7 +81,7 @@ class _FakeRuntime:
             token_budget=0,
         )
 
-    def new_worker_spawn_budget(self):
+    async def new_worker_spawn_budget(self):
         return None
 
 

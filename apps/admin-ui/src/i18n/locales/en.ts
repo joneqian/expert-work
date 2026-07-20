@@ -1820,6 +1820,17 @@ export interface TranslationKeys {
     tool_budget_toggle_label: string;
     tool_budget_saved: string;
     tool_budget_save_failed: string;
+    dynamic_worker_heading: string;
+    dynamic_worker_help_title: string;
+    dynamic_worker_help_body: string;
+    dynamic_worker_max_concurrent_label: string;
+    dynamic_worker_max_per_run_label: string;
+    dynamic_worker_max_iterations_label: string;
+    dynamic_worker_env_default: string;
+    dynamic_worker_hint: string;
+    dynamic_worker_save: string;
+    dynamic_worker_saved: string;
+    dynamic_worker_save_failed: string;
     quality_heading: string;
     quality_help_title: string;
     quality_help_body: string;
@@ -4767,6 +4778,19 @@ const en: TranslationKeys = {
     tool_budget_toggle_label: "Platform tool-output budget",
     tool_budget_saved: "Tool-output budget setting saved.",
     tool_budget_save_failed: "Failed to save tool-output budget setting",
+    dynamic_worker_heading: "Dynamic worker guardrails",
+    dynamic_worker_help_title: "What are dynamic worker guardrails?",
+    dynamic_worker_help_body:
+      "Limits on the spawn_worker tool: how many temporary sub-agent workers a run may spawn at once, how many it may spawn cumulatively in one run, and how many steps each worker may take. Unset falls back to the process env-default settings.",
+    dynamic_worker_max_concurrent_label: "Max concurrent workers per run",
+    dynamic_worker_max_per_run_label: "Max cumulative workers per run",
+    dynamic_worker_max_iterations_label: "Max steps per worker",
+    dynamic_worker_env_default: "env default",
+    dynamic_worker_hint:
+      "Changes take effect on the next run/build — no restart needed. When unset, the env-default values are used.",
+    dynamic_worker_save: "Save",
+    dynamic_worker_saved: "Dynamic worker guardrails saved.",
+    dynamic_worker_save_failed: "Failed to save dynamic worker guardrails",
     quality_heading: "Quality Monitoring",
     quality_help_title: "What is quality monitoring?",
     quality_help_body:

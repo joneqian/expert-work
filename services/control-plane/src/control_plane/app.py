@@ -63,6 +63,7 @@ from control_plane.api import (
     build_plan_router,
     build_platform_billing_config_router,
     build_platform_config_router,
+    build_platform_dynamic_worker_config_router,
     build_platform_embedding_config_router,
     build_platform_judge_config_router,
     build_platform_quality_config_router,
@@ -158,6 +159,10 @@ from control_plane.middleware import (
     TenantRateLimitMiddleware,
 )
 from control_plane.orphan_sweep import OrphanSweep
+from control_plane.platform_dynamic_worker_config import (
+    DynamicWorkerConfig,
+    PlatformDynamicWorkerConfigService,
+)
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolService
@@ -324,6 +329,11 @@ from expert_work.persistence.platform_billing_config import (
     InMemoryPlatformBillingConfigStore,
     PlatformBillingConfigStore,
     SqlPlatformBillingConfigStore,
+)
+from expert_work.persistence.platform_dynamic_worker_config import (
+    InMemoryPlatformDynamicWorkerConfigStore,
+    PlatformDynamicWorkerConfigStore,
+    SqlPlatformDynamicWorkerConfigStore,
 )
 from expert_work.persistence.platform_embedding_config import (
     InMemoryPlatformEmbeddingConfigStore,
@@ -859,6 +869,23 @@ def create_app(
         store=resolved_platform_tool_budget_config_store,
         ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
     )
+    # B3 PR2 — platform dynamic-worker limits (max_concurrent/max_per_run/
+    # max_iterations); DB-row wins over the env-default settings snapshot,
+    # mirroring the tool-budget pattern immediately above.
+    resolved_platform_dynamic_worker_config_store: PlatformDynamicWorkerConfigStore = (
+        sql_stores.platform_dynamic_worker_config
+        if sql_stores
+        else InMemoryPlatformDynamicWorkerConfigStore()
+    )
+    resolved_platform_dynamic_worker_config_service = PlatformDynamicWorkerConfigService(
+        store=resolved_platform_dynamic_worker_config_store,
+        env_default=DynamicWorkerConfig(
+            max_concurrent=resolved_settings.dynamic_worker_max_concurrent,
+            max_per_run=resolved_settings.dynamic_worker_max_per_run,
+            max_iterations=resolved_settings.dynamic_worker_max_iterations,
+        ),
+        ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
+    )
     # Complete the D.2 cycle: TenantAwareRedactor → resolver → service.
     pii_resolver.bind(resolved_tenant_config_service)
 
@@ -1239,6 +1266,12 @@ def create_app(
                 resolved_agent_runtime.dynamic_worker_max_per_run = (
                     resolved_settings.dynamic_worker_max_per_run
                 )
+                # B3 PR2 — hot path: new_worker_spawn_budget() reads THROUGH this
+                # service (DB-wins-over-env, live) when set; the three cold-read
+                # attrs above remain its fallback (service absent).
+                resolved_agent_runtime.dynamic_worker_config_service = (
+                    resolved_platform_dynamic_worker_config_service
+                )
                 # Stream J.12 — the curation worker reads the L7
                 # trajectory ObjectStore, so it is constructed here
                 # where the store exists (mirrors MemoryDLQWorker).
@@ -1406,6 +1439,10 @@ def create_app(
                         skill_activity_recorder=skill_activity_recorder,
                         tenant_config_service=resolved_tenant_config_service,
                         skill_asset_store=skill_asset_store,
+                        # B3 PR2 — per-build max_iterations reads through this
+                        # service (DB-wins-over-env, live); ``max_iterations=``
+                        # above stays its boot-time fallback.
+                        dynamic_worker_config_service=resolved_platform_dynamic_worker_config_service,
                     )
                     if resolved_settings.enable_dynamic_workers
                     else None
@@ -1916,6 +1953,9 @@ def create_app(
     app.state.platform_embedding_config_service = resolved_platform_embedding_config_service
     app.state.platform_judge_config_service = resolved_platform_judge_config_service
     app.state.platform_tool_budget_config_service = resolved_platform_tool_budget_config_service
+    app.state.platform_dynamic_worker_config_service = (
+        resolved_platform_dynamic_worker_config_service
+    )
     app.state.platform_billing_config_store = resolved_platform_billing_config_store
     # Capability Uplift Sprint #4 — exposed on app.state for callers that
     # need it directly. Stream X (Mini-ADR X-4) wires it through
@@ -2109,6 +2149,7 @@ def create_app(
     app.include_router(build_platform_embedding_config_router())
     app.include_router(build_platform_judge_config_router())
     app.include_router(build_platform_tool_budget_config_router())
+    app.include_router(build_platform_dynamic_worker_config_router())
     app.include_router(build_platform_billing_config_router())
     app.include_router(build_tenant_quotas_router())
     app.include_router(build_tenant_config_router())
@@ -2164,6 +2205,7 @@ class _SqlStores:
     platform_embedding_config: PlatformEmbeddingConfigStore  # Stream T (PR B)
     platform_judge_config: PlatformJudgeConfigStore  # Stream PI-3-A1
     platform_tool_budget_config: PlatformToolBudgetConfigStore  # Phase 3
+    platform_dynamic_worker_config: PlatformDynamicWorkerConfigStore  # B3 PR2
     platform_billing_config: PlatformBillingConfigStore  # Stream 12.4
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
@@ -2387,6 +2429,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         platform_embedding_config=SqlPlatformEmbeddingConfigStore(session_factory),
         platform_judge_config=SqlPlatformJudgeConfigStore(session_factory),
         platform_tool_budget_config=SqlPlatformToolBudgetConfigStore(session_factory),
+        platform_dynamic_worker_config=SqlPlatformDynamicWorkerConfigStore(session_factory),
         platform_billing_config=SqlPlatformBillingConfigStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         agent_disable=SqlAgentDisableStore(session_factory),
