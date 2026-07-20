@@ -61,6 +61,7 @@ class _FakeRuntime:
             supports_vision=False,
             spotlight_nonce=None,
             trajectory_recording=True,
+            token_budget=0,
             max_steps=8,
             max_no_progress=0,
         )

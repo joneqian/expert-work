@@ -78,6 +78,7 @@ class _FakeRuntime:
             tool_replay_safe=None,
             run_deadline_s=0,
             trajectory_recording=True,
+            token_budget=0,
         )
 
     def new_worker_spawn_budget(self):
