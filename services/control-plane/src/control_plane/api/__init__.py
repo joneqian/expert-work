@@ -28,6 +28,9 @@ from control_plane.api.platform_billing_config import (
     build_platform_billing_config_router,
 )
 from control_plane.api.platform_config import build_platform_config_router
+from control_plane.api.platform_dynamic_worker_config import (
+    build_platform_dynamic_worker_config_router,
+)
 from control_plane.api.platform_embedding_config import (
     build_platform_embedding_config_router,
 )
@@ -90,6 +93,7 @@ __all__ = [
     "build_plan_router",
     "build_platform_billing_config_router",
     "build_platform_config_router",
+    "build_platform_dynamic_worker_config_router",
     "build_platform_embedding_config_router",
     "build_platform_judge_config_router",
     "build_platform_quality_config_router",

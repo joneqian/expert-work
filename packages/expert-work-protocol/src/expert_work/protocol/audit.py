@@ -350,6 +350,9 @@ class AuditAction(StrEnum):
     # platform tool-output-budget config (Phase 3) — system_admin-only write to
     # the platform tool-budget on/off flag.
     PLATFORM_TOOL_BUDGET_UPDATED = "platform_tool_budget_config:updated"
+    # platform dynamic-worker limits config (B3 PR2) — system_admin-only write
+    # to the platform dynamic_worker max_concurrent/max_per_run/max_iterations row.
+    PLATFORM_DYNAMIC_WORKER_UPDATED = "platform_dynamic_worker_config:updated"
     # mcp_server (Stream V — tenant remote MCP server registry)
     MCP_SERVER_CREATE = "mcp_server:create"
     MCP_SERVER_UPDATE = "mcp_server:update"
