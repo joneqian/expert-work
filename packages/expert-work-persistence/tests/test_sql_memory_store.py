@@ -490,3 +490,65 @@ async def test_review_flag_lifecycle(sql_store: SqlStoreFixture) -> None:
         assert await store.list_review_flagged(tenant_id=tenant, user_id=user, limit=10) == []
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# P5a — bump_access (access reinforcement)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bump_access_increments_and_touches(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        item = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="x")
+        await store.write([item])
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET last_used_at = :old WHERE id = :id"),
+                {"old": datetime(2020, 1, 1, tzinfo=UTC), "id": item.id},
+            )
+
+        await store.bump_access(tenant_id=tenant, user_id=user, ids=[item.id])
+
+        [row] = await store.list_for_user(tenant_id=tenant, user_id=user)
+        assert row.access_count == 1
+        last_used = row.last_used_at
+        assert last_used is not None
+        assert last_used > datetime(2020, 1, 1, tzinfo=UTC)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_bump_access_empty_ids_noop(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        # Must not raise on the empty-list WHERE ... IN () shape.
+        await store.bump_access(tenant_id=tenant, user_id=user, ids=[])
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_bump_access_scoped_to_tenant_and_user(sql_store: SqlStoreFixture) -> None:
+    """The tenant/user predicate is defensive — an id that belongs to
+    another tenant or user must not be bumped even if it's passed in."""
+    store, engine = sql_store
+    try:
+        tenant, user, other_user = uuid4(), uuid4(), uuid4()
+        mine = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="mine")
+        theirs = _item(tenant=tenant, user=other_user, embedding=_vec(1.0), content="theirs")
+        await store.write([mine, theirs])
+
+        # Bump as `user`, but pass both ids — `theirs` must be skipped.
+        await store.bump_access(tenant_id=tenant, user_id=user, ids=[mine.id, theirs.id])
+
+        [their_row] = await store.list_for_user(tenant_id=tenant, user_id=other_user)
+        assert their_row.access_count == 0
+        [my_row] = await store.list_for_user(tenant_id=tenant, user_id=user)
+        assert my_row.access_count == 1
+    finally:
+        await engine.dispose()

@@ -258,6 +258,18 @@ class InMemoryMemoryStore(MemoryStore):
                 return True
         return False
 
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        if not ids:
+            return
+        now = datetime.now(UTC)
+        id_set = set(ids)
+        self._rows = [
+            row.model_copy(update={"last_used_at": now, "access_count": row.access_count + 1})
+            if (row.tenant_id == tenant_id and row.user_id == user_id and row.id in id_set)
+            else row
+            for row in self._rows
+        ]
+
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
         removed = 0

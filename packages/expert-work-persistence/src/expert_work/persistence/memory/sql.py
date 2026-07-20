@@ -422,6 +422,23 @@ class SqlMemoryStore(MemoryStore):
             ).first()
         return exists is not None
 
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        if not ids:
+            return
+        now = datetime.now(UTC)
+        stmt = (
+            update(MemoryItemRow)
+            .where(
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.id.in_(list(ids)),
+            )
+            .values(last_used_at=now, access_count=MemoryItemRow.access_count + 1)
+        )
+        async with self._sf() as session:
+            await session.execute(stmt)
+            await session.commit()
+
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
         stmt = (

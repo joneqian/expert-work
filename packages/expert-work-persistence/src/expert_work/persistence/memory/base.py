@@ -149,6 +149,13 @@ class MemoryStore(abc.ABC):
         ``False`` for unknown id / wrong tenant / wrong user."""
 
     @abc.abstractmethod
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        """P5a — mark memories as retrieved: stamp ``last_used_at=now`` and
+        increment ``access_count`` for each id. Best-effort at the call site
+        (recall must not fail on a bump error). Empty ``ids`` is a no-op.
+        Tenant- AND user-scoped as a defensive predicate."""
+
+    @abc.abstractmethod
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         """Phase 3a (purge_user) — soft-delete EVERY live memory for a user.
 

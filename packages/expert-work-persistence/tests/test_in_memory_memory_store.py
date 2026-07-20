@@ -549,3 +549,41 @@ async def test_no_agent_scope_returns_all() -> None:
         tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0), limit=10
     )
     assert {h.content for h in rows} == {"a-ep", "b-ep"}
+
+
+# ---------------------------------------------------------------------------
+# P5a — bump_access (access reinforcement)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bump_access_increments_and_touches() -> None:
+    tenant, user = uuid4(), uuid4()
+    mid = uuid4()
+    store = InMemoryMemoryStore()
+    old = datetime(2020, 1, 1, tzinfo=UTC)
+    await store.write(
+        [
+            MemoryItem(
+                id=mid,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="x",
+                embedding=(0.1,),
+                last_used_at=old,
+                access_count=0,
+            )
+        ]
+    )
+    await store.bump_access(tenant_id=tenant, user_id=user, ids=[mid])
+    row = (await store.list_for_user(tenant_id=tenant, user_id=user))[0]
+    assert row.access_count == 1
+    last_used = row.last_used_at
+    assert last_used is not None
+    assert last_used > old
+
+
+@pytest.mark.asyncio
+async def test_bump_access_empty_ids_noop() -> None:
+    await InMemoryMemoryStore().bump_access(tenant_id=uuid4(), user_id=uuid4(), ids=[])
