@@ -10,6 +10,17 @@ trip into graceful wrap-up (token AND the pre-existing max_steps /
 no_progress guards, all guard-visible now), the ``limit=0`` / unwired
 no-op path, sink-failure resilience, and ``ToolContext`` / ``_child_config``
 propagation.
+
+Also covers the code-review fix for two accumulation-point leaks (the
+per-step ``token_budget.add(...)`` used to read only the FINAL response's
+``usage_metadata``, after screen/judge/structured post-processing could
+already have replaced it):
+
+* a response the PI-2 output screen blocks is swapped for a fresh
+  ``REFUSAL_TEXT`` ``AIMessage`` with no ``usage_metadata`` — the real
+  billed primary call's tokens must still land in the budget;
+* an RT-ADR-4 structured resend is a SECOND real call — both the
+  non-conforming primary candidate and the resend must be counted.
 """
 
 from __future__ import annotations
@@ -23,6 +34,8 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from expert_work.common.output_screen import REFUSAL_TEXT
+from expert_work.protocol import StructuredOutputSpec
 from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import AgentState, GraphRunner, ToolRegistry, build_react_graph
 from orchestrator.graph_builder.builder import _build_tool_context
@@ -51,6 +64,30 @@ class _ScriptedLLM:
         self.calls += 1
         self.seen_messages.append(list(messages))
         self.seen_tool_counts.append(len(list(tools)))
+        if idx >= len(self.responses):
+            raise RuntimeError(f"scripted LLM ran out of responses at call {idx}")
+        return self.responses[idx]
+
+
+@dataclass
+class _ScriptedStructuredLLM:
+    """LLMCaller stub accepting ``output_schema`` (RT-ADR-4 resend path) —
+    ``_ScriptedLLM`` above doesn't take that kwarg since it's only exercised
+    off the unstructured path."""
+
+    responses: list[AIMessage]
+    calls: int = 0
+
+    async def __call__(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> AIMessage:
+        del messages, tools, output_schema
+        idx = self.calls
+        self.calls += 1
         if idx >= len(self.responses):
             raise RuntimeError(f"scripted LLM ran out of responses at call {idx}")
         return self.responses[idx]
@@ -425,3 +462,81 @@ def test_child_config_omits_keys_when_absent() -> None:
     configurable = child_config["configurable"]
     assert TOKEN_BUDGET_KEY not in configurable
     assert GUARD_SINK_KEY not in configurable
+
+
+# ---------------------------------------------------------------------------
+# 8) Code-review fix — accumulation point moved off the FINAL response
+#    (see module docstring: screen-blocked replacement / structured resend)
+# ---------------------------------------------------------------------------
+
+_STRUCT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {"score": {"type": "integer"}},
+    "required": ["score"],
+    "additionalProperties": False,
+}
+_STRUCT_SPEC = StructuredOutputSpec(schema=_STRUCT_SCHEMA, name="verdict")
+
+
+@pytest.mark.asyncio
+async def test_screen_blocked_response_still_counts_original_usage() -> None:
+    """PI-2 output screening (Finding 1): a flagged reply is swapped for a
+    fresh ``REFUSAL_TEXT`` ``AIMessage`` that carries no ``usage_metadata``.
+    The primary call still really happened and was really billed — its
+    tokens must land in the budget rather than vanish because the reply got
+    blocked afterward."""
+    registry = ToolRegistry()
+    registry.register(_EchoTool())
+    # Split literal so push protection sees no contiguous provider token.
+    leak = "Sure, the key is sk-" + "ant-api03-AbCdEf012345678901234567"
+    llm = _ScriptedLLM(responses=[AIMessage(content=leak, usage_metadata=_usage(42))])
+    graph = build_react_graph(llm_caller=llm, tool_registry=registry, output_screen=True)
+    budget = TokenBudget(limit=100_000)
+
+    state = await _invoke(
+        graph,
+        {"messages": [HumanMessage(content="hi")], "step_count": 0, "max_steps": 5},
+        thread_id="tb-screen-blocked",
+        token_budget=budget,
+    )
+
+    assert llm.calls == 1
+    last = state["messages"][-1]
+    assert isinstance(last, AIMessage)
+    assert last.content == REFUSAL_TEXT
+    # The pre-fix code read the FINAL response's usage_metadata (the refusal
+    # has none) and would have left spent at 0.
+    assert budget.spent == 42
+
+
+@pytest.mark.asyncio
+async def test_structured_resend_counts_both_calls() -> None:
+    """RT-ADR-4 structured resend (Finding 2): a non-conforming primary
+    candidate triggers ONE schema-enforced resend — a second real billed
+    call. Both must be counted, not just the resend's (previously the
+    only one visible to the budget)."""
+    registry = ToolRegistry()
+    llm = _ScriptedStructuredLLM(
+        responses=[
+            AIMessage(content="not json", usage_metadata=_usage(50)),
+            AIMessage(content='{"score": 4}', usage_metadata=_usage(30)),
+        ]
+    )
+    graph = build_react_graph(
+        llm_caller=llm, tool_registry=registry, output_schema=_STRUCT_SPEC
+    )
+    budget = TokenBudget(limit=100_000)
+
+    state = await _invoke(
+        graph,
+        {"messages": [HumanMessage(content="rate this")], "step_count": 0, "max_steps": 20},
+        thread_id="tb-structured-resend",
+        token_budget=budget,
+    )
+
+    assert llm.calls == 2
+    # 50 (non-conforming primary candidate) + 30 (schema-enforced resend).
+    assert budget.spent == 80
+    last = state["messages"][-1]
+    assert isinstance(last, AIMessage)
+    assert last.additional_kwargs["parsed"] == {"score": 4}

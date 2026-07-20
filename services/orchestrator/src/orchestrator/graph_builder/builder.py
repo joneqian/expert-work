@@ -809,8 +809,12 @@ def build_react_graph(
         # Budget-exhausted final turn: no tools (so the model can only answer),
         # append the wrap-up instruction, and bypass the response cache (a
         # cached tool-call hit would re-enter the loop). The escalation above
-        # already routes this last turn to the higher-effort caller (the budget
-        # signal fires at >=75% spend), so the summary gets a deliberate think.
+        # only covers the step-budget case — its ``budget_signal`` is
+        # step-count based (fires at >=75% of ``max_steps``), so a
+        # step-exhausted wrap-up gets a deliberate think from the
+        # higher-effort caller. A token-triggered wrap-up (``token_tripped``)
+        # is not what that signal watches, so this final turn falls through
+        # to the normal (non-escalated) caller instead.
         if budget_exhausted:
             tools = []
             cache_hit_response = None
@@ -910,6 +914,17 @@ def build_react_graph(
             if _token_sink is not None:
                 await _token_sink.flush()
 
+        # B3 — count the INITIAL response's real spend right where it
+        # resolves (cache hit or fresh call), before screen/judge below can
+        # replace it with a refusal ``AIMessage`` that carries no
+        # ``usage_metadata`` (the billed call still happened — the tokens
+        # must not vanish from the budget just because the reply got
+        # blocked) and before a structured resend can overwrite ``response``
+        # with a second call's reply. A resend's own spend is accounted
+        # separately, inside ``_finalize_structured_response``.
+        if token_budget is not None:
+            token_budget.add(usage_total(getattr(response, "usage_metadata", None)))
+
         # Budget-exhausted turn must terminate: no tools were bound so the model
         # shouldn't emit tool_calls, but strip any it returns anyway (defends
         # against a provider/stub echoing them) so ``_should_continue`` routes
@@ -967,6 +982,7 @@ def build_react_graph(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 primary_cache_hit=cache_hit_response is not None,
+                token_budget=token_budget,
             )
             response = finalize.response
             structured_prompt = finalize.structured_prompt
@@ -1020,10 +1036,6 @@ def build_react_graph(
                     result=AuditResult.SUCCESS,
                     categories=dlp_cats,
                 )
-
-        # B3 — 每步累计(cache hit 同计,与 token_usage 行为一致)。
-        if token_budget is not None:
-            token_budget.add(usage_total(getattr(response, "usage_metadata", None)))
 
         if after_llm_chain is not None:
             # RT-1 PR-3 — when a structured resend happened, this pass
@@ -1808,6 +1820,7 @@ async def _finalize_structured_response(
     tenant_id: UUID | None,
     user_id: UUID | None,
     primary_cache_hit: bool,
+    token_budget: TokenBudget | None = None,
 ) -> _StructuredFinalize:
     """RT-ADR-4 two-stage finalization (mechanism: ``agent_node`` comment).
 
@@ -1820,6 +1833,13 @@ async def _finalize_structured_response(
     the LLM call). The resend's response is re-validated here so a cached
     entry is held to the same contract as a fresh router-validated one;
     a still-invalid response raises :class:`LLMOutputValidationError`.
+
+    B3 — ``token_budget`` (when wired) only needs to hear about the STAGE 2
+    call here: the primary candidate was already counted by the caller
+    (``agent_node``) right after it resolved, before this function ever
+    runs. Stage 1's zero-extra-call return therefore adds nothing more; a
+    real stage 2 call (cache hit or fresh resend) is real spend and gets
+    counted once, right after it resolves below.
     """
     parsed, error_summary = validate_structured_output(candidate, spec)
     if parsed is not None:
@@ -1895,6 +1915,15 @@ async def _finalize_structured_response(
             response = await token.run_cancellable(
                 caller(messages=finalize_messages, tools=[], output_schema=spec)
             )
+
+    # B3 — stage 2 spend (finding 2 fix): a resend is a second real billed
+    # call the pre-hoist budget accounting never saw (it only ran once, on
+    # the primary candidate, before this function was invoked). A cache hit
+    # is counted too, matching the primary-call cache-hit convention in
+    # ``agent_node`` (whatever ``usage_metadata`` the resolved response
+    # carries gets counted, cached or not).
+    if token_budget is not None:
+        token_budget.add(usage_total(getattr(response, "usage_metadata", None)))
 
     parsed, error_summary = validate_structured_output(response, spec)
     if parsed is None:
