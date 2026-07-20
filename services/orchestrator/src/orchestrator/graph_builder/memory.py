@@ -506,6 +506,17 @@ def make_memory_recall_node(
             record_memory_retrieval(mode=mode, result="miss")
             return {}
         record_memory_retrieval(mode=mode, result="hit" if memories else "miss")
+        if memories:
+            try:
+                await memory_store.bump_access(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    ids=[m.id for m in memories],
+                )
+            except RunCancelledError:
+                raise
+            except Exception:
+                logger.warning("memory.bump_access_failed", exc_info=True)
         redacted = [_redact_memory(m) for m in memories]
         logger.info("memory.recall count=%d mode=%s", len(redacted), mode)
         return {"recalled_memories": redacted}

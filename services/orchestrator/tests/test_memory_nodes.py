@@ -272,6 +272,28 @@ async def test_memory_recall_node_returns_user_memories() -> None:
 
 
 @pytest.mark.asyncio
+async def test_memory_recall_node_bumps_access_count_on_hit() -> None:
+    # Task 5 — a recall hit must reinforce access via MemoryStore.bump_access
+    # (closes the frequency_boost activation loop: access_count only feeds
+    # ranking if something actually increments it on recall).
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await _seed(store, tenant=tenant, user=user, content="user prefers metric units")
+    [seeded] = await store.list_for_user(tenant_id=tenant, user_id=user)
+    assert seeded.access_count == 0
+
+    node = make_memory_recall_node(memory_store=store, embedder=FakeEmbedder(dim=_DIM), top_k=5)
+    out = await node(  # type: ignore[arg-type]
+        _state("what's the distance"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert [m.content for m in out["recalled_memories"]] == ["user prefers metric units"]
+
+    [after] = await store.list_for_user(tenant_id=tenant, user_id=user)
+    assert after.access_count == 1
+
+
+@pytest.mark.asyncio
 async def test_memory_recall_node_noop_without_user_scope() -> None:
     store = InMemoryMemoryStore()
     node = make_memory_recall_node(memory_store=store, embedder=FakeEmbedder(dim=_DIM), top_k=5)
@@ -436,6 +458,9 @@ class _SpyMemoryStore:
     async def retrieve(self, **kwargs: object) -> list[MemoryItem]:
         self.calls.append(kwargs)
         return []
+
+    async def bump_access(self, *, tenant_id: UUID, user_id: UUID, ids: Sequence[UUID]) -> None:
+        return None
 
 
 @pytest.mark.asyncio
