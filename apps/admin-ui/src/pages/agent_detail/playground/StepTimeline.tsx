@@ -301,7 +301,15 @@ function WorkerNode({ worker }: { worker: WorkerTimeline }) {
     >
       <div
         data-testid="worker-subtimeline-header"
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e: KeyboardEvent): void => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
         style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}
       >
         <span style={{ color: "var(--ew-text-secondary)" }}>{expanded ? "▾" : "▸"}</span>

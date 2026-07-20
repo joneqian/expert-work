@@ -56,5 +56,7 @@ describe("WorkerSubTimeline", () => {
     await userEvent.click(screen.getByTestId("worker-subtimeline-header"));
     expect(screen.getAllByTestId("worker-subtimeline")).toHaveLength(2);
     expect(screen.getAllByTestId("worker-subtimeline")[1].textContent).toContain("running");
+    // "without summary":父有 summary 行,running 子 worker 没有 → 恰好 1 个
+    expect(screen.getAllByTestId("worker-summary")).toHaveLength(1);
   });
 });
