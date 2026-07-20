@@ -416,11 +416,9 @@ class InMemoryMemoryStore(MemoryStore):
                 and row.created_at < cutoff
             ):
                 continue
-            # never retrieved: last_used_at ≤ created_at + 1 minute
-            if row.last_used_at is None:
-                candidates.append(row)
-                continue
-            if row.last_used_at <= row.created_at + timedelta(minutes=1):
+            # never retrieved: access_count == 0 (P5a T6 — exact, replaces
+            # the old last_used_at <= created_at + 1 minute approximation)
+            if row.access_count == 0:
                 candidates.append(row)
         candidates.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC))
         return candidates[:limit]

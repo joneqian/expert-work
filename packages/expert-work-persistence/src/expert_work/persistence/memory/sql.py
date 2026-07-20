@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, and_, func, or_, select, text, update
+from sqlalchemy import ColumnElement, and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -618,13 +618,13 @@ class SqlMemoryStore(MemoryStore):
         limit: int,
     ) -> list[MemoryItem]:
         cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
-        # "Never retrieved" approximated by
-        # ``last_used_at <= created_at + 1 minute`` — writeback bump
-        # can be ~ms after insert, the minute slack soaks up clock skew
-        # without admitting "actually used" rows (Mini-ADR U-37).
-        never_used = MemoryItemRow.last_used_at <= (
-            MemoryItemRow.created_at + text("INTERVAL '1 minute'")
-        )
+        # "Never retrieved" — exact via access_count (P5a T6; supersedes the
+        # old ``last_used_at <= created_at + 1 minute`` approximation from
+        # Mini-ADR U-37, which was vacuously true before access_count
+        # existed and could misread an early-but-real hit as "never used").
+        # access_count is bumped in lockstep with last_used_at on every
+        # recall hit, so == 0 means retrieve() has never returned this row.
+        never_used = MemoryItemRow.access_count == 0
         stmt = (
             select(MemoryItemRow)
             .where(
