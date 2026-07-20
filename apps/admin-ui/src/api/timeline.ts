@@ -7,6 +7,7 @@
  */
 import type { SseEvent } from "./sessions";
 import { parseToolCalls, type ToolCallEntry } from "./tool_timeline";
+import { parseWorkerFrames } from "./worker_timeline";
 
 export interface AgentStep {
   kind: "agent";
@@ -67,6 +68,7 @@ export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   const byId = new Map<string, ToolCallEntry>();
   for (const e of parseToolCalls(events)) byId.set(e.id, e);
+  const workersByCall = parseWorkerFrames(events);
   let seq = 0;
   const push = (it: Record<string, unknown>): void => {
     items.push({ ...it, seq: seq++ } as TimelineItem);
@@ -99,6 +101,7 @@ export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
       push({ kind: "end", receivedAt: at, tone: "good", text: "运行完成" });
       continue;
     }
+    if (evt.event === "worker") continue; // 已由 parseWorkerFrames 预扫,挂在工具卡上
     if (evt.event !== "updates") continue;
 
     const data = obj(evt.data);
@@ -118,7 +121,11 @@ export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
         for (const tc of calls) {
           const id = str(obj(tc).id);
           const entry = id === "" ? undefined : byId.get(id);
-          if (entry) tools.push(entry);
+          if (entry) {
+            const workers = workersByCall.get(id);
+            if (workers) entry.workers = workers;
+            tools.push(entry);
+          }
         }
         push({
           kind: "agent", receivedAt: at, node,

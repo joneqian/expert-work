@@ -1156,6 +1156,13 @@ export interface TranslationKeys {
     tr_purpose_primary: string;
     tr_aux_llm: string;
     tr_raw_error: string;
+    tl_worker_running: string;
+    tl_worker_success: string;
+    tl_worker_max_steps: string;
+    tl_worker_cancelled: string;
+    tl_worker_task: string;
+    tl_worker_summary: string; // "{{steps}} steps · {{calls}} LLM calls · {{duration}}"
+    tl_worker_children: string;
   };
   session_history: {
     title: string;
@@ -4019,6 +4026,13 @@ const en: TranslationKeys = {
     tr_purpose_primary: "Primary reasoning",
     tr_aux_llm: "Auxiliary LLM call",
     tr_raw_error: "Failed to load raw content",
+    tl_worker_running: "running",
+    tl_worker_success: "done",
+    tl_worker_max_steps: "step limit",
+    tl_worker_cancelled: "cancelled",
+    tl_worker_task: "Task",
+    tl_worker_summary: "{{steps}} steps · {{calls}} LLM calls · {{duration}}",
+    tl_worker_children: "child workers",
   },
   session_history: {
     title: "Session history",

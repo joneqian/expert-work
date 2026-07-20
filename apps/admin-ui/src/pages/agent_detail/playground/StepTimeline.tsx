@@ -12,6 +12,7 @@ import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentStep, AuxNodeItem, MarkerItem, TimelineItem } from "../../../api/timeline";
+import type { WorkerStatus, WorkerTimeline } from "../../../api/worker_timeline";
 import { ToolCallCard } from "../../../components/ToolTimeline";
 import { fmtDuration } from "./duration_format";
 import { StreamingStepCard } from "./StreamingStepCard";
@@ -250,6 +251,7 @@ function AgentStepCard({ item }: { item: AgentStep }) {
                     color: "var(--ew-text-tertiary)",
                   }}
                 />
+                {tool.workers ? <WorkerSubTimeline workers={tool.workers} /> : null}
               </div>
             ))}
             {isFinal && item.content && (
@@ -260,6 +262,99 @@ function AgentStepCard({ item }: { item: AgentStep }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+export function WorkerSubTimeline({ workers }: { workers: WorkerTimeline[] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+      {workers.map((w) => (
+        <WorkerNode key={w.workerId} worker={w} />
+      ))}
+    </div>
+  );
+}
+
+const WORKER_STATUS_TONE: Record<WorkerStatus, string> = {
+  running: INFO,
+  success: SUCCESS,
+  max_steps: WARNING,
+  cancelled: DANGER,
+};
+
+function WorkerNode({ worker }: { worker: WorkerTimeline }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const tone = WORKER_STATUS_TONE[worker.status];
+  const statusText = t(`playground.tl_worker_${worker.status}`);
+  return (
+    <div
+      data-testid="worker-subtimeline"
+      style={{
+        border: "1px solid var(--ew-border-subtle)",
+        borderLeft: `3px solid ${tone}`,
+        borderRadius: 6,
+        background: "var(--ew-surface-base)",
+        fontSize: 12,
+      }}
+    >
+      <div
+        data-testid="worker-subtimeline-header"
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e: KeyboardEvent): void => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}
+      >
+        <span style={{ color: "var(--ew-text-secondary)" }}>{expanded ? "▾" : "▸"}</span>
+        <span style={{ fontFamily: "var(--ew-font-mono)" }}>{worker.role ?? worker.agentRef}</span>
+        <span style={{ color: tone }}>{statusText}</span>
+        {worker.summary ? (
+          <span data-testid="worker-summary" style={{ marginLeft: "auto", color: "var(--ew-text-secondary)" }}>
+            {t("playground.tl_worker_summary", {
+              steps: worker.summary.iterationUsed,
+              calls: worker.summary.llmCallCount,
+              duration: fmtDuration(worker.summary.wallClockMs),
+            })}
+          </span>
+        ) : null}
+      </div>
+      {expanded ? (
+        <div style={{ padding: "0 8px 6px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {worker.taskExcerpt ? (
+            <div style={{ color: "var(--ew-text-secondary)" }}>
+              {t("playground.tl_worker_task")}: {worker.taskExcerpt}
+            </div>
+          ) : null}
+          {worker.steps.map((s) => (
+            <div key={s.wseq} data-testid="worker-step" style={{ fontFamily: "var(--ew-font-mono)" }}>
+              <span style={{ color: "var(--ew-text-secondary)" }}>
+                {s.node}
+                {s.stepCount !== null ? ` #${s.stepCount}` : ""} · {fmtDuration(s.durationMs)}
+              </span>
+              {s.messages.map((m, i) => (
+                <div key={i} style={{ paddingLeft: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {m.contentExcerpt ?? ""}
+                  {m.toolCalls?.map((c) => `⚙ ${c.name}(${c.argsExcerpt})`).join(" ") ?? ""}
+                  {m.toolResultExcerpt ? `→ ${m.toolResultExcerpt}` : ""}
+                </div>
+              ))}
+            </div>
+          ))}
+          {worker.children.length > 0 ? (
+            <div style={{ paddingLeft: 8 }}>
+              <div style={{ color: "var(--ew-text-secondary)" }}>{t("playground.tl_worker_children")}</div>
+              <WorkerSubTimeline workers={worker.children} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
