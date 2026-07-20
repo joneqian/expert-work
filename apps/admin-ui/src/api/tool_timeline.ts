@@ -14,6 +14,7 @@
  * ``exec_python``, …) keep their bare name.
  */
 import type { SseEvent } from "./sessions";
+import type { WorkerTimeline } from "./worker_timeline";
 
 export type ToolCallStatus = "pending" | "success" | "error" | "pending_approval";
 
@@ -35,6 +36,8 @@ export interface ToolCallEntry {
   execResult?: ExecResult;
   /** Tool execution time in ms, from the result's ``additional_kwargs.duration_ms`` (``null`` until the result arrives or if absent). */
   durationMs: number | null;
+  /** B2 PR2 — 本次调用派生的 worker 子时间线(spawn_worker / subagent);无则缺省。 */
+  workers?: WorkerTimeline[];
 }
 
 const MCP_PREFIX = "mcp__";

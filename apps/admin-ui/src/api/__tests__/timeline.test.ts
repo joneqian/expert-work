@@ -94,4 +94,46 @@ describe("parseTimeline", () => {
     expect(steps[1].kind === "agent" && steps[1].durationMs).toBe(null);
     expect(mem && mem.kind === "memory_recall" && mem.durationMs).toBe(300);
   });
+
+  it("attaches worker timelines to the matching tool call entry", () => {
+    const events = [
+      upd("agent", {
+        step_count: 1,
+        messages: [
+          {
+            type: "ai",
+            content: "",
+            tool_calls: [{ id: "call-9", name: "spawn_worker", args: { task: "x" } }],
+          },
+        ],
+      }, "t1"),
+      ev("worker", {
+        worker_id: "w-9", parent_worker_id: null, parent_tool_call_id: "call-9",
+        label: "spawn_worker", agent_ref: "dynamic:general", depth: 1, kind: "start", wseq: 0,
+        data: { task_excerpt: "x", role: null, max_steps: 8 },
+      }, "t2"),
+      ev("worker", {
+        worker_id: "w-9", parent_worker_id: null, parent_tool_call_id: "call-9",
+        label: "spawn_worker", agent_ref: "dynamic:general", depth: 1, kind: "end", wseq: 1,
+        data: { outcome: "success", iteration_used: 1, llm_call_count: 1, wall_clock_ms: 42 },
+      }, "t3"),
+    ];
+    const items = parseTimeline(events);
+    const agent = items.find((i) => i.kind === "agent");
+    expect(agent?.kind).toBe("agent");
+    const tool = agent?.kind === "agent" ? agent.tools.find((t) => t.id === "call-9") : undefined;
+    expect(tool?.workers).toHaveLength(1);
+    expect(tool?.workers?.[0].status).toBe("success");
+  });
+
+  it("worker events do not become standalone timeline items", () => {
+    const items = parseTimeline([
+      ev("worker", {
+        worker_id: "w", parent_worker_id: null, parent_tool_call_id: "c",
+        label: "spawn_worker", agent_ref: "d", depth: 1, kind: "start", wseq: 0,
+        data: { task_excerpt: "", role: null, max_steps: 1 },
+      }, "t1"),
+    ]);
+    expect(items).toHaveLength(0);
+  });
 });
