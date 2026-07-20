@@ -11,7 +11,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import CHAR, DateTime, Float, Index, String, Text, func, text
+from sqlalchemy import CHAR, DateTime, Float, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -65,6 +65,10 @@ class MemoryItemRow(Base):
         nullable=False,
         server_default=func.now(),
     )
+    # P5a — access reinforcement counter. Bumped on recall; feeds the ranking
+    # frequency boost and replaces the (buggy) time-approximation for the
+    # consolidator's "never retrieved" purge protection.
+    access_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Stream K.K6 — soft-delete column. ``retrieve`` and the per-user
     # list endpoint filter out rows with ``deleted_at IS NOT NULL``;
     # a future retention sweep hard-deletes 30+ days after.

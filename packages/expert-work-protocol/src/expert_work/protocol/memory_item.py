@@ -79,6 +79,13 @@ class MemoryItem(BaseModel):
     )
     created_at: datetime | None = None
     last_used_at: datetime | None = None
+    access_count: int = Field(
+        default=0,
+        ge=0,
+        description="Times this memory has been returned by retrieve (P5a access "
+        "reinforcement). Bumped on recall; feeds the frequency boost in ranking "
+        "and the consolidator's never-used purge protection.",
+    )
     deleted_at: datetime | None = Field(
         default=None,
         description="Stream K.K6 — soft-delete timestamp (forget). "

@@ -70,6 +70,7 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
         source_thread_id=row.source_thread_id,
         created_at=row.created_at,
         last_used_at=row.last_used_at,
+        access_count=row.access_count,
         deleted_at=row.deleted_at,
         # Capability Uplift Sprint #7 (Mini-ADR U-33) — lifecycle fields.
         status=row.status,  # type: ignore[arg-type]
