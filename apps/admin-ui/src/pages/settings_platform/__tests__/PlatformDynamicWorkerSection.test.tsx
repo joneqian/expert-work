@@ -51,6 +51,19 @@ describe("PlatformDynamicWorkerSection", () => {
     expect(screen.queryByTestId("pdw-env-default")).not.toBeInTheDocument();
   });
 
+  it("disables save while any field is cleared (no silent coercion)", async () => {
+    const user = userEvent.setup();
+    const put = vi.spyOn(sdk, "putPlatformDynamicWorkerConfig");
+    renderSection(<PlatformDynamicWorkerSection />);
+    await screen.findByTestId("pdw-root");
+
+    await user.clear(screen.getByTestId("pdw-max-concurrent"));
+
+    expect(screen.getByTestId("pdw-save")).toBeDisabled();
+    await user.click(screen.getByTestId("pdw-save"));
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it("PUTs the edited values when saved", async () => {
     const user = userEvent.setup();
     const put = vi.spyOn(sdk, "putPlatformDynamicWorkerConfig").mockResolvedValue({

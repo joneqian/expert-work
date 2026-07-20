@@ -65,11 +65,17 @@ export function PlatformDynamicWorkerSection({
     void load();
   }, [load]);
 
+  const hasEmptyField =
+    maxConcurrent === null || maxPerRun === null || maxIterations === null;
+
   const onSave = useCallback(async () => {
+    if (maxConcurrent === null || maxPerRun === null || maxIterations === null) {
+      return;
+    }
     const limits: DynamicWorkerLimits = {
-      max_concurrent: maxConcurrent ?? 1,
-      max_per_run: maxPerRun ?? 1,
-      max_iterations: maxIterations ?? 1,
+      max_concurrent: maxConcurrent,
+      max_per_run: maxPerRun,
+      max_iterations: maxIterations,
     };
     setSaving(true);
     try {
@@ -166,6 +172,7 @@ export function PlatformDynamicWorkerSection({
         <Button
           type="primary"
           loading={saving}
+          disabled={hasEmptyField}
           onClick={onSave}
           data-testid="pdw-save"
         >
