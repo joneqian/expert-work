@@ -552,3 +552,55 @@ async def test_bump_access_scoped_to_tenant_and_user(sql_store: SqlStoreFixture)
         assert my_row.access_count == 1
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# P5a — ranking reinforcement (access frequency + importance weight)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ranking_reinforces_access_and_importance(sql_store: SqlStoreFixture) -> None:
+    """P5a — frequency_boost x importance_weight multiply into both SQL ranking paths.
+
+    ``write()`` does not persist caller-supplied ``access_count`` (it relies
+    on the server default + ``bump_access``), so the hot row's count is
+    patched directly, mirroring how the CM-6 decay test above backdates
+    timestamps.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        low = _item(
+            tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="quiet", importance=0.5
+        )
+        hot = _item(
+            tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="loud", importance=0.9
+        )
+        await store.write([low, hot])
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET access_count = 100 WHERE id = :id"),
+                {"id": hot.id},
+            )
+
+        # Pure-vector path (_vector_retrieve): identical cosine distance —
+        # frequency_boost(100) x importance_weight(0.9) must win the tie.
+        hits = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0), limit=2
+        )
+        assert hits[0].content == "loud"
+
+        # Hybrid path (_hybrid_retrieve): each row matches its own keyword
+        # token in the query (same tie shape as the CM-6 decay test) — the
+        # access/importance boost breaks the tie the same way.
+        hits = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user,
+            query_embedding=_vec(1.0, 0.0),
+            query_text="quiet loud",
+            limit=2,
+        )
+        assert hits[0].content == "loud"
+    finally:
+        await engine.dispose()

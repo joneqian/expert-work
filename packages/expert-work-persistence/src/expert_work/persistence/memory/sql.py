@@ -12,7 +12,11 @@ from sqlalchemy import ColumnElement, and_, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from expert_work.common.search.decay import temporal_decay_factor
+from expert_work.common.search.decay import (
+    frequency_boost,
+    importance_weight,
+    temporal_decay_factor,
+)
 from expert_work.common.search.rrf import rrf_fuse_scored
 from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
 from expert_work.persistence.knowledge.text_search import tokenize_for_search
@@ -230,6 +234,8 @@ class SqlMemoryStore(MemoryStore):
             key=lambda row: (
                 (1.0 - _cosine_distance_value(query_embedding, row.embedding) / 2.0)
                 * _decay_for(row.last_used_at, row.created_at, now=now)
+                * frequency_boost(row.access_count)
+                * importance_weight(row.importance)
             ),
             reverse=True,
         )
@@ -298,7 +304,13 @@ class SqlMemoryStore(MemoryStore):
         now = datetime.now(UTC)
         weighted = sorted(
             (
-                (mid, score * _decay_for(by_id[mid].last_used_at, by_id[mid].created_at, now=now))
+                (
+                    mid,
+                    score
+                    * _decay_for(by_id[mid].last_used_at, by_id[mid].created_at, now=now)
+                    * frequency_boost(by_id[mid].access_count)
+                    * importance_weight(by_id[mid].importance),
+                )
                 for mid, score in scored
             ),
             key=lambda pair: pair[1],

@@ -8,7 +8,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from expert_work.common.search.decay import temporal_decay_factor
+from expert_work.common.search.decay import (
+    frequency_boost,
+    importance_weight,
+    temporal_decay_factor,
+)
 from expert_work.common.search.rrf import rrf_fuse_scored
 from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
 from expert_work.persistence.knowledge.text_search import tokenize_for_search
@@ -152,7 +156,16 @@ class InMemoryMemoryStore(MemoryStore):
                 [vector_hits[:_HYBRID_RECALL_LIMIT], keyword_hits[:_HYBRID_RECALL_LIMIT]]
             )
             weighted = sorted(
-                ((row, score * _decay_for(row, now=now)) for row, score in scored),
+                (
+                    (
+                        row,
+                        score
+                        * _decay_for(row, now=now)
+                        * frequency_boost(row.access_count)
+                        * importance_weight(row.importance),
+                    )
+                    for row, score in scored
+                ),
                 key=lambda pair: pair[1],
                 reverse=True,
             )
@@ -164,6 +177,8 @@ class InMemoryMemoryStore(MemoryStore):
             key=lambda row: (
                 (1.0 - _cosine_distance(query_embedding, row.embedding) / 2.0)
                 * _decay_for(row, now=now)
+                * frequency_boost(row.access_count)
+                * importance_weight(row.importance)
             ),
             reverse=True,
         )

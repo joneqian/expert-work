@@ -587,3 +587,38 @@ async def test_bump_access_increments_and_touches() -> None:
 @pytest.mark.asyncio
 async def test_bump_access_empty_ids_noop() -> None:
     await InMemoryMemoryStore().bump_access(tenant_id=uuid4(), user_id=uuid4(), ids=[])
+
+
+# ---------------------------------------------------------------------------
+# P5a — ranking reinforcement (access frequency + importance weight)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ranking_reinforces_access_and_importance() -> None:
+    t, u = uuid4(), uuid4()
+    emb = (1.0, 0.0)
+    store = InMemoryMemoryStore()
+    low = MemoryItem(
+        id=uuid4(),
+        tenant_id=t,
+        user_id=u,
+        kind="fact",
+        content="a",
+        embedding=emb,
+        access_count=0,
+        importance=0.5,
+    )
+    hot = MemoryItem(
+        id=uuid4(),
+        tenant_id=t,
+        user_id=u,
+        kind="fact",
+        content="b",
+        embedding=emb,
+        access_count=100,
+        importance=0.9,
+    )
+    await store.write([low, hot])
+    got = await store.retrieve(tenant_id=t, user_id=u, query_embedding=emb, limit=2)
+    assert got[0].content == "b"  # same cosine, hot+important wins
