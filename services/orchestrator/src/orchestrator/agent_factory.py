@@ -245,6 +245,10 @@ class BuiltAgent:
     #: the run is never serialised to ObjectStore even when the deployment
     #: has a recorder configured.
     trajectory_recording: bool = True
+    #: B3 — per-run token breaker limit (``policies.token_budget``). Callers
+    #: pass it to ``sse.run_agent(token_budget=...)``; 0 disables (no budget
+    #: object is created, zero behaviour change).
+    token_budget: int = 0
 
 
 def _tool_replay_safe(registry: ToolRegistry) -> Callable[[str], bool]:
@@ -1060,6 +1064,7 @@ async def build_agent(
         prompt_base=base_prompt,
         prompt_suffix=final_system_prompt[len(base_prompt) :],
         trajectory_recording=spec.spec.policies.trajectory_recording,
+        token_budget=spec.spec.policies.token_budget,
     )
 
 

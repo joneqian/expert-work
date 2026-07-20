@@ -868,6 +868,16 @@ class PolicySpec(BaseModel):
             "config unchanged (the child does not reset)."
         ),
     )
+    token_budget: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Per-run total token cap across the whole delegation tree (main "
+            "agent + static sub-agents + dynamic workers). Counts input + "
+            "output + cache_creation + cache_read from each main-loop LLM "
+            "call. 0 disables the breaker."
+        ),
+    )
     max_no_progress: int = Field(
         default=0,
         ge=0,

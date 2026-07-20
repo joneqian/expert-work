@@ -167,6 +167,9 @@ export interface AgentManifest {
       // MemoryConsolidator master switch (default_factory ⇒ absent block =
       // enabled with the platform-default aux_model).
       memory_consolidation?: { enabled?: boolean; [k: string]: unknown };
+      // B3 — per-run total token budget across the whole delegation tree
+      // (main agent + all workers), 0/absent = disabled.
+      token_budget?: number;
       [k: string]: unknown;
     } | null;
     // Group 6 试点(运行预算与超时) — ReAct loop step budget + free-form knobs
@@ -657,6 +660,8 @@ export interface RunBudgetFields {
   runDeadlineS?: number;
   streamDeadlineS?: number;
   idleTimeoutS?: number;
+  // B3 — per-run total token budget (policies.token_budget), 0/undefined = disabled.
+  tokenBudget?: number;
 }
 
 export const readRunBudget = (m: unknown): RunBudgetFields => ({
@@ -666,6 +671,7 @@ export const readRunBudget = (m: unknown): RunBudgetFields => ({
   runDeadlineS: specOf(m).policies?.run_deadline_s,
   streamDeadlineS: specOf(m).stream_deadline_s,
   idleTimeoutS: specOf(m).idle_timeout_s,
+  tokenBudget: specOf(m).policies?.token_budget,
 });
 
 // Merge a partial patch into a block, deleting keys whose patch value is
@@ -699,6 +705,7 @@ export function patchRunBudget(
   const policiesPatch: Record<string, unknown> = {};
   if ("maxNoProgress" in patch) policiesPatch.max_no_progress = patch.maxNoProgress;
   if ("runDeadlineS" in patch) policiesPatch.run_deadline_s = patch.runDeadlineS;
+  if ("tokenBudget" in patch) policiesPatch.token_budget = patch.tokenBudget;
   if (Object.keys(policiesPatch).length > 0) {
     updates.policies = mergeBlock(spec.policies ?? undefined, policiesPatch);
   }

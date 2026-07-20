@@ -11,6 +11,7 @@ function haystack(it: TimelineItem): string {
     case "retry":
     case "error":
     case "approval":
+    case "guard":
     case "end":
       return it.text.toLowerCase();
     default:

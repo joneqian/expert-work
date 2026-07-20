@@ -624,6 +624,10 @@ export interface TranslationKeys {
     idle_timeout_brief: string;
     idle_timeout_impact: string;
     idle_timeout_default: string;
+    token_budget_label: string;
+    token_budget_brief: string;
+    token_budget_impact: string;
+    token_budget_default: string;
   };
   // Task 3 — "Context & Compression" group (ContextGatesSection). 18 knobs
   // across the four PolicySpec sub-blocks the three context gates read
@@ -3398,6 +3402,11 @@ const en: TranslationKeys = {
     idle_timeout_impact:
       "Once the first token has arrived, a gap between subsequent tokens longer than this ends the turn early with whatever output was generated so far (the model went silent mid-stream). Distinct from the first-token timeout (stream_deadline_s). 0 = off (dev / long-batch use only); non-streaming providers ignore this.",
     idle_timeout_default: "45",
+    token_budget_label: "Token budget",
+    token_budget_brief: "Per-run total token cap across the whole delegation tree (main agent + all workers).",
+    token_budget_impact:
+      "Counts input/output/cache tokens of every main-loop LLM call into one shared pool. At 80% the model is warned to converge; at the cap the run does one final tool-less wrap-up turn and completes normally. Guard markers appear on the timeline.",
+    token_budget_default: "0 (disabled)",
   },
   context_gates: {
     group_intro:

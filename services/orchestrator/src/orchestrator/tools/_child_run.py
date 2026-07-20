@@ -38,6 +38,7 @@ from expert_work.runtime.cancellation import (
     RunCancelledError,
 )
 from orchestrator.errors import MaxStepsExceededError
+from orchestrator.tools._guards import GUARD_SINK_KEY, TOKEN_BUDGET_KEY
 from orchestrator.tools._worker_events import (
     WORKER_EVENT_SINK_KEY,
     WorkerEventSink,
@@ -458,4 +459,9 @@ def _child_config(ctx: ToolContext, *, sub_thread_id: UUID, sub_run_id: UUID) ->
     # B2 — 向下透传 worker 事件 sink,孙 worker 帧直达父 run bridge。
     if ctx.worker_event_sink is not None:
         configurable[WORKER_EVENT_SINK_KEY] = ctx.worker_event_sink
+    # B3 — token 池 + guard sink 下传:全树共扣一个额度,guard 帧直达父流。
+    if ctx.token_budget is not None:
+        configurable[TOKEN_BUDGET_KEY] = ctx.token_budget
+    if ctx.guard_sink is not None:
+        configurable[GUARD_SINK_KEY] = ctx.guard_sink
     return {"configurable": configurable}

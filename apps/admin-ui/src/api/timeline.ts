@@ -37,7 +37,7 @@ export interface AuxNodeItem {
   durationMs: number | null;
 }
 export interface MarkerItem {
-  kind: "compaction" | "retry" | "error" | "approval" | "end";
+  kind: "compaction" | "retry" | "error" | "approval" | "guard" | "end";
   seq: number;
   receivedAt: string;
   text: string;
@@ -95,6 +95,22 @@ export function parseTimeline(events: readonly SseEvent[]): TimelineItem[] {
     }
     if (evt.event === "approval") {
       push({ kind: "approval", receivedAt: at, tone: "pause", text: "等待人工审批" });
+      continue;
+    }
+    if (evt.event === "guard") {
+      const d = obj(evt.data);
+      const detail = obj(d.detail);
+      const warn = str(d.kind) === "warning";
+      const g = str(d.guard);
+      const text =
+        g === "token_budget"
+          ? warn
+            ? `token 预算已用 ${Math.round((int(detail.spent) / Math.max(1, int(detail.limit))) * 100)}%(${int(detail.spent)}/${int(detail.limit)})`
+            : `token 预算耗尽(${int(detail.spent)}/${int(detail.limit)})→ 收尾轮`
+          : g === "max_steps"
+            ? `步数耗尽(${int(detail.steps)}/${int(detail.max)})→ 收尾轮`
+            : `无进展 ${int(detail.streak)}/${int(detail.max)} → 收尾轮`;
+      push({ kind: "guard", receivedAt: at, tone: warn ? "warn" : "bad", text });
       continue;
     }
     if (evt.event === "end") {

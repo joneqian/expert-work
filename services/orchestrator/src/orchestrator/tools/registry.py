@@ -24,6 +24,7 @@ from uuid import UUID
 from expert_work.protocol import Plan
 from expert_work.runtime.cancellation import CancellationToken
 from orchestrator.tools._budget import WorkerSpawnBudget
+from orchestrator.tools._guards import TokenBudget
 from orchestrator.tools.ranking import build_document, rank_tools
 
 #: Stream TE-1 — a tool's effect on the world. Descriptive metadata only in
@@ -205,6 +206,10 @@ class ToolContext:
     #: ``dataclasses.replace``. Worker frames carry it so the frontend can
     #: attach the worker sub-timeline to the pending tool card.
     tool_call_id: str | None = None
+    #: B3 — 全树共享 token 池(run_agent 注入,None=未启用)。
+    token_budget: TokenBudget | None = None
+    #: B3 — guard marker 帧 sink(下传给子树,None=未接线)。
+    guard_sink: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
 
 #: Stream K.K8 — keys a tool is allowed to write back to ``AgentState``

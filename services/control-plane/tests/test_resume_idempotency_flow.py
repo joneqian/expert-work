@@ -112,6 +112,7 @@ class _FakeRuntime:
             bound_distilled_skills=(),
             tool_replay_safe=None,
             trajectory_recording=True,
+            token_budget=0,
         )
 
     def new_worker_spawn_budget(self) -> None:

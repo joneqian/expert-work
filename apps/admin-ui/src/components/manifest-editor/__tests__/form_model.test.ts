@@ -967,6 +967,13 @@ describe("run budget (workflow.max_iterations + policies.max_no_progress/run_dea
     expect(next.spec?.workflow?.type).toBeUndefined();
     expect(next.spec?.workflow?.max_iterations).toBe(40);
   });
+
+  it("reads and patches policies.token_budget", () => {
+    const m = { spec: { policies: { token_budget: 500000 } } };
+    expect(readRunBudget(m).tokenBudget).toBe(500000);
+    const patched = patchRunBudget(m, { tokenBudget: undefined });
+    expect(patched.spec?.policies?.token_budget).toBeUndefined();
+  });
 });
 
 describe("context gates (policies.context_compression / working_memory / tool_result_prune / tool_output_budget)", () => {
