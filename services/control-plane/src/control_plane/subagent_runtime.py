@@ -17,6 +17,7 @@ from uuid import UUID
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from control_plane.platform_dynamic_worker_config import PlatformDynamicWorkerConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolProvider
 from control_plane.runtime import make_provider_key_resolver, make_skill_resolver
 from control_plane.tenancy import TenantConfigService
@@ -107,6 +108,15 @@ def synthesize_worker_spec(
     )
     worker_meta = parent.metadata.model_copy(update={"name": f"{parent.metadata.name}-worker"})
     return parent.model_copy(update={"metadata": worker_meta, "spec": worker_body})
+
+
+async def _resolve_worker_max_iterations(
+    service: PlatformDynamicWorkerConfigService | None, fallback: int
+) -> int:
+    """Per-build effective worker iteration cap — DB-wins-over-env (B3 PR2)."""
+    if service is None:
+        return fallback
+    return (await service.effective()).max_iterations
 
 
 class SubAgentNotFoundError(Exception):
@@ -292,6 +302,7 @@ def make_worker_build_fn(
     skill_asset_store: SkillAssetStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
+    dynamic_worker_config_service: PlatformDynamicWorkerConfigService | None = None,
 ) -> WorkerBuildFn:
     """Build the :class:`WorkerBuildFn` the orchestrator's ``ToolEnv`` carries
     for the ``spawn_worker`` tool (1.3 dynamic Orchestrator-Worker).
@@ -302,6 +313,12 @@ def make_worker_build_fn(
     ephemeral. The build reuses the same plumbing (provider key / skill
     resolvers, tenant MCP pool, ``build_agent`` at ``subagent_depth=depth``).
     Not cached: each worker carries a per-call role/prompt.
+
+    ``dynamic_worker_config_service`` (B3 PR2) — when set, ``max_iterations``
+    is re-read from the live platform config on EVERY build via
+    :func:`_resolve_worker_max_iterations`, so a config change is hot (the
+    ``max_iterations`` param stays the boot-time fallback). ``None`` keeps
+    every worker clamped to the ``max_iterations`` param, unchanged.
     """
 
     async def _build(
@@ -315,7 +332,9 @@ def make_worker_build_fn(
         worker_spec = synthesize_worker_spec(
             parent_spec,
             role=role,
-            max_iterations=max_iterations,
+            max_iterations=await _resolve_worker_max_iterations(
+                dynamic_worker_config_service, max_iterations
+            ),
             allowed_toolsets=allowed_toolsets,
         )
         provider_key_resolver = (

@@ -287,7 +287,7 @@ async def fire_trigger(
             trajectory_recorder=runtime.trajectory_recorder,
             trajectory_enabled=built.trajectory_recording,
             token_budget=built.token_budget,
-            worker_spawn_budget=runtime.new_worker_spawn_budget(),
+            worker_spawn_budget=await runtime.new_worker_spawn_budget(),
             # Stream HX-3 — replay-safety resolver for transient retry.
             tool_replay_safe=built.tool_replay_safe,
         )

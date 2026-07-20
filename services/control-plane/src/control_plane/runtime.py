@@ -24,6 +24,7 @@ from uuid import UUID
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
+from control_plane.platform_dynamic_worker_config import PlatformDynamicWorkerConfigService
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolProvider
@@ -195,6 +196,13 @@ class AgentRuntime:
     dynamic_workers_enabled: bool = False
     dynamic_worker_max_concurrent: int = 3
     dynamic_worker_max_per_run: int = 16
+    #: B3 PR2 — the platform dynamic-worker config service. When set,
+    #: :meth:`new_worker_spawn_budget` reads the live (DB-wins-over-env)
+    #: ``max_per_run`` / ``max_concurrent`` per call, so a config change
+    #: takes effect on the NEXT run without a process restart. ``None``
+    #: (tests / pre-lifespan-swap) falls back to the attrs above, which
+    #: the lifespan cold-reads from settings at boot.
+    dynamic_worker_config_service: PlatformDynamicWorkerConfigService | None = None
     #: The durable checkpointer the app lifespan binds into ``agent_builder``.
     #: Exposed here so read-only history surfaces (Playground resume — the
     #: ``/messages`` endpoint) can read a thread's checkpoint DIRECTLY instead of
@@ -212,18 +220,33 @@ class AgentRuntime:
     #: catalog) changes, which affects every tenant's build.
     _invalidate_all_hooks: list[Callable[[], None]] = field(default_factory=list, repr=False)
 
-    def new_worker_spawn_budget(self) -> Any:
+    async def new_worker_spawn_budget(self) -> Any:
         """A fresh per-run :class:`WorkerSpawnBudget`, or ``None`` when dynamic
         workers are disabled. Created per run (the semaphore + count are
         per-run state), passed into ``run_agent``. Lazy-imports the
-        orchestrator type to keep this module's import graph light."""
+        orchestrator type to keep this module's import graph light.
+
+        B3 PR2 — ``max_per_run`` / ``max_concurrent`` read through
+        ``dynamic_worker_config_service`` (``effective()``) when set, so a
+        platform-settings change is HOT: the very next run picks it up, no
+        restart. ``None`` falls back to the ``dynamic_worker_max_*`` attrs,
+        which are the lifespan's cold read of settings at boot.
+        """
         if not self.dynamic_workers_enabled:
             return None
         from orchestrator.tools.spawn_worker import WorkerSpawnBudget
 
+        if self.dynamic_worker_config_service is not None:
+            cfg = await self.dynamic_worker_config_service.effective()
+            max_per_run = cfg.max_per_run
+            max_concurrent = cfg.max_concurrent
+        else:
+            max_per_run = self.dynamic_worker_max_per_run
+            max_concurrent = self.dynamic_worker_max_concurrent
+
         return WorkerSpawnBudget(
-            max_per_run=self.dynamic_worker_max_per_run,
-            max_concurrent=self.dynamic_worker_max_concurrent,
+            max_per_run=max_per_run,
+            max_concurrent=max_concurrent,
         )
 
     async def get_agent(

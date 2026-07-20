@@ -1266,6 +1266,12 @@ def create_app(
                 resolved_agent_runtime.dynamic_worker_max_per_run = (
                     resolved_settings.dynamic_worker_max_per_run
                 )
+                # B3 PR2 — hot path: new_worker_spawn_budget() reads THROUGH this
+                # service (DB-wins-over-env, live) when set; the three cold-read
+                # attrs above remain its fallback (service absent).
+                resolved_agent_runtime.dynamic_worker_config_service = (
+                    resolved_platform_dynamic_worker_config_service
+                )
                 # Stream J.12 — the curation worker reads the L7
                 # trajectory ObjectStore, so it is constructed here
                 # where the store exists (mirrors MemoryDLQWorker).
@@ -1433,6 +1439,10 @@ def create_app(
                         skill_activity_recorder=skill_activity_recorder,
                         tenant_config_service=resolved_tenant_config_service,
                         skill_asset_store=skill_asset_store,
+                        # B3 PR2 — per-build max_iterations reads through this
+                        # service (DB-wins-over-env, live); ``max_iterations=``
+                        # above stays its boot-time fallback.
+                        dynamic_worker_config_service=resolved_platform_dynamic_worker_config_service,
                     )
                     if resolved_settings.enable_dynamic_workers
                     else None
