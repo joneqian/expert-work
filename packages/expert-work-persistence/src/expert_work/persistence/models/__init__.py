@@ -38,6 +38,9 @@ from expert_work.persistence.models.platform_agent_template import (
 from expert_work.persistence.models.platform_billing_config import (
     PlatformBillingConfigRow,
 )
+from expert_work.persistence.models.platform_dynamic_worker_config import (
+    PlatformDynamicWorkerConfigRow,
+)
 from expert_work.persistence.models.platform_embedding_config import (
     PlatformEmbeddingConfigRow,
 )
@@ -124,6 +127,7 @@ __all__ = [
     "ModelRateCardRow",
     "PlatformAgentTemplateRow",
     "PlatformBillingConfigRow",
+    "PlatformDynamicWorkerConfigRow",
     "PlatformEmbeddingConfigRow",
     "PlatformJudgeConfigRow",
     "PlatformProviderSecretRow",
