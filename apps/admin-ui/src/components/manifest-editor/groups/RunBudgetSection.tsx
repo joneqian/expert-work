@@ -81,6 +81,14 @@ const RUN_BUDGET_DEFS: readonly FieldDef[] = [
     max: 86400,
   },
   {
+    fieldId: "policies.token_budget",
+    i18nKey: "run_budget.token_budget",
+    valueKey: "tokenBudget",
+    kind: "number",
+    effectiveDefault: 0,
+    min: 0,
+  },
+  {
     fieldId: "spec.stream_deadline_s",
     i18nKey: "run_budget.stream_deadline",
     valueKey: "streamDeadlineS",

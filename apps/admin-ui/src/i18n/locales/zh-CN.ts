@@ -642,6 +642,11 @@ const zhCN: TranslationKeys = {
     idle_timeout_impact:
       "首个 token 到达后,若相邻两个 token 的间隔超过此值,视为模型中途卡住/沉默,提前结束本轮并保留已生成的部分输出。区别于首 token 超时(stream_deadline_s)。0 = 关闭该计时器(仅建议开发/长批处理场景使用);非流式 provider 不受影响。",
     idle_timeout_default: "45",
+    token_budget_label: "Token 预算",
+    token_budget_brief: "本 run(主 Agent + 全部 worker)全委托树共享的 token 总上限。",
+    token_budget_impact:
+      "主循环每次 LLM 调用的 input/output/cache token 计入同一个池。80% 时提示模型收敛;耗尽时强制一轮无工具收尾并正常完成。触发在时间线上有 guard 标记。",
+    token_budget_default: "0(关闭)",
   },
   context_gates: {
     group_intro:

@@ -136,4 +136,16 @@ describe("parseTimeline", () => {
     ]);
     expect(items).toHaveLength(0);
   });
+
+  it("renders guard frames as markers", () => {
+    const items = parseTimeline([
+      ev("guard", { kind: "warning", guard: "token_budget", detail: { spent: 410000, limit: 500000 } }, "t1"),
+      ev("guard", { kind: "tripped", guard: "max_steps", detail: { steps: 30, max: 30 } }, "t2"),
+    ]);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ kind: "guard", tone: "warn" });
+    expect(items[0].kind === "guard" && items[0].text).toContain("82%");
+    expect(items[1]).toMatchObject({ kind: "guard", tone: "bad" });
+    expect(items[1].kind === "guard" && items[1].text).toContain("步数耗尽");
+  });
 });

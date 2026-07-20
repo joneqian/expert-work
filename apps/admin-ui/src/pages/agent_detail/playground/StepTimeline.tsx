@@ -86,6 +86,7 @@ export function StepTimeline({ items, liveByStep, ttftMs = null, finalized = fal
             case "retry":
             case "error":
             case "approval":
+            case "guard":
             case "end":
               return <MarkerRow key={item.seq} item={item} />;
             default:
