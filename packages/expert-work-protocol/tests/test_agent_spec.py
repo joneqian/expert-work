@@ -940,3 +940,25 @@ def test_idle_timeout_field_default() -> None:
     assert AgentSpecBody.model_fields["idle_timeout_s"].default == 45
     # stream_deadline_s stays a field (reinterpreted as the first-token budget)
     assert AgentSpecBody.model_fields["stream_deadline_s"].default == 180
+
+
+# ---------------------------------------------------------------------------
+# policies.token_budget — B3 (per-run total token breaker)
+# ---------------------------------------------------------------------------
+
+
+def test_token_budget_round_trips() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {"token_budget": 500_000}
+    spec = AgentSpec.model_validate(doc)
+    assert spec.spec.policies.token_budget == 500_000
+    dumped = spec.model_dump(by_alias=True, exclude_none=True)
+    assert dumped["spec"]["policies"]["token_budget"] == 500_000
+
+
+def test_token_budget_defaults_zero_and_rejects_negative() -> None:
+    assert AgentSpec.model_validate(_doc()).spec.policies.token_budget == 0
+    doc = _doc()
+    doc["spec"]["policies"] = {"token_budget": -1}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)

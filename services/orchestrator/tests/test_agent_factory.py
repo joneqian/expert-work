@@ -432,6 +432,25 @@ async def test_build_agent_max_steps_from_workflow() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_agent_token_budget_defaults_zero() -> None:
+    """B3 — ``policies.token_budget`` default 0 ⇒ BuiltAgent carries no
+    breaker (opt-in, zero behaviour change for existing manifests)."""
+    async with make_checkpointer("memory") as cp:
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert built.token_budget == 0
+
+
+@pytest.mark.asyncio
+async def test_build_agent_token_budget_propagates_from_policies() -> None:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["policies"] = {"token_budget": 123_456}
+    spec = AgentSpec.model_validate(doc)
+    async with make_checkpointer("memory") as cp:
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
+    assert built.token_budget == 123_456
+
+
+@pytest.mark.asyncio
 async def test_build_agent_supports_vision_defaults_to_false() -> None:
     """``ModelSpec.supports_vision`` default → ``BuiltAgent.supports_vision`` False."""
     async with make_checkpointer("memory") as cp:
