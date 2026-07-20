@@ -8,7 +8,7 @@ falls back to its built-in defaults.
 No RLS policy: tenant-less row, exactly like ``platform_tool_budget_config``
 — all access goes through ``bypass_rls_session()``.
 
-Revision id ``0124_platform_dynamic_worker`` = 27 chars (within the 32-char
+Revision id ``0124_platform_dynamic_worker`` = 28 chars (within the 32-char
 alembic ``version_num`` ceiling per [memory:alembic-revision-id-32-chars]).
 """
 
