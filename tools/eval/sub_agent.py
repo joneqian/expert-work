@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import sys as _sys
 import time
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from pathlib import Path as _Path
@@ -154,6 +154,15 @@ class _ScriptedGraph:
         if self.child_delay_s > 0:
             await asyncio.sleep(self.child_delay_s)
         return {"messages": list(self.messages), "step_count": self.step_count}
+
+    async def astream(
+        self, state: Any, config: Any = None, *, stream_mode: Any = None
+    ) -> AsyncIterator[Any]:
+        # B2 — run_child_to_result 走 astream;脚本仍在 ainvoke 里,异常
+        # 路径不 yield values(主代码 _fetch_partial 兜底 = 原语义)。
+        del stream_mode
+        result = await self.ainvoke(state, config)
+        yield ("values", result)
 
     async def aget_state(self, config: Any) -> Any:
         del config

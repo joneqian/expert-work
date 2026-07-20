@@ -92,6 +92,7 @@ from orchestrator.run_retry import (
     retry_enabled,
     run_retry_total,
 )
+from orchestrator.tools._worker_events import WORKER_EVENT_SINK_KEY
 from orchestrator.tools.spawn_worker import WorkerSpawnBudget
 from orchestrator.trajectory import (
     TrajectoryOutcome,
@@ -378,9 +379,23 @@ async def run_agent(
         # store (the authoritative ``updates`` frame is what replays).
         await bridge.publish(run_id, "token", frame)
 
+    # B2 worker 可观测性 — worker 事件 sink。child run(spawn_worker /
+    # 静态 subagent)的 start/update/end 帧经此进父 run 的 bridge + 事件
+    # 库,实时与回放同源。与 _publish_compaction 的关键差异:并发
+    # worker(≤dynamic_worker_max_concurrent)会交错 await 本函数,seq
+    # 必须在任何 await 之前同步分配,否则两帧读到同一 event_seq 撞
+    # (run_id, seq) 主键。best-effort 由发送端(_emit_worker_frame)兜。
+    async def _publish_worker(frame: dict[str, Any]) -> None:
+        nonlocal event_seq
+        seq = event_seq
+        event_seq += 1
+        await bridge.publish(run_id, "worker", frame)
+        await _persist_event(event_store, run_id=run_id, seq=seq, event_name="worker", data=frame)
+
     # ``configurable`` was populated in the effective_config literal above.
     effective_config["configurable"][COMPACTION_SINK_KEY] = _publish_compaction
     effective_config["configurable"][TOKEN_SINK_KEY] = _publish_token
+    effective_config["configurable"][WORKER_EVENT_SINK_KEY] = _publish_worker
     # Stream 9.4 (HA failover) — renew the ownership lease while executing so a
     # peer's orphan sweep can tell this live run from a crashed owner's. Spawned
     # after the → RUNNING claim; cancelled in ``finally``.

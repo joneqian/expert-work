@@ -1,0 +1,129 @@
+"""B2 worker 可观测性 — 帧构建纯函数单测."""
+
+from __future__ import annotations
+
+import json
+
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+
+from orchestrator.tools._worker_events import (
+    WORKER_ARGS_EXCERPT,
+    WORKER_CONTENT_EXCERPT,
+    WORKER_RESULT_EXCERPT,
+    WorkerIdentity,
+    build_worker_end_frame,
+    build_worker_start_frame,
+    build_worker_update_frame,
+)
+
+_IDENT = WorkerIdentity(
+    worker_id="w-1",
+    parent_worker_id=None,
+    parent_tool_call_id="call-1",
+    label="spawn_worker",
+    agent_ref="dynamic:research",
+    depth=1,
+)
+
+
+def test_start_frame_envelope_and_task_excerpt() -> None:
+    frame = build_worker_start_frame(_IDENT, wseq=0, task="t" * 600, role="research", max_steps=32)
+    assert frame["worker_id"] == "w-1"
+    assert frame["parent_worker_id"] is None
+    assert frame["parent_tool_call_id"] == "call-1"
+    assert frame["label"] == "spawn_worker"
+    assert frame["agent_ref"] == "dynamic:research"
+    assert frame["depth"] == 1
+    assert frame["kind"] == "start"
+    assert frame["wseq"] == 0
+    assert frame["data"]["role"] == "research"
+    assert frame["data"]["max_steps"] == 32
+    # 500 字 + "…"
+    assert len(frame["data"]["task_excerpt"]) == WORKER_CONTENT_EXCERPT + 1
+    assert frame["data"]["task_excerpt"].endswith("…")
+
+
+def test_update_frame_summarizes_ai_and_tool_messages() -> None:
+    writes = {
+        "step_count": 3,
+        "messages": [
+            AIMessage(
+                content="x" * 600,
+                tool_calls=[
+                    {
+                        "name": "http_request",
+                        "args": {"url": "https://e.com", "body": "b" * 300},
+                        "id": "tc-1",
+                    }
+                ],
+            ),
+            ToolMessage(content="r" * 600, tool_call_id="tc-1", name="http_request"),
+        ],
+        "plan": {"goal": "dropped"},
+    }
+    frame = build_worker_update_frame(_IDENT, wseq=1, node="agent", writes=writes, duration_ms=42)
+    data = frame["data"]
+    assert frame["kind"] == "update"
+    assert data["node"] == "agent"
+    assert data["step_count"] == 3
+    assert data["_duration_ms"] == 42
+    assert "plan" not in data  # 非消息类 writes 丢弃
+    ai, tool = data["messages"]
+    assert ai["type"] == "ai"
+    assert len(ai["content_excerpt"]) == WORKER_CONTENT_EXCERPT + 1
+    assert ai["tool_calls"][0]["name"] == "http_request"
+    assert len(ai["tool_calls"][0]["args_excerpt"]) == WORKER_ARGS_EXCERPT + 1
+    assert tool["type"] == "tool"
+    assert tool["name"] == "http_request"
+    assert len(tool["tool_result_excerpt"]) == WORKER_RESULT_EXCERPT + 1
+
+
+def test_update_frame_accepts_single_message_and_generic_type() -> None:
+    frame = build_worker_update_frame(
+        _IDENT,
+        wseq=0,
+        node="agent",
+        writes={"messages": SystemMessage(content="hi")},
+        duration_ms=1,
+    )
+    (msg,) = frame["data"]["messages"]
+    assert msg["type"] == "system"
+    assert msg["content_excerpt"] == "hi"
+
+
+def test_update_frame_no_step_count_key_when_absent() -> None:
+    frame = build_worker_update_frame(
+        _IDENT, wseq=0, node="tools", writes={"messages": []}, duration_ms=5
+    )
+    assert "step_count" not in frame["data"]
+    assert frame["data"]["messages"] == []
+
+
+def test_end_frame_summary() -> None:
+    frame = build_worker_end_frame(
+        _IDENT,
+        wseq=9,
+        outcome="max_steps",
+        iteration_used=32,
+        llm_call_count=16,
+        wall_clock_ms=1234,
+    )
+    assert frame["kind"] == "end"
+    assert frame["data"] == {
+        "outcome": "max_steps",
+        "iteration_used": 32,
+        "llm_call_count": 16,
+        "wall_clock_ms": 1234,
+    }
+
+
+def test_frames_are_json_safe() -> None:
+    writes = {"messages": [AIMessage(content="ok")], "step_count": 1}
+    for frame in (
+        build_worker_start_frame(_IDENT, wseq=0, task="t", role=None, max_steps=8),
+        build_worker_update_frame(_IDENT, wseq=1, node="agent", writes=writes, duration_ms=0),
+        build_worker_end_frame(
+            _IDENT, wseq=2, outcome="success", iteration_used=1, llm_call_count=1, wall_clock_ms=10
+        ),
+    ):
+        json.dumps(frame)  # 不抛 = JSON-safe
