@@ -137,6 +137,14 @@ from orchestrator.llm import LLMCaller
 from orchestrator.llm.structured_output import correction_message, validate_structured_output
 from orchestrator.output_judge import ActionJudge, OutputJudge
 from orchestrator.state import AgentState
+from orchestrator.tools._guards import (
+    GUARD_SINK_KEY,
+    TOKEN_BUDGET_KEY,
+    TokenBudget,
+    build_guard_frame,
+    emit_guard_frame,
+    usage_total,
+)
 from orchestrator.tools._worker_events import WORKER_EVENT_SINK_KEY
 from orchestrator.tools.error_classifier import (
     ClassifiedToolError,
@@ -182,6 +190,14 @@ _PROMOTED_STALE_STEPS = 12
 #: #7915 — a hard stop discards finished work; a forced summary preserves it).
 _MAX_STEPS_WRAPUP_INSTRUCTION = (
     "You have reached this task's step budget and can no longer call any tools. "
+    "Using everything you have already gathered, produced, or written so far, "
+    "write your best, complete final answer to the user's request now. "
+    "Do not ask to continue and do not attempt to call any tools."
+)
+
+#: B3 — token 预算耗尽的收尾指令(措辞镜像步数版,原因改为 token)。
+_TOKEN_BUDGET_WRAPUP_INSTRUCTION = (
+    "You have reached this task's token budget and can no longer call any tools. "  # noqa: S105
     "Using everything you have already gathered, produced, or written so far, "
     "write your best, complete final answer to the user's request now. "
     "Do not ask to continue and do not attempt to call any tools."
@@ -351,6 +367,11 @@ _llm_structured_finalize_total = expert_work_counter(
     "expert_work_llm_structured_finalize_total",
     "Structured finalization outcomes on terminal agent turns (Stream RT-1 PR-3).",
     ("outcome",),
+)
+#: B3 — runs (or workers) that hit the per-run token budget and wrapped up.
+_token_budget_exhausted_total = expert_work_counter(
+    "expert_work_token_budget_exhausted_total",
+    "Runs (or workers) that hit the per-run token budget and wrapped up.",
 )
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
@@ -525,7 +546,15 @@ def build_react_graph(
         # a wrap-up instruction just before the call below and strips any
         # tool_calls off the response so the router ends instead of looping.
         # ``stuck`` (no-progress) routes into the same graceful wrap-up.
-        budget_exhausted = (max_steps > 0 and step_count >= max_steps) or stuck
+        # B3 — 全树共享 token 池。对象/sink 缺失(limit=0 或未注入)全为
+        # None → 行为与引入前逐字节一致。
+        configurable = config.get("configurable") or {}
+        token_budget = configurable.get(TOKEN_BUDGET_KEY)
+        token_budget = token_budget if isinstance(token_budget, TokenBudget) else None
+        guard_sink_raw = configurable.get(GUARD_SINK_KEY)
+        guard_sink = guard_sink_raw if callable(guard_sink_raw) else None
+        token_tripped = token_budget is not None and token_budget.exhausted
+        budget_exhausted = (max_steps > 0 and step_count >= max_steps) or stuck or token_tripped
 
         # Stream TE-6 — bind active specs plus any deferred tools the run has
         # promoted via ``find_tools`` (carried per-thread on AgentState, so the
@@ -785,8 +814,69 @@ def build_react_graph(
         if budget_exhausted:
             tools = []
             cache_hit_response = None
-            messages = [*messages, HumanMessage(content=_MAX_STEPS_WRAPUP_INSTRUCTION)]
-            logger.warning("agent.max_steps_graceful_wrapup step=%d max=%d", step_count, max_steps)
+            wrapup = (
+                _TOKEN_BUDGET_WRAPUP_INSTRUCTION if token_tripped else _MAX_STEPS_WRAPUP_INSTRUCTION
+            )
+            messages = [*messages, HumanMessage(content=wrapup)]
+            # B3 — guard 可见化:每个触发的闸各发一条 tripped 帧(老盲区一起治)。
+            if token_tripped and token_budget is not None:
+                await emit_guard_frame(
+                    guard_sink,
+                    build_guard_frame(
+                        kind="tripped",
+                        guard="token_budget",
+                        detail={"spent": token_budget.spent, "limit": token_budget.limit},
+                    ),
+                )
+                _token_budget_exhausted_total.inc()
+            if max_steps > 0 and step_count >= max_steps:
+                await emit_guard_frame(
+                    guard_sink,
+                    build_guard_frame(
+                        kind="tripped",
+                        guard="max_steps",
+                        detail={"steps": step_count, "max": max_steps},
+                    ),
+                )
+            if stuck:
+                await emit_guard_frame(
+                    guard_sink,
+                    build_guard_frame(
+                        kind="tripped",
+                        guard="no_progress",
+                        detail={"streak": no_progress_streak, "max": max_no_progress},
+                    ),
+                )
+            logger.warning("agent.budget_graceful_wrapup step=%d max=%d", step_count, max_steps)
+        elif token_budget is not None and token_budget.warning:
+            # B3 — 80% 预警:首跨发一条 warning 帧(flag 挂共享对象,全树一次);
+            # 此后每步 prompt 附预算注(ephemeral,不持久化,不碰 system 前缀)。
+            if not token_budget.warned:
+                token_budget.warned = True
+                await emit_guard_frame(
+                    guard_sink,
+                    build_guard_frame(
+                        kind="warning",
+                        guard="token_budget",
+                        detail={"spent": token_budget.spent, "limit": token_budget.limit},
+                    ),
+                )
+                logger.info(
+                    "agent.token_budget_warning spent=%d limit=%d",
+                    token_budget.spent,
+                    token_budget.limit,
+                )
+            messages = [
+                *messages,
+                HumanMessage(
+                    content=(
+                        f"[token budget notice] This run has used {token_budget.spent} of its "
+                        f"{token_budget.limit} token budget ({token_budget.remaining} remaining). "
+                        "Converge quickly: prefer finishing with what you have over further "
+                        "tool exploration."
+                    )
+                ),
+            ]
 
         # ``messages`` is now the exact prompt — the E.13 cache key input.
         if cache_hit_response is not None:
@@ -930,6 +1020,10 @@ def build_react_graph(
                     result=AuditResult.SUCCESS,
                     categories=dlp_cats,
                 )
+
+        # B3 — 每步累计(cache hit 同计,与 token_usage 行为一致)。
+        if token_budget is not None:
+            token_budget.add(usage_total(getattr(response, "usage_metadata", None)))
 
         if after_llm_chain is not None:
             # RT-1 PR-3 — when a structured resend happened, this pass
@@ -2547,6 +2641,9 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
     # B2 — worker 事件 sink(镜像 worker_spawn_budget 的 config 读取)。
     sink_raw = configurable.get(WORKER_EVENT_SINK_KEY)
     worker_event_sink = sink_raw if callable(sink_raw) else None
+    # B3 — token 池 + guard sink(镜像同一读取惯例)。
+    tb_raw = configurable.get(TOKEN_BUDGET_KEY)
+    guard_raw = configurable.get(GUARD_SINK_KEY)
     return ToolContext(
         tenant_id=tenant_id,
         run_id=run_id,
@@ -2557,6 +2654,8 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
         deadline_at=deadline_at,
         worker_spawn_budget=worker_spawn_budget,
         worker_event_sink=worker_event_sink,
+        token_budget=tb_raw if isinstance(tb_raw, TokenBudget) else None,
+        guard_sink=guard_raw if callable(guard_raw) else None,
     )
 
 
