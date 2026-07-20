@@ -1230,6 +1230,13 @@ const zhCN: TranslationKeys = {
     tr_purpose_primary: "主推理",
     tr_aux_llm: "辅助 LLM 调用",
     tr_raw_error: "原文加载失败",
+    tl_worker_running: "运行中",
+    tl_worker_success: "完成",
+    tl_worker_max_steps: "步数耗尽",
+    tl_worker_cancelled: "已取消",
+    tl_worker_task: "任务",
+    tl_worker_summary: "{{steps}} 步 · {{calls}} 次 LLM · {{duration}}",
+    tl_worker_children: "子 worker",
   },
   session_history: {
     title: "会话历史",
