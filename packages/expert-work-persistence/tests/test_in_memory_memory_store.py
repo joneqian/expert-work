@@ -622,3 +622,50 @@ async def test_ranking_reinforces_access_and_importance() -> None:
     await store.write([low, hot])
     got = await store.retrieve(tenant_id=t, user_id=u, query_embedding=emb, limit=2)
     assert got[0].content == "b"  # same cosine, hot+important wins
+
+
+@pytest.mark.asyncio
+async def test_hybrid_ranking_reinforces_access_and_importance() -> None:
+    """Hybrid (``query_text=``) counterpart of the vector-path test above.
+
+    Identical embeddings tie the vector sub-ranking, and both contents
+    share the query keyword so they tie the keyword sub-ranking too —
+    RRF fusion then favors ``low`` on insertion-order alone (it lands at
+    rank 0 in both sub-rankings). Only the frequency/importance factors
+    can flip that back to ``hot``, so this pins down the P5a weighting
+    on the hybrid RRF path (SQL vector-only path already covered above).
+    """
+    t, u = uuid4(), uuid4()
+    emb = (1.0, 0.0)
+    store = InMemoryMemoryStore()
+    low = MemoryItem(
+        id=uuid4(),
+        tenant_id=t,
+        user_id=u,
+        kind="fact",
+        content="widget alpha",
+        embedding=emb,
+        access_count=0,
+        importance=0.5,
+    )
+    hot = MemoryItem(
+        id=uuid4(),
+        tenant_id=t,
+        user_id=u,
+        kind="fact",
+        content="widget beta",
+        embedding=emb,
+        access_count=100,
+        importance=0.9,
+    )
+    await store.write([low, hot])
+    got = await store.retrieve(
+        tenant_id=t,
+        user_id=u,
+        query_embedding=emb,
+        query_text="widget",
+        limit=2,
+    )
+    # RRF alone (no freq/importance) would rank "widget alpha" first —
+    # both sub-rankings tie and it holds rank 0 by insertion order.
+    assert got[0].content == "widget beta"  # hot+important overturns the RRF tie
