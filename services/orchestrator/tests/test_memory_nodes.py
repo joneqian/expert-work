@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
@@ -21,6 +22,7 @@ from orchestrator import (
     make_memory_writeback_node,
 )
 from orchestrator.graph_builder.memory import (
+    _reconcile_and_apply,
     _verify_memories,
     parse_extracted_memories,
     parse_verify_kept,
@@ -132,6 +134,67 @@ def test_parse_extracted_memories_drops_bad_kind_and_dedups() -> None:
 )
 def test_parse_extracted_memories_tolerates_garbage(text: str) -> None:
     assert parse_extracted_memories(text) == []
+
+
+def test_parse_extracted_memories_reads_expected_valid_days_and_is_correction() -> None:
+    text = """{"memories": [
+      {"kind": "fact", "content": "User lives in Shanghai", "importance": 0.9,
+       "confidence": 0.9, "expected_valid_days": 365, "is_correction": true}
+    ]}"""
+    out = parse_extracted_memories(text)
+    assert len(out) == 1
+    assert out[0].expected_valid_days == 365
+    assert out[0].is_correction is True
+
+
+def test_parse_extracted_memories_defaults_new_fields_when_absent() -> None:
+    text = '{"memories": [{"kind": "fact", "content": "x", "importance": 0.9, "confidence": 0.9}]}'
+    out = parse_extracted_memories(text)
+    assert out[0].expected_valid_days is None
+    assert out[0].is_correction is False
+
+
+def test_parse_extracted_memories_tolerates_malformed_new_fields() -> None:
+    text = """{"memories": [{"kind": "fact", "content": "x", "importance": 0.9,
+      "confidence": 0.9, "expected_valid_days": "soon", "is_correction": "yes"}]}"""
+    out = parse_extracted_memories(text)
+    # Malformed window → None (never drop the memory); non-bool truthy string → False (strict).
+    assert out[0].expected_valid_days is None
+    assert out[0].is_correction is False
+
+
+def test_parse_extracted_memories_infinity_valid_days_does_not_drop_batch() -> None:
+    """Reviewer repro (P5b-2b T1 fix) — ``int(float('inf'))`` raises
+    ``OverflowError``, a sibling of ``TypeError``/``ValueError`` (not a
+    subclass), so it was previously uncaught. ``json.loads`` accepts the
+    non-standard ``Infinity`` token by default, so an LLM reply with
+    ``"expected_valid_days": Infinity`` must not blow up parsing and drop the
+    ENTIRE batch — the malformed field degrades to None (best-effort) and the
+    well-formed sibling memory in the same reply still survives."""
+    text = """{"memories": [
+      {"kind": "fact", "content": "bad window", "importance": 0.9,
+       "confidence": 0.9, "expected_valid_days": Infinity},
+      {"kind": "fact", "content": "good memory", "importance": 0.8,
+       "confidence": 0.7, "expected_valid_days": 30}
+    ]}"""
+    out = parse_extracted_memories(text)
+    assert [m.content for m in out] == ["bad window", "good memory"]
+    assert out[0].expected_valid_days is None
+    assert out[1].expected_valid_days == 30
+
+
+def test_parse_extracted_memories_zero_and_negative_valid_days_are_none() -> None:
+    # Reviewer coverage gap — the ``days > 0 else None`` branch: 0 and negative
+    # windows are not valid "stays true for N days" values, so both must fall
+    # back to None rather than being persisted as a bogus validity window.
+    text = """{"memories": [
+      {"kind": "fact", "content": "zero window", "expected_valid_days": 0},
+      {"kind": "fact", "content": "negative window", "expected_valid_days": -5}
+    ]}"""
+    out = parse_extracted_memories(text)
+    assert len(out) == 2
+    assert out[0].expected_valid_days is None
+    assert out[1].expected_valid_days is None
 
 
 # ---------------------------------------------------------------------------
@@ -815,6 +878,62 @@ async def test_flush_failure_enqueues_with_source_run_id() -> None:
     assert await dlq.count() == 1
     enqueued = next(iter(dlq._rows.values()))  # type: ignore[attr-defined]
     assert enqueued.source_run_id == str(run)
+
+
+# ---------------------------------------------------------------------------
+# P5b-2b ⑧ — reconcile correction hint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconcile_payload_includes_is_correction() -> None:
+    # One extracted item flagged as a correction, one existing near-neighbor
+    # above the 0.80 gate → reconcile runs and the candidate payload must
+    # carry is_correction=True for that candidate.
+    tenant, user = uuid4(), uuid4()
+    existing_id = uuid4()
+    vector = (1.0, 0.0, 0.0, 0.0)
+    store = InMemoryMemoryStore()
+    await store.write(
+        [
+            MemoryItem(
+                id=existing_id,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="lives in Paris",
+                embedding=vector,
+            )
+        ]
+    )
+    item = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="lives in Berlin",
+        embedding=vector,  # identical vector → cosine == 1.0, above the 0.80 gate
+    )
+
+    captured: dict = {}
+
+    async def spy_llm(*, messages: Sequence[BaseMessage], tools: Sequence[ToolSpec]) -> AIMessage:
+        del tools
+        # second message is the JSON candidate payload
+        captured["payload"] = json.loads(str(messages[-1].content))
+        return AIMessage(
+            content=f'{{"ops": [{{"index": 0, "op": "UPDATE", "target_id": "{existing_id}"}}]}}'
+        )
+
+    await _reconcile_and_apply(
+        [item],
+        corrections=[True],
+        memory_store=store,
+        llm_caller=spy_llm,
+        token=CancellationToken(),
+        log_label="test",
+    )
+    assert captured["payload"]["candidates"][0]["is_correction"] is True
 
 
 # ---------------------------------------------------------------------------

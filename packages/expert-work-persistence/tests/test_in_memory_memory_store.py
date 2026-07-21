@@ -1020,3 +1020,142 @@ async def test_retrieve_as_of_excludes_not_yet_valid() -> None:
         as_of=datetime(2026, 2, 1, tzinfo=UTC),
     )
     assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# P5b-2b ⑦ — list_due_for_review / renew_review (predictive review due-scan)
+# ---------------------------------------------------------------------------
+
+
+def _mem(
+    *,
+    tenant: object,
+    user: object,
+    content: str,
+    created_at: datetime | None = None,
+    expected_valid_days: int | None = None,
+    last_reviewed_at: datetime | None = None,
+    invalid_at: datetime | None = None,
+    expired_at: datetime | None = None,
+) -> MemoryItem:
+    return MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,  # type: ignore[arg-type]
+        user_id=user,  # type: ignore[arg-type]
+        kind="fact",
+        content=content,
+        embedding=(1.0, 0.0, 0.0),
+        created_at=created_at,
+        expected_valid_days=expected_valid_days,
+        last_reviewed_at=last_reviewed_at,
+        invalid_at=invalid_at,
+        expired_at=expired_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_due_for_review_selects_only_due_live_facts() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    # due: created 400d ago, window 365 → past due, never reviewed
+    due = _mem(
+        tenant=t,
+        user=u,
+        content="due",
+        created_at=now - timedelta(days=400),
+        expected_valid_days=365,
+    )
+    # not due yet: created 10d ago, window 365
+    fresh = _mem(
+        tenant=t,
+        user=u,
+        content="fresh",
+        created_at=now - timedelta(days=10),
+        expected_valid_days=365,
+    )
+    # no window → never scanned
+    nowin = _mem(
+        tenant=t,
+        user=u,
+        content="nowin",
+        created_at=now - timedelta(days=999),
+        expected_valid_days=None,
+    )
+    # due-by-age but already expired → excluded
+    expired = _mem(
+        tenant=t,
+        user=u,
+        content="expired",
+        created_at=now - timedelta(days=400),
+        expected_valid_days=365,
+        expired_at=now - timedelta(days=1),
+    )
+    # due-by-age but superseded (invalid) → excluded
+    invalid = _mem(
+        tenant=t,
+        user=u,
+        content="invalid",
+        created_at=now - timedelta(days=400),
+        expected_valid_days=365,
+        invalid_at=now - timedelta(days=1),
+    )
+    await store.write([due, fresh, nowin, expired, invalid])
+    out = await store.list_due_for_review(tenant_id=t, user_id=u, limit=10)
+    assert [m.content for m in out] == ["due"]
+
+
+@pytest.mark.asyncio
+async def test_list_due_for_review_rearms_on_last_reviewed_at() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    # created 400d ago but reviewed 10d ago, window 365 → base=reviewed → not due
+    reviewed = _mem(
+        tenant=t,
+        user=u,
+        content="reviewed",
+        created_at=now - timedelta(days=400),
+        expected_valid_days=365,
+        last_reviewed_at=now - timedelta(days=10),
+    )
+    await store.write([reviewed])
+    out = await store.list_due_for_review(tenant_id=t, user_id=u, limit=10)
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_renew_review_stamps_reviewed_and_updates_window() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    item = _mem(
+        tenant=t,
+        user=u,
+        content="x",
+        created_at=datetime.now(UTC) - timedelta(days=400),
+        expected_valid_days=365,
+    )
+    await store.write([item])
+    ok = await store.renew_review(
+        tenant_id=t, user_id=u, memory_id=item.id, expected_valid_days=730
+    )
+    assert ok is True
+    # now not due (just reviewed) and window extended
+    assert await store.list_due_for_review(tenant_id=t, user_id=u, limit=10) == []
+
+
+@pytest.mark.asyncio
+async def test_renew_review_none_clears_window() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    item = _mem(
+        tenant=t,
+        user=u,
+        content="x",
+        created_at=datetime.now(UTC) - timedelta(days=400),
+        expected_valid_days=365,
+    )
+    await store.write([item])
+    await store.renew_review(tenant_id=t, user_id=u, memory_id=item.id, expected_valid_days=None)
+    got = await store.list_for_user(tenant_id=t, user_id=u)
+    assert got[0].expected_valid_days is None

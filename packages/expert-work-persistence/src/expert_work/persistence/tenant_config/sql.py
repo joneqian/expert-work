@@ -58,6 +58,7 @@ def _row_to_record(row: TenantConfigRow) -> TenantConfigRecord:
         memory_consolidation_similarity=row.memory_consolidation_similarity,
         memory_purge_enabled=row.memory_purge_enabled,
         memory_purge_min_age_days=row.memory_purge_min_age_days,
+        memory_predictive_review_enabled=row.memory_predictive_review_enabled,
         # Stream O — credentials mode + tool credentials.
         credentials_mode=cast(CredentialsMode, row.credentials_mode),
         tool_credentials={cast(Tool, str(k)): str(v) for k, v in row.tool_credentials.items()},
@@ -179,6 +180,10 @@ class SqlTenantConfigStore(TenantConfigStore):
                     values["memory_purge_enabled"] = patch.memory_purge_enabled
                 if patch.memory_purge_min_age_days is not None:
                     values["memory_purge_min_age_days"] = patch.memory_purge_min_age_days
+                if patch.memory_predictive_review_enabled is not None:
+                    values["memory_predictive_review_enabled"] = (
+                        patch.memory_predictive_review_enabled
+                    )
                 # Stream O — credentials mode + tool credentials.
                 if patch.credentials_mode is not None:
                     values["credentials_mode"] = patch.credentials_mode
@@ -268,6 +273,8 @@ class SqlTenantConfigStore(TenantConfigStore):
                 existing.memory_purge_enabled = patch.memory_purge_enabled
             if patch.memory_purge_min_age_days is not None:
                 existing.memory_purge_min_age_days = patch.memory_purge_min_age_days
+            if patch.memory_predictive_review_enabled is not None:
+                existing.memory_predictive_review_enabled = patch.memory_predictive_review_enabled
             # Stream O — credentials mode + tool credentials. The
             # all-or-nothing invariant for ``mode='tenant'`` is enforced
             # by the TenantConfigService gate (Mini-ADR O-4), not here

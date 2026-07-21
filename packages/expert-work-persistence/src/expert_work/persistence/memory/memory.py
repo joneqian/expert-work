@@ -559,6 +559,62 @@ class InMemoryMemoryStore(MemoryStore):
         rows.sort(key=lambda r: (r.review_flagged_at, r.id))
         return rows[:limit]
 
+    async def list_due_for_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int,
+    ) -> list[MemoryItem]:
+        now = datetime.now(UTC)
+
+        def _due_at(row: MemoryItem) -> datetime | None:
+            if row.expected_valid_days is None or row.created_at is None:
+                return None
+            base = row.last_reviewed_at or row.created_at
+            return base + timedelta(days=row.expected_valid_days)
+
+        candidates = []
+        for row in self._rows:
+            if not (
+                row.tenant_id == tenant_id
+                and row.user_id == user_id
+                and row.deleted_at is None
+                and row.invalid_at is None
+                and row.expired_at is None
+                and row.expected_valid_days is not None
+            ):
+                continue
+            due = _due_at(row)
+            if due is not None and due <= now:
+                candidates.append(row)
+        candidates.sort(key=lambda r: _due_at(r) or now)
+        return candidates[:limit]
+
+    async def renew_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+        expected_valid_days: int | None,
+    ) -> bool:
+        for idx, row in enumerate(self._rows):
+            if (
+                row.id == memory_id
+                and row.tenant_id == tenant_id
+                and row.user_id == user_id
+                and row.deleted_at is None
+            ):
+                self._rows[idx] = row.model_copy(
+                    update={
+                        "last_reviewed_at": datetime.now(UTC),
+                        "expected_valid_days": expected_valid_days,
+                    }
+                )
+                return True
+        return False
+
     async def archive(
         self,
         *,

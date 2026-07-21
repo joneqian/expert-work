@@ -349,6 +349,37 @@ class MemoryStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def list_due_for_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int,
+    ) -> list[MemoryItem]:
+        """P5b-2b ⑦ — live facts whose predicted validity window is due for
+        re-review: ``expected_valid_days IS NOT NULL`` and
+        ``COALESCE(last_reviewed_at, created_at) + expected_valid_days days
+        <= now``, excluding deleted / invalidated (superseded) / expired rows.
+        Oldest-due first, capped at ``limit``. Unlike
+        :meth:`list_purge_candidates` there is NO access_count / status
+        filter — a retrieved, in-use fact is exactly what predictive review
+        must revisit."""
+
+    @abc.abstractmethod
+    async def renew_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+        expected_valid_days: int | None,
+    ) -> bool:
+        """P5b-2b ⑦ still-true verdict — stamp ``last_reviewed_at=now`` (re-arms
+        the due-scan window from now) and set ``expected_valid_days`` to the
+        given value (None clears it → the row drops out of future due-scans).
+        Returns False for unknown id / wrong tenant / wrong user / deleted."""
+
+    @abc.abstractmethod
     async def archive(
         self,
         *,

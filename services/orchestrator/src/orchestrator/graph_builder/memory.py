@@ -85,10 +85,19 @@ _EXTRACT_SYSTEM = (
     '"importance" (how reusable it is in future sessions — rare stable '
     'user facts high, one-off chatter low) and "confidence" (how sure '
     "you are it is true — explicit statements high, inferred or hedged "
-    "low). Respond with ONLY a JSON object, no prose and no code "
-    "fences:\n"
+    "low). Also give:\n"
+    '- "expected_valid_days": how many days you expect this to stay true '
+    "before it is worth re-checking — a rough guide: volatile/ephemeral "
+    "~7, seasonal/plans ~90, yearly ~365, stable preferences ~1095, "
+    "near-permanent identity facts ~3650. Omit or null if you cannot "
+    "estimate.\n"
+    '- "is_correction": true ONLY if this memory explicitly corrects or '
+    "updates something stated earlier in the conversation (e.g. the user "
+    "says they moved, changed jobs, renamed a thing); otherwise false.\n"
+    "Respond with ONLY a JSON object, no prose and no code fences:\n"
     '{"memories": [{"kind": "fact" | "episodic", "content": "<one concise '
-    'sentence>", "importance": <0-1>, "confidence": <0-1>}]}\n'
+    'sentence>", "importance": <0-1>, "confidence": <0-1>, '
+    '"expected_valid_days": <int or null>, "is_correction": <bool>}]}\n'
     'If there is nothing worth remembering, return {"memories": []}.'
 )
 
@@ -141,6 +150,12 @@ class ExtractedMemory:
     content: str
     importance: float = 0.5
     confidence: float = 0.5
+    # P5b-2b ⑦ — LLM-predicted validity window (days); drives the consolidator
+    # due-scan. None = no prediction (never scanned for predictive review).
+    expected_valid_days: int | None = None
+    # P5b-2b ⑧ — LLM flag: this memory explicitly corrects prior info. Transient
+    # (never persisted); threaded into reconcile to bias the UPDATE decision.
+    is_correction: bool = False
 
 
 #: Stream RT-2 PR-2 (review HIGH) — ceiling for extraction-scored confidence.
@@ -169,6 +184,23 @@ def _clamp_score(value: object) -> float:
     if math.isnan(score):
         return 0.5
     return min(1.0, max(0.0, score))
+
+
+def _parse_valid_days(value: object) -> int | None:
+    """P5b-2b ⑦ — parse a model-supplied validity window into a positive int,
+    or None on anything non-numeric / non-positive (best-effort — a bad window
+    never drops the memory, it just opts the row out of predictive review)."""
+    try:
+        days = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError — ``int(float('inf'))`` raises this (a sibling of
+        # TypeError/ValueError, not a subclass). ``json.loads`` accepts the
+        # non-standard ``Infinity`` / ``-Infinity`` tokens by default, so an
+        # LLM reply carrying ``"expected_valid_days": Infinity`` must degrade
+        # to None here rather than propagate out of ``parse_extracted_memories``
+        # and drop the whole extraction batch.
+        return None
+    return days if days > 0 else None
 
 
 def parse_extracted_memories(text: str) -> list[ExtractedMemory]:
@@ -205,6 +237,10 @@ def parse_extracted_memories(text: str) -> list[ExtractedMemory]:
                     # Capped below the M-4 sentinel — see
                     # ``_MAX_EXTRACTED_CONFIDENCE`` above.
                     confidence=min(_MAX_EXTRACTED_CONFIDENCE, _clamp_score(row.get("confidence"))),
+                    expected_valid_days=_parse_valid_days(row.get("expected_valid_days")),
+                    # Strict bool — only a real JSON `true` counts as a correction
+                    # (a truthy string must not silently trip UPDATE recall).
+                    is_correction=row.get("is_correction") is True,
                 )
             )
     return out
@@ -630,6 +666,10 @@ _RECONCILE_SYSTEM = (
     "target_id; the existing memory is removed and the candidate "
     "itself is NOT stored)\n"
     '- "NOOP": duplicate of an existing memory; store nothing\n'
+    'A candidate with "is_correction": true is the user explicitly '
+    "correcting earlier info — strongly prefer UPDATE (or DELETE) against "
+    "the matching existing memory over ADD, so the old value is superseded "
+    "rather than left to coexist.\n"
     "Respond with ONLY a JSON object, no prose and no code fences:\n"
     '{"ops": [{"index": <candidate index>, "op": "ADD", '
     '"target_id": "<existing id, only for UPDATE/DELETE>"}]}'
@@ -677,6 +717,7 @@ def parse_reconcile_ops(text: str) -> dict[int, tuple[str, str | None]]:
 async def _reconcile_and_apply(
     items: list[MemoryItem],
     *,
+    corrections: Sequence[bool],
     memory_store: MemoryStore,
     llm_caller: LLMCaller,
     token: CancellationToken,
@@ -688,10 +729,16 @@ async def _reconcile_and_apply(
     in place against the store. Best-effort throughout: every failure
     path degrades to keeping the candidate in the direct-write list
     (never lose a memory), and only cancellation propagates.
+
+    P5b-2b ⑧ — ``corrections[i]`` aligns 1:1 with ``items[i]`` (the LLM's
+    ``is_correction`` extraction flag); it rides along into the reconcile
+    payload as ``"is_correction"`` per candidate so the ops LLM can bias
+    UPDATE/DELETE over ADD on an explicit user correction.
     """
     direct: list[MemoryItem] = []
-    pending: list[tuple[MemoryItem, list[MemoryItem]]] = []
-    for item in items:
+    pending: list[tuple[MemoryItem, list[MemoryItem], bool]] = []
+    for idx, item in enumerate(items):
+        is_corr = corrections[idx] if idx < len(corrections) else False
         try:
             neighbors = await token.run_cancellable(
                 memory_store.retrieve(
@@ -714,7 +761,7 @@ async def _reconcile_and_apply(
             if _reconcile_cosine(item.embedding, n.embedding) >= _RECONCILE_SIM_THRESHOLD
         ]
         if similar:
-            pending.append((item, similar))
+            pending.append((item, similar, is_corr))
         else:
             record_memory_reconcile(op="add")
             direct.append(item)
@@ -727,9 +774,10 @@ async def _reconcile_and_apply(
                 "index": idx,
                 "kind": item.kind,
                 "content": item.content,
+                "is_correction": is_corr,
                 "existing": [{"id": str(n.id), "content": n.content} for n in similar],
             }
-            for idx, (item, similar) in enumerate(pending)
+            for idx, (item, similar, is_corr) in enumerate(pending)
         ]
     }
     ops: dict[int, tuple[str, str | None]] = {}
@@ -750,7 +798,7 @@ async def _reconcile_and_apply(
     except Exception:
         logger.warning("%s_reconcile_llm_failed — direct add all", log_label, exc_info=True)
 
-    for idx, (item, similar) in enumerate(pending):
+    for idx, (item, similar, _is_corr) in enumerate(pending):
         op, target_raw = ops.get(idx, ("", None))
         valid = {str(n.id): n.id for n in similar}
         target = valid.get(target_raw) if target_raw is not None else None
@@ -905,12 +953,16 @@ async def flush_messages_to_memory(
                 confidence=mem.confidence,
                 source_thread_id=str(thread_id) if thread_id is not None else None,
                 source_run_id=run_id,
+                # P5b-2b ⑦ — persist the predicted window so the consolidator
+                # due-scan can find this fact when it comes due.
+                expected_valid_days=mem.expected_valid_days,
             )
             for mem, vector in zip(extracted, vectors, strict=True)
         ]
         if reconcile:
             items = await _reconcile_and_apply(
                 items,
+                corrections=[m.is_correction for m in extracted],
                 memory_store=memory_store,
                 llm_caller=llm_caller,
                 token=token,
