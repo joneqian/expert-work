@@ -156,6 +156,25 @@ class MemoryStore(abc.ABC):
         Tenant- AND user-scoped as a defensive predicate."""
 
     @abc.abstractmethod
+    async def supersede(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        old_id: UUID,
+        new_item: MemoryItem,
+    ) -> MemoryItem | None:
+        """P5b — append-only UPDATE. Atomically close ``old_id`` (set
+        ``invalid_at=now``, ``superseded_by=new_item.id``) and insert
+        ``new_item`` with ``supersedes=old_id`` + ``valid_at=now``. The old
+        row is KEPT (history/audit) but excluded from default retrieve.
+
+        Returns the newly written item, or ``None`` when ``old_id`` is
+        unknown / wrong tenant-user / already superseded (``invalid_at`` set) —
+        in which case NO new row is written (the caller falls back to a plain
+        write). Tenant- AND user-scoped."""
+
+    @abc.abstractmethod
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         """Phase 3a (purge_user) — soft-delete EVERY live memory for a user.
 

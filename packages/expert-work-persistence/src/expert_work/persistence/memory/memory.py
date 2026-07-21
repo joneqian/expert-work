@@ -288,6 +288,45 @@ class InMemoryMemoryStore(MemoryStore):
             for row in self._rows
         ]
 
+    async def supersede(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        old_id: UUID,
+        new_item: MemoryItem,
+    ) -> MemoryItem | None:
+        now = datetime.now(UTC)
+        idx = next(
+            (
+                i
+                for i, r in enumerate(self._rows)
+                if r.id == old_id
+                and r.tenant_id == tenant_id
+                and r.user_id == user_id
+                and r.deleted_at is None
+                and r.invalid_at is None
+            ),
+            None,
+        )
+        if idx is None:
+            return None
+        self._rows[idx] = self._rows[idx].model_copy(
+            update={"invalid_at": now, "superseded_by": new_item.id}
+        )
+        content_hash = new_item.content_hash or hash_content(new_item.content)
+        written = new_item.model_copy(
+            update={
+                "content_hash": content_hash,
+                "supersedes": old_id,
+                "valid_at": now,
+                "created_at": now,
+                "last_used_at": now,
+            }
+        )
+        self._rows.append(written)
+        return written
+
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
         removed = 0

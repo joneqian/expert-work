@@ -762,3 +762,72 @@ async def test_retrieve_keeps_future_expiry() -> None:
         tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0)
     )
     assert [m.content for m in got] == ["still valid"]
+
+
+async def test_supersede_closes_old_opens_new() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    old_id = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=old_id,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user lives in Beijing",
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+    new_item = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user lives in Shanghai",
+        embedding=(0.9, 0.1, 0.0),
+    )
+    written = await store.supersede(
+        tenant_id=tenant, user_id=user, old_id=old_id, new_item=new_item
+    )
+    assert written is not None
+    assert written.supersedes == old_id
+    assert written.valid_at is not None
+
+    # Only the new fact is recalled; the old one is superseded (hidden).
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10
+    )
+    assert [m.content for m in got] == ["user lives in Shanghai"]
+
+    # The old row survives in the store with the reverse link set.
+    old = next(r for r in store._rows if r.id == old_id)
+    assert old.invalid_at is not None
+    assert old.superseded_by == new_item.id
+
+
+async def test_supersede_unknown_old_returns_none() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    new_item = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="x",
+        embedding=(1.0, 0.0, 0.0),
+    )
+    out = await store.supersede(tenant_id=tenant, user_id=user, old_id=uuid4(), new_item=new_item)
+    assert out is None
+    assert store._rows == []

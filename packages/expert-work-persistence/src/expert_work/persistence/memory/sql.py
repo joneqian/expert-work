@@ -473,6 +473,56 @@ class SqlMemoryStore(MemoryStore):
             await session.execute(stmt)
             await session.commit()
 
+    async def supersede(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        old_id: UUID,
+        new_item: MemoryItem,
+    ) -> MemoryItem | None:
+        now = datetime.now(UTC)
+        async with self._sf() as session:
+            old = (
+                await session.execute(
+                    select(MemoryItemRow).where(
+                        MemoryItemRow.id == old_id,
+                        MemoryItemRow.tenant_id == tenant_id,
+                        MemoryItemRow.user_id == user_id,
+                        MemoryItemRow.deleted_at.is_(None),
+                        MemoryItemRow.invalid_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if old is None:
+                return None
+            old.invalid_at = now
+            old.superseded_by = new_item.id
+            content = new_item.content
+            new_row = MemoryItemRow(
+                id=new_item.id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                kind=new_item.kind,
+                agent_name=new_item.agent_name,
+                content=content,
+                content_hash=new_item.content_hash or hash_content(content),
+                embedding=list(new_item.embedding),
+                importance=new_item.importance,
+                confidence=new_item.confidence,
+                source_thread_id=new_item.source_thread_id,
+                source_run_id=new_item.source_run_id,
+                content_tsv=func.to_tsvector(_TS_CONFIG, tokenize_for_search(content)),
+                created_at=now,
+                last_used_at=now,
+                valid_at=now,
+                supersedes=old_id,
+            )
+            session.add(new_row)
+            await session.commit()
+            await session.refresh(new_row)
+            return _row_to_item(new_row)
+
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
         stmt = (
