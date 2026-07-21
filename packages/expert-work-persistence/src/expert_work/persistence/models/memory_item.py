@@ -43,9 +43,12 @@ class MemoryItemRow(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
     # Stream K.K7 — SHA-256 hex of ``lower(trim(content))``. Filled by
-    # the application store at write time; the partial UNIQUE index on
-    # ``(tenant_id, user_id, content_hash) WHERE deleted_at IS NULL``
-    # backs ON CONFLICT DO NOTHING dedup.
+    # the application store at write time; the partial UNIQUE index
+    # ``(tenant_id, user_id, content_hash, COALESCE(agent_name, ''))
+    # WHERE deleted_at IS NULL AND invalid_at IS NULL AND expired_at IS NULL``
+    # (migrations 0098 + P5b 0127) backs ON CONFLICT DO NOTHING dedup —
+    # bi-temporal-hidden rows (superseded / expired) are excluded so a
+    # re-asserted fact can be re-inserted (see supersede()).
     content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     source_thread_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Stream Memory-Enhance (M-2) — importance/confidence scoring (migration
