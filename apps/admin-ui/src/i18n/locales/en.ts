@@ -412,6 +412,8 @@ export interface TranslationKeys {
     col_kind: string;
     col_content: string;
     col_created: string;
+    col_source: string;
+    source_run: string;
   };
   knowledge_page: {
     page_title: string;
@@ -3179,6 +3181,8 @@ const en: TranslationKeys = {
     col_kind: "Kind",
     col_content: "Content",
     col_created: "Created",
+    col_source: "Source",
+    source_run: "View run",
   },
   knowledge_page: {
     page_title: "Knowledge",

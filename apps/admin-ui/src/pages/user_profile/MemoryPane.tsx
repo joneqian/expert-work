@@ -21,6 +21,7 @@ import {
 import type { TableColumnsType } from "antd";
 import { Pencil, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 import {
   deleteMemory,
@@ -39,6 +40,7 @@ const KIND_OPTIONS: MemoryKind[] = ["fact", "episodic"];
 export function MemoryPane({ userId }: { userId: string }) {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const navigate = useNavigate();
 
   const [data, setData] = useState<MemoryList | null>(null);
   const [loading, setLoading] = useState(true);
@@ -151,6 +153,30 @@ export function MemoryPane({ userId }: { userId: string }) {
         ),
       },
       {
+        title: t("memory_tab.col_source"),
+        key: "source",
+        width: 110,
+        render: (_: unknown, record) =>
+          record.source_thread_id && record.source_run_id ? (
+            <Button
+              size="small"
+              type="link"
+              onClick={() =>
+                navigate(
+                  `/runs/${encodeURIComponent(record.source_thread_id!)}/${encodeURIComponent(record.source_run_id!)}`,
+                )
+              }
+              data-testid={`memory-source-run-${record.id}`}
+            >
+              {t("memory_tab.source_run")}
+            </Button>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              —
+            </Text>
+          ),
+      },
+      {
         title: t("user_profile.memory_col_actions"),
         key: "actions",
         width: 160,
@@ -184,7 +210,7 @@ export function MemoryPane({ userId }: { userId: string }) {
         ),
       },
     ],
-    [t, busyId, openEdit, handleForget],
+    [t, busyId, openEdit, handleForget, navigate],
   );
 
   return (

@@ -420,6 +420,8 @@ const zhCN: TranslationKeys = {
     col_kind: "类型",
     col_content: "内容",
     col_created: "创建时间",
+    col_source: "来源",
+    source_run: "查看运行",
   },
   knowledge_page: {
     page_title: "知识库",
