@@ -51,7 +51,7 @@ _MAX_STEP_DESCRIPTION_CHARS: int = 500
 
 @dataclass(frozen=True)
 class UpdatePlanTool:
-    """``update_plan(steps, reason)`` — agent-initiated create-or-replace.
+    """``update_plan(steps, reason, goal=None)`` — agent-initiated create-or-replace.
 
     Creates the run's :class:`Plan` if none exists yet, otherwise
     replaces it with a new ordered set of steps. The replacement is
@@ -92,7 +92,7 @@ class UpdatePlanTool:
                         "minItems": 1,
                         "maxItems": _MAX_STEPS,
                         "description": (
-                            "Ordered list of steps for the revised plan. Each "
+                            "Ordered list of steps for the plan. Each "
                             "entry is either a short imperative description "
                             "string, or an object {description, status} where "
                             "status is pending / in_progress / completed — use "
