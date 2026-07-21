@@ -108,5 +108,15 @@ class MemoryItemRow(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    # ---- Stream P5b (溯源 + bi-temporal) migration 0126 ----
+    # source_run_id: Text (mirrors source_thread_id — a stringified UUID, not a
+    # uuid column, to keep the two provenance columns the same type).
+    source_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invalid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    supersedes: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    superseded_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    expected_valid_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (Index("memory_item_tenant_user_idx", "tenant_id", "user_id"),)

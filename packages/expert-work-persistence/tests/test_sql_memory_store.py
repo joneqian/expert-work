@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from testcontainers.postgres import PostgresContainer
 
@@ -604,3 +604,21 @@ async def test_ranking_reinforces_access_and_importance(sql_store: SqlStoreFixtu
         assert hits[0].content == "loud"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_migration_0126_adds_bitemporal_columns(sql_store: SqlStoreFixture) -> None:
+    _store, engine = sql_store
+    async with engine.connect() as conn:
+        columns = await conn.run_sync(
+            lambda sync_conn: {c["name"] for c in inspect(sync_conn).get_columns("memory_item")}
+        )
+    assert {
+        "source_run_id",
+        "valid_at",
+        "expired_at",
+        "invalid_at",
+        "supersedes",
+        "superseded_by",
+        "expected_valid_days",
+    } <= columns
