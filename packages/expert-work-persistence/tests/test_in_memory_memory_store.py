@@ -1185,3 +1185,27 @@ async def test_in_memory_write_backfills_created_and_valid_at() -> None:
     got = (await store.list_for_user(tenant_id=t, user_id=u))[0]
     assert got.created_at is not None
     assert got.valid_at is not None
+
+
+# ---------------------------------------------------------------------------
+# P5b-2c T2 — list_for_user(as_of=...) time-travel (memory-tab back-end)
+# ---------------------------------------------------------------------------
+#
+# retrieve() already time-travels via as_of (P5b-2a); the memory tab reads
+# list_for_user() instead, which never applied the bi-temporal filter at
+# all. as_of=None must keep list_for_user()'s existing behavior (deleted_at
+# + optional kind only, no bi-temporal predicate) — only as_of=<instant>
+# ANDs the three time-travel predicates (mirrors retrieve()'s
+# _temporally_visible as_of branch).
+
+
+@pytest.mark.asyncio
+async def test_list_for_user_as_of_time_travel() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+    # valid from 2021, so invisible at as_of=2020 but visible with as_of=None
+    later = _mem(tenant=t, user=u, content="later", valid_at=datetime(2021, 1, 1, tzinfo=UTC))
+    await store.write([later])
+    assert [m.content for m in await store.list_for_user(tenant_id=t, user_id=u)] == ["later"]
+    assert await store.list_for_user(tenant_id=t, user_id=u, as_of=past) == []

@@ -224,8 +224,21 @@ class InMemoryMemoryStore(MemoryStore):
         tenant_id: UUID,
         user_id: UUID,
         kind: Literal["fact", "episodic"] | None = None,
+        as_of: datetime | None = None,
         limit: int = 50,
     ) -> list[MemoryItem]:
+        # Stream P5b-2c — as_of=None keeps the pre-existing behavior (no
+        # bi-temporal predicate at all); mirrors retrieve()'s
+        # _temporally_visible as_of branch only when as_of is given.
+        def _temporally_visible(row: MemoryItem) -> bool:
+            if as_of is None:
+                return True
+            return (
+                (row.valid_at is None or row.valid_at <= as_of)
+                and (row.invalid_at is None or row.invalid_at > as_of)
+                and (row.expired_at is None or row.expired_at > as_of)
+            )
+
         candidates = [
             row
             for row in self._rows
@@ -233,6 +246,7 @@ class InMemoryMemoryStore(MemoryStore):
             and row.user_id == user_id
             and row.deleted_at is None
             and (kind is None or row.kind == kind)
+            and _temporally_visible(row)
         ]
         # newest-first matches the partial index ordering in migration 0024.
         candidates.sort(

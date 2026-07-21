@@ -28,6 +28,7 @@ receives 403.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -214,6 +215,10 @@ def build_memory_router() -> APIRouter:
         # one member's memories (the user-detail Memory tab). Non-admins
         # may only read their own; asking for someone else is a 403.
         user_id: Annotated[UUID | None, Query()] = None,
+        # Stream P5b-2c — the memory tab's time-travel control. None (default)
+        # is today's behavior (list_for_user applies no bi-temporal filter);
+        # given, only memories valid AT that instant are returned.
+        as_of: Annotated[datetime | None, Query()] = None,
     ) -> dict[str, Any]:
         scope = await ensure_tenant_scope(
             principal,
@@ -237,7 +242,11 @@ def build_memory_router() -> APIRouter:
                     request, users, requested=user_id
                 )
                 items = await store.list_for_user(
-                    tenant_id=scope.tenant_id, user_id=target_user_id, kind=kind, limit=limit
+                    tenant_id=scope.tenant_id,
+                    user_id=target_user_id,
+                    kind=kind,
+                    as_of=as_of,
+                    limit=limit,
                 )
                 if cross_user:
                     # Read auditing — "who looked at whom" (Phase 2 governance).

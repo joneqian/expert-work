@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -244,6 +245,51 @@ async def test_list_for_machine_principal_returns_403() -> None:
         resp = await client.get("/v1/memory")
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "USER_SCOPE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_list_as_of_time_travels_bitemporal_validity(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    """P5b-2c T2 — ``GET /v1/memory?as_of=`` threads through to
+    ``list_for_user(as_of=...)``: a row superseded (``invalid_at``) in
+    March was live in February and hidden after March."""
+    client, store, user_id, _, _ = setup
+    t_jan = datetime(2026, 1, 1, tzinfo=UTC)
+    t_mar = datetime(2026, 3, 1, tzinfo=UTC)
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=_TENANT,
+                user_id=user_id,
+                kind="fact",
+                content="superseded-in-mar",
+                embedding=(0.0, 0.0, 0.0),
+                valid_at=t_jan,
+                invalid_at=t_mar,
+            )
+        ]
+    )
+
+    # as_of=Feb (before the Mar supersession): the row was live.
+    resp = await client.get("/v1/memory", params={"as_of": "2026-02-01T00:00:00Z"})
+    assert resp.status_code == 200, resp.text
+    contents = {i["content"] for i in resp.json()["data"]["items"]}
+    assert "superseded-in-mar" in contents
+
+    # as_of=Apr (after the Mar supersession): hidden.
+    resp = await client.get("/v1/memory", params={"as_of": "2026-04-01T00:00:00Z"})
+    assert resp.status_code == 200, resp.text
+    contents = {i["content"] for i in resp.json()["data"]["items"]}
+    assert "superseded-in-mar" not in contents
+
+    # as_of omitted: today's behavior is unaffected — list_for_user()
+    # applies no bi-temporal filter, so the row still shows.
+    resp = await client.get("/v1/memory")
+    assert resp.status_code == 200, resp.text
+    contents = {i["content"] for i in resp.json()["data"]["items"]}
+    assert "superseded-in-mar" in contents
 
 
 # ---------------------------------------------------------------------------
