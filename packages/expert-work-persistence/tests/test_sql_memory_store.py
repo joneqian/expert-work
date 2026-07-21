@@ -1133,3 +1133,72 @@ async def test_expire_scoped_to_tenant_and_user(sql_store: SqlStoreFixture) -> N
         assert [m.content for m in got] == ["mine"]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_retrieve_as_of_time_travel_sql(sql_store: SqlStoreFixture) -> None:
+    """Stream P5b-2a — ``as_of`` time-travels retrieve() to what was valid
+    AT that instant, using the bi-temporal columns. SQL counterpart of
+    ``test_retrieve_as_of_returns_historical_state`` in
+    test_in_memory_memory_store.py — the Postgres predicate
+    (``_retrieve_filter`` in sql.py) had no coverage for the as_of branch.
+
+    ``SqlMemoryStore.write()`` does not persist ``invalid_at`` (see the note
+    on ``test_retrieve_excludes_invalidated_and_expired`` above), so Beijing's
+    supersession is patched in via a raw UPDATE after the write, mirroring
+    that test's pattern.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        t_jan = datetime(2026, 1, 1, tzinfo=UTC)
+        t_mar = datetime(2026, 3, 1, tzinfo=UTC)
+        beijing_id = uuid4()
+        await store.write(
+            [
+                MemoryItem(
+                    id=beijing_id,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="user lives in Beijing",
+                    embedding=_vec(1.0, 0.0),
+                    valid_at=t_jan,
+                    invalid_at=t_mar,
+                )
+            ]
+        )
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET invalid_at = :invalid_at WHERE id = :id"),
+                {"invalid_at": t_mar, "id": beijing_id},
+            )
+        await store.write(
+            [
+                MemoryItem(
+                    id=uuid4(),
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="user lives in Shanghai",
+                    embedding=_vec(1.0, 0.0),
+                    valid_at=t_mar,
+                )
+            ]
+        )
+        # Current: Shanghai only.
+        now_hits = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0), limit=10
+        )
+        assert [m.content for m in now_hits] == ["user lives in Shanghai"]
+        # As of Feb: Beijing only.
+        feb_hits = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user,
+            query_embedding=_vec(1.0, 0.0),
+            limit=10,
+            as_of=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+        assert [m.content for m in feb_hits] == ["user lives in Beijing"]
+    finally:
+        await engine.dispose()

@@ -239,6 +239,7 @@ def _build_memory_items(row: DLQRowLike, vectors: Sequence[Sequence[float]]) -> 
             content=content,
             embedding=tuple(float(x) for x in vector),
             source_thread_id=row.source_thread_id,
+            source_run_id=row.source_run_id,
         )
         for (kind, content), vector in zip(row.extracted, vectors, strict=True)
     ]
@@ -255,6 +256,7 @@ class DLQRowLike:  # pragma: no cover - protocol-only
     tenant_id: UUID
     user_id: object
     source_thread_id: str | None
+    source_run_id: str | None
     extracted: Sequence[tuple[str, str]]
     attempts: int
 

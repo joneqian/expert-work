@@ -102,22 +102,24 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
 # Skips ``archived`` outright and skips raw transient items that have
 # been superseded by a consolidated parent (the parent is returned in
 # their place when relevant).
-def _retrieve_filter() -> list[ColumnElement[bool]]:
-    return [
+def _retrieve_filter(as_of: datetime | None = None) -> list[ColumnElement[bool]]:
+    base: list[ColumnElement[bool]] = [
         MemoryItemRow.status != "archived",
         or_(
             MemoryItemRow.status == "consolidated",
             MemoryItemRow.consolidated_into.is_(None),
         ),
-        # Stream P5b — bi-temporal: exclude superseded rows (invalid_at set) and
-        # world-expired rows (expired_at in the past). Both are kept in the DB
-        # for history/audit but never enter agent recall.
-        MemoryItemRow.invalid_at.is_(None),
-        or_(
-            MemoryItemRow.expired_at.is_(None),
-            MemoryItemRow.expired_at > func.now(),
-        ),
     ]
+    if as_of is None:
+        # Current-time: hide superseded (invalid_at) + world-expired rows.
+        base.append(MemoryItemRow.invalid_at.is_(None))
+        base.append(or_(MemoryItemRow.expired_at.is_(None), MemoryItemRow.expired_at > func.now()))
+    else:
+        # Time-travel: what was valid AT ``as_of``.
+        base.append(or_(MemoryItemRow.valid_at.is_(None), MemoryItemRow.valid_at <= as_of))
+        base.append(or_(MemoryItemRow.invalid_at.is_(None), MemoryItemRow.invalid_at > as_of))
+        base.append(or_(MemoryItemRow.expired_at.is_(None), MemoryItemRow.expired_at > as_of))
+    return base
 
 
 class SqlMemoryStore(MemoryStore):
@@ -196,6 +198,7 @@ class SqlMemoryStore(MemoryStore):
         query_text: str | None = None,
         kind: Literal["fact", "episodic"] | None = None,
         agent_name: str | None = None,
+        as_of: datetime | None = None,
         limit: int = 5,
     ) -> list[MemoryItem]:
         # Capability Uplift Sprint #6 (Mini-ADR U-5) — hybrid path.
@@ -207,6 +210,7 @@ class SqlMemoryStore(MemoryStore):
                 query_text=query_text,
                 kind=kind,
                 agent_name=agent_name,
+                as_of=as_of,
                 limit=limit,
             )
         return await self._vector_retrieve(
@@ -215,6 +219,7 @@ class SqlMemoryStore(MemoryStore):
             query_embedding=query_embedding,
             kind=kind,
             agent_name=agent_name,
+            as_of=as_of,
             limit=limit,
         )
 
@@ -226,13 +231,14 @@ class SqlMemoryStore(MemoryStore):
         query_embedding: Sequence[float],
         kind: Literal["fact", "episodic"] | None,
         agent_name: str | None = None,
+        as_of: datetime | None = None,
         limit: int,
     ) -> list[MemoryItem]:
         stmt = select(MemoryItemRow).where(
             MemoryItemRow.tenant_id == tenant_id,
             MemoryItemRow.user_id == user_id,
             MemoryItemRow.deleted_at.is_(None),  # Stream K.K6 — exclude soft-deleted
-            *_retrieve_filter(),  # Sprint #7 lifecycle filter
+            *_retrieve_filter(as_of),  # Sprint #7 lifecycle filter (+ P5b as_of)
         )
         if kind is not None:
             stmt = stmt.where(MemoryItemRow.kind == kind)
@@ -273,6 +279,7 @@ class SqlMemoryStore(MemoryStore):
         query_text: str,
         kind: Literal["fact", "episodic"] | None,
         agent_name: str | None = None,
+        as_of: datetime | None = None,
         limit: int,
     ) -> list[MemoryItem]:
         tokenized = tokenize_for_search(query_text)
@@ -283,6 +290,7 @@ class SqlMemoryStore(MemoryStore):
                 query_embedding=query_embedding,
                 kind=kind,
                 agent_name=agent_name,
+                as_of=as_of,
                 limit=limit,
             )
         # Two parallel selects under the same RLS-scoped session; fuse
@@ -293,7 +301,7 @@ class SqlMemoryStore(MemoryStore):
             MemoryItemRow.tenant_id == tenant_id,
             MemoryItemRow.user_id == user_id,
             MemoryItemRow.deleted_at.is_(None),
-            *_retrieve_filter(),  # Sprint #7 lifecycle filter
+            *_retrieve_filter(as_of),  # Sprint #7 lifecycle filter (+ P5b as_of)
         ]
         if kind is not None:
             base_where.append(MemoryItemRow.kind == kind)

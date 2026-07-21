@@ -769,6 +769,54 @@ async def test_writeback_stamps_source_run_id_from_config() -> None:
     assert store._rows[0].source_run_id == str(run)
 
 
+@pytest.mark.asyncio
+async def test_flush_failure_enqueues_with_source_run_id() -> None:
+    from uuid import uuid4
+
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from expert_work.persistence.memory.dlq import InMemoryMemoryWritebackDLQ
+    from expert_work.runtime.cancellation import CancellationToken
+    from orchestrator.graph_builder.memory import flush_messages_to_memory
+
+    tenant, user, thread, run = uuid4(), uuid4(), uuid4(), uuid4()
+
+    class _BoomStore:
+        async def write(self, items: object) -> None:
+            raise RuntimeError("db down")
+
+    async def _extract_llm(*, messages: object, tools: object) -> AIMessage:
+        del messages, tools
+        return AIMessage(
+            content='{"memories": [{"kind": "fact", "content": "x", '
+            '"importance": 0.9, "confidence": 0.9}]}'
+        )
+
+    class _Embedder:
+        async def embed(
+            self, texts: Sequence[str], *, tenant_id: object
+        ) -> list[tuple[float, ...]]:
+            del tenant_id
+            return [(1.0, 0.0, 0.0) for _ in texts]
+
+    dlq = InMemoryMemoryWritebackDLQ()
+    await flush_messages_to_memory(
+        [HumanMessage(content="hi")],
+        memory_store=_BoomStore(),  # type: ignore[arg-type]
+        embedder=_Embedder(),  # type: ignore[arg-type]
+        llm_caller=_extract_llm,  # type: ignore[arg-type]
+        tenant_id=tenant,
+        user_id=user,
+        thread_id=thread,
+        run_id=str(run),
+        token=CancellationToken(),
+        dlq=dlq,
+    )
+    assert await dlq.count() == 1
+    enqueued = next(iter(dlq._rows.values()))  # type: ignore[attr-defined]
+    assert enqueued.source_run_id == str(run)
+
+
 # ---------------------------------------------------------------------------
 # end-to-end — recall injects, write-back persists
 # ---------------------------------------------------------------------------

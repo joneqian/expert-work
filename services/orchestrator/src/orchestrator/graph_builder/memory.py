@@ -857,8 +857,9 @@ async def flush_messages_to_memory(
     flush stays a direct write (latency-sensitive, inside a turn).
 
     ``run_id`` (P5b provenance) is stamped on every written item; the
-    DLQ-retry path does not carry it yet (follow-up), so retried memories
-    keep source_run_id NULL.
+    DLQ-retry path now carries run_id (P5b-2a) too — the enqueue call
+    below passes ``source_run_id=run_id``, so the control-plane worker's
+    reconstructed items keep the original run's provenance.
     """
     prompt = [
         SystemMessage(content=_EXTRACT_SYSTEM),
@@ -944,6 +945,7 @@ async def flush_messages_to_memory(
                     tenant_id=tenant_id,
                     user_id=user_id,
                     source_thread_id=str(thread_id) if thread_id is not None else None,
+                    source_run_id=run_id,
                     extracted=[(str(m.kind), m.content) for m in extracted],
                     error=f"{type(exc).__name__}: {exc}",
                 )
