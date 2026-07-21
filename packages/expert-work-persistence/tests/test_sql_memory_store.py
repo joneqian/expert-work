@@ -720,3 +720,232 @@ async def test_retrieve_keeps_future_expiry(sql_store: SqlStoreFixture) -> None:
         assert [h.content for h in hits] == ["still valid"]
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# P5b — supersede() (append-only UPDATE / version chain)
+# ---------------------------------------------------------------------------
+#
+# Reviewer gap on Task 5: supersede() was only exercised against the
+# in-memory store (test_in_memory_memory_store.py); the Postgres path
+# (sql.py's real SELECT-then-UPDATE-and-INSERT transaction) had zero
+# integration coverage. Mirrors the in-memory tests where a direct analog
+# exists (same test names), plus two SQL-only tests for scenarios the
+# in-memory store's list-scan guard doesn't need separate DB proof of.
+
+
+@pytest.mark.asyncio
+async def test_supersede_closes_old_opens_new(sql_store: SqlStoreFixture) -> None:
+    """SQL counterpart of the in-memory test of the same name — the real
+    transaction against Postgres: the old row is closed (``invalid_at`` +
+    ``superseded_by``), the new row is opened (``supersedes`` + ``valid_at``),
+    and ``retrieve()`` returns only the new content."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        old_id = uuid4()
+        await store.write(
+            [
+                MemoryItem(
+                    id=old_id,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="user lives in Beijing",
+                    embedding=_vec(1.0, 0.0),
+                )
+            ]
+        )
+        new_item = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content="user lives in Shanghai",
+            embedding=_vec(0.9, 0.1),
+        )
+        written = await store.supersede(
+            tenant_id=tenant, user_id=user, old_id=old_id, new_item=new_item
+        )
+        assert written is not None
+        assert written.supersedes == old_id
+        assert written.valid_at is not None
+
+        # Only the new fact is recalled; the old one is superseded (hidden).
+        hits = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0), limit=10
+        )
+        assert [h.content for h in hits] == ["user lives in Shanghai"]
+
+        # retrieve() excludes the superseded row (invalid_at set); reach it
+        # via list_for_user(), which does not apply the bi-temporal filter,
+        # so it surfaces the closed old row for direct inspection.
+        rows = {
+            r.content: r
+            for r in await store.list_for_user(tenant_id=tenant, user_id=user, limit=10)
+        }
+        old_row = rows["user lives in Beijing"]
+        assert old_row.invalid_at is not None
+        assert old_row.superseded_by == new_item.id
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_supersede_unknown_old_returns_none(sql_store: SqlStoreFixture) -> None:
+    """SQL counterpart of the in-memory test of the same name — an unknown
+    ``old_id`` returns ``None`` and writes nothing (no orphan new row)."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        new_item = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content="x",
+            embedding=_vec(1.0, 0.0),
+        )
+        out = await store.supersede(
+            tenant_id=tenant, user_id=user, old_id=uuid4(), new_item=new_item
+        )
+        assert out is None
+
+        # Nothing was written under this (fresh, test-local) tenant/user.
+        assert await store.list_for_user(tenant_id=tenant, user_id=user, limit=10) == []
+        async with engine.connect() as conn:
+            count = (
+                await conn.execute(
+                    text("SELECT count(*) FROM memory_item WHERE id = :id"),
+                    {"id": new_item.id},
+                )
+            ).scalar_one()
+        assert count == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_supersede_already_superseded_returns_none(sql_store: SqlStoreFixture) -> None:
+    """Double-supersede: once ``old_id`` has already been superseded
+    (``invalid_at`` set), a second supersede() attempt against the same
+    ``old_id`` must return ``None`` and must not write a second new row.
+    This pins the ``MemoryItemRow.invalid_at.is_(None)`` guard in the
+    old-row SELECT — without it, the second call would silently succeed
+    and re-point ``superseded_by``."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        old_id = uuid4()
+        await store.write(
+            [
+                MemoryItem(
+                    id=old_id,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="v1",
+                    embedding=_vec(1.0, 0.0),
+                )
+            ]
+        )
+        first_new = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content="v2",
+            embedding=_vec(0.9, 0.1),
+        )
+        first = await store.supersede(
+            tenant_id=tenant, user_id=user, old_id=old_id, new_item=first_new
+        )
+        assert first is not None
+
+        second_new = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content="v3",
+            embedding=_vec(0.8, 0.2),
+        )
+        second = await store.supersede(
+            tenant_id=tenant, user_id=user, old_id=old_id, new_item=second_new
+        )
+        assert second is None
+
+        # No second new row landed — only "v1" (closed) and "v2" (the first
+        # supersession) exist; "v3" never made it to the table.
+        rows = await store.list_for_user(tenant_id=tenant, user_id=user, limit=10)
+        assert {r.content for r in rows} == {"v1", "v2"}
+        async with engine.connect() as conn:
+            count = (
+                await conn.execute(
+                    text("SELECT count(*) FROM memory_item WHERE id = :id"),
+                    {"id": second_new.id},
+                )
+            ).scalar_one()
+        assert count == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_supersede_scoped_to_tenant_and_user(sql_store: SqlStoreFixture) -> None:
+    """The tenant/user predicate is defensive — supersede() must not touch
+    a row that belongs to a different tenant or a different user, even
+    when the caller passes the correct old_id."""
+    store, engine = sql_store
+    try:
+        tenant, user, other_tenant, other_user = uuid4(), uuid4(), uuid4(), uuid4()
+        old_id = uuid4()
+        await store.write(
+            [
+                MemoryItem(
+                    id=old_id,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="mine",
+                    embedding=_vec(1.0, 0.0),
+                )
+            ]
+        )
+
+        wrong_user_new = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=other_user,
+            kind="fact",
+            content="wrong-user",
+            embedding=_vec(0.9, 0.0),
+        )
+        out_wrong_user = await store.supersede(
+            tenant_id=tenant, user_id=other_user, old_id=old_id, new_item=wrong_user_new
+        )
+        assert out_wrong_user is None
+
+        wrong_tenant_new = MemoryItem(
+            id=uuid4(),
+            tenant_id=other_tenant,
+            user_id=user,
+            kind="fact",
+            content="wrong-tenant",
+            embedding=_vec(0.8, 0.0),
+        )
+        out_wrong_tenant = await store.supersede(
+            tenant_id=other_tenant, user_id=user, old_id=old_id, new_item=wrong_tenant_new
+        )
+        assert out_wrong_tenant is None
+
+        # The original row is untouched, and neither wrong-scope attempt
+        # wrote anything under its own scope.
+        [row] = await store.list_for_user(tenant_id=tenant, user_id=user, limit=10)
+        assert row.content == "mine"
+        assert row.invalid_at is None
+        assert row.superseded_by is None
+        assert await store.list_for_user(tenant_id=tenant, user_id=other_user, limit=10) == []
+        assert await store.list_for_user(tenant_id=other_tenant, user_id=user, limit=10) == []
+    finally:
+        await engine.dispose()
