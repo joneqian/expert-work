@@ -11,7 +11,7 @@
 | **P1** | B3 成本/token 熔断(+平台设置页 worker 步数夹) | **✅ 已完成**(PR1 主链 #1028 + PR2 dynamic_worker 平台配置节 #1029,2026-07-20) | 2 PR |
 | **P2** | 触发器 user 维度重设计 | 待开工 | 2-3 PR |
 | **P3** | 自适应规划 | 待开工 | spec 后定 |
-| **P5** | 记忆模块演化(检索质量 + 时间有效性) | **进行中**(P5a 检索质量已实现待合;装配 follow-up + P5b 待做) | 3 PR+ |
+| **P5** | 记忆模块演化(检索质量 + 时间有效性) | **进行中**(P5a 检索质量已合 #1030;装配已实现待合;P5b 待做) | 3 PR+ |
 
 **排序逻辑:看得见 → 兜得住 → 放得开 → 跑得巧。**
 可观测先行(所有后续 epic 的排障都受益);成本护栏必须在触发器之前(自动任务无人盯,放开创建入口前先有熔断兜底);自适应规划是体验优化非刚需,graph 改动风险最高,收益需实测,压尾。
@@ -66,10 +66,10 @@
 
 **已升级为完整 spec**(`docs/superpowers/specs/2026-07-20-memory-evolution-p5-design.md`):基于 deer-flow/hermes 代码对照 + LongMemEval/Zep/Generative Agents 论文,缺口从"两个洞"扩为记忆演化整维度。分 P5a(检索质量)+ P5b(时间模型),不做 graph/procedural。
 
-**P5a ✅ 已实现待合**(feat/memory-p5a,8 task SDD 双评审 + opus 终审 Ready:YES):
+**P5a ✅ 已合并**(#1030,main `0c7e1fb5`,2026-07-20;8 task SDD 双评审 + opus 终审 Ready:YES):
 - access 强化(`access_count` 命中刷新 + freq_boost 排序 + 修 consolidator never-used 恒真 bug)、importance 进检索排序 —— **自动生效**
 - query 改写(aux LLM,fail-open)、abstention 阈值门 —— **能力就位但默认关、未接 agent_factory**(opus 判合理分阶段)
 
-**装配 follow-up**(P5a 合并后紧接,用户 2026-07-20 定):LongTermMemorySpec 加 `rewrite_reads`+`abstain_threshold` 两字段 + agent_factory:2023 传三参 + 前端 form_model/FormView/i18n(仿 verify_reads 全套)+ 观测补齐(abstain 补 `record_memory_retrieval` miss、query 改写补 `record_memory_rewrite`);rewrite 默认值(spec 说 ON / plan 选 OFF)届时定。
+**装配 follow-up ✅ 已实现待合**(2026-07-21):LongTermMemorySpec 加 `rewrite_reads`(默认 **OFF**,取 plan de-risk 而非 spec 的 ON——加 per-recall LLM 调用、未验证,per-agent 可开)+ `abstain_threshold`(默认 0.0)两字段 + agent_factory 传 `rewrite_query`/`rewriter`/`abstain_threshold` 三参 + 前端 form_model/FormView/i18n en+zh-CN(仿 verify_reads 全套)+ 观测补齐(abstain 早退补 `record_memory_retrieval` miss、query 改写加 `record_memory_rewrite{rewritten|unchanged|degraded}`)。至此 P5a 全能力接入 agent 配置面。
 
 **P5b 待做**(P5a 合并后单独 plan):run 溯源(`source_run_id`)+ 完整 bi-temporal(valid_at/expired_at/invalid_at/supersedes 版本链 + reconcile 改 append-only + 时间旅行 as_of 检索)+ per-fact 预测复核 + 对话内 correction→invalidate。

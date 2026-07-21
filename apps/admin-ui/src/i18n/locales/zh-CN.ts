@@ -1026,6 +1026,12 @@ const zhCN: TranslationKeys = {
       "记忆插入对话的位置。\n每会话:整段对话固定插一次,更省更快(默认)。\n每轮:每轮都重新插,适合对话中会自己改记忆的 Agent。\n示例:每会话",
     memory_recall_per_session: "每会话(更省更快)",
     memory_recall_per_turn: "每轮",
+    memory_rewrite_reads: "改写问题用于检索",
+    memory_rewrite_reads_help:
+      "检索记忆前,先把用户最新的消息改写成一句独立的检索词——剥掉指令、精简过长内容,避免带偏召回的记忆。\n会多花一次模型调用;万一出错则用原消息。\n默认关闭(按需开启)。\n示例:关闭",
+    memory_abstain_threshold: "跳过弱匹配(阈值)",
+    memory_abstain_threshold_help:
+      "检索后,若最相关记忆与问题的相似度低于此值,则不注入任何记忆,而非塞一个勉强的匹配——避免把关系不大的记忆拉进回答。\n0 = 从不跳过(默认);约 0.2–0.3 = 跳过明显偏弱的匹配。\n示例:0",
     approval_timeout: "审批等待上限(秒)",
     approval_timeout_help:
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",

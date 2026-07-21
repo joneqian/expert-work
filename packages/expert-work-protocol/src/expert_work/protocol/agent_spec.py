@@ -399,6 +399,26 @@ class LongTermMemorySpec(BaseModel):
         default=True,
         description="verify recalled memories against the request before injecting them",
     )
+    # Stream P5a (Task 7) — retrieval query rewrite. An aux LLM call rewrites the
+    # user's latest message into a concise standalone search query before
+    # embedding (and before the hybrid full-text query), stripping instructions /
+    # trimming long messages so they don't pollute retrieval. Default OFF: it adds
+    # one LLM call per recall and is unproven, so it is opt-in per agent. Fail-open
+    # (a rewrite error keeps the original message, so recall never breaks on it).
+    rewrite_reads: bool = Field(
+        default=False,
+        description="rewrite the user's message into a search query before recall",
+    )
+    # Stream P5a (Task 8) — abstention gate. After recall, if the best candidate's
+    # cosine similarity to the query is below this threshold, inject NO memories
+    # rather than a weak match. Default 0.0 never abstains (observe-only until a
+    # tenant opts in); a typical opt-in value is ~0.2-0.3.
+    abstain_threshold: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="skip recall when the top candidate similarity is below this",
+    )
     # Stream RT-2 PR-2 (RT-ADR-10) — injection token budget. The recall path
     # caps COUNT only (``retrieve_top_k``), so a single oversized memory could
     # blow up the injected block (STREAM-RT §8.1). The injection renderer

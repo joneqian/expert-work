@@ -718,6 +718,53 @@ def test_long_term_memory_forbids_extra() -> None:
 
 
 # ---------------------------------------------------------------------------
+# memory.long_term.rewrite_reads / abstain_threshold — P5a assembly
+# ---------------------------------------------------------------------------
+
+
+def test_rewrite_reads_defaults_false() -> None:
+    """P5a — query rewrite is opt-in (it adds one aux LLM call per recall)."""
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {}}
+    memory = AgentSpec.model_validate(doc).spec.memory
+    assert memory is not None and memory.long_term is not None
+    assert memory.long_term.rewrite_reads is False
+
+
+def test_rewrite_reads_can_enable() -> None:
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {"rewrite_reads": True}}
+    memory = AgentSpec.model_validate(doc).spec.memory
+    assert memory is not None and memory.long_term is not None
+    assert memory.long_term.rewrite_reads is True
+
+
+def test_abstain_threshold_defaults_zero() -> None:
+    """P5a — abstention is observe-only (never abstains) until a tenant opts in."""
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {}}
+    memory = AgentSpec.model_validate(doc).spec.memory
+    assert memory is not None and memory.long_term is not None
+    assert memory.long_term.abstain_threshold == 0.0
+
+
+def test_abstain_threshold_accepts_unit_interval() -> None:
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {"abstain_threshold": 0.3}}
+    memory = AgentSpec.model_validate(doc).spec.memory
+    assert memory is not None and memory.long_term is not None
+    assert memory.long_term.abstain_threshold == 0.3
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.1])
+def test_abstain_threshold_rejects_out_of_range(bad: float) -> None:
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {"abstain_threshold": bad}}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
 # model.effort / model.adaptive_thinking — CM-9
 # ---------------------------------------------------------------------------
 

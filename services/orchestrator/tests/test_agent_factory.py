@@ -824,6 +824,135 @@ async def test_build_memory_nodes_passes_reranker_to_recall() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_memory_nodes_passes_rewrite_reads_to_recall() -> None:
+    """P5a assembly — ``long_term.rewrite_reads`` + the agent's chat model reach
+    the recall node as ``rewrite_query`` + ``rewriter``, so an enabled manifest
+    actually rewrites the query before recall."""
+    from collections.abc import Sequence
+    from uuid import UUID, uuid4
+
+    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+
+    from expert_work.protocol import MemoryItem
+    from orchestrator.agent_factory import _build_memory_nodes
+
+    tenant, user = uuid4(), uuid4()
+
+    class _FixedEmbedder:
+        async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
+            del tenant_id
+            return [(1.0, 0.0, 0.0) for _ in texts]
+
+    class _NoHitStore:
+        def __init__(self) -> None:
+            self.query_texts: list[object] = []
+
+        async def retrieve(self, **kwargs: object) -> list[MemoryItem]:
+            self.query_texts.append(kwargs.get("query_text"))
+            return []
+
+        async def bump_access(self, **kwargs: object) -> None:
+            return None
+
+    class _SpyLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def __call__(
+            self, *, messages: Sequence[BaseMessage], tools: Sequence[object]
+        ) -> AIMessage:
+            del messages, tools
+            self.calls += 1
+            return AIMessage(content="rewritten query")
+
+    store = _NoHitStore()
+    llm = _SpyLLM()
+    doc = deepcopy(_MINIMAL_SPEC)
+    # verify_reads off so the only LLM call under test is the rewriter.
+    doc["spec"]["memory"] = {"long_term": {"rewrite_reads": True, "verify_reads": False}}
+    spec = AgentSpec.model_validate(doc)
+
+    recall, _writeback, _flush = _build_memory_nodes(
+        spec,
+        memory_env=MemoryEnv(store=store, embedder=_FixedEmbedder()),  # type: ignore[arg-type]
+        llm_caller=llm,  # type: ignore[arg-type]
+    )
+    assert recall is not None
+    await recall(
+        {"messages": [HumanMessage(content="q")], "step_count": 0, "max_steps": 5},  # type: ignore[arg-type]
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert llm.calls == 1  # rewriter invoked → rewrite_reads + rewriter wired from spec
+    # Default recall mode is hybrid → the rewritten text reaches query_text too.
+    assert store.query_texts == ["rewritten query"]
+
+
+@pytest.mark.asyncio
+async def test_build_memory_nodes_passes_abstain_threshold_to_recall() -> None:
+    """P5a assembly — ``long_term.abstain_threshold`` reaches the recall node, so
+    a manifest that sets it actually abstains on a weak match."""
+    from collections.abc import Sequence
+    from uuid import UUID, uuid4
+
+    from langchain_core.messages import HumanMessage
+
+    from expert_work.protocol import MemoryItem
+    from orchestrator.agent_factory import _build_memory_nodes
+
+    tenant, user = uuid4(), uuid4()
+
+    class _FixedEmbedder:
+        async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
+            del tenant_id
+            return [(1.0, 0.0, 0.0) for _ in texts]
+
+    # Orthogonal to the query embedding → cosine 0.0, below the 0.5 threshold.
+    far = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="far",
+        embedding=(0.0, 1.0, 0.0),
+    )
+
+    class _OneHitStore:
+        def __init__(self) -> None:
+            self.retrieve_calls = 0
+
+        async def retrieve(self, **kwargs: object) -> list[MemoryItem]:
+            del kwargs
+            self.retrieve_calls += 1
+            return [far]
+
+        async def bump_access(self, **kwargs: object) -> None:
+            return None
+
+    async def _no_llm(*, messages: object, tools: object) -> object:
+        raise AssertionError("no rewrite / verify enabled — LLM must not be called")
+
+    store = _OneHitStore()
+    doc = deepcopy(_MINIMAL_SPEC)
+    # verify_reads off so an empty result can only come from the abstain gate,
+    # never from the fail-open verify path swallowing an LLM error.
+    doc["spec"]["memory"] = {"long_term": {"abstain_threshold": 0.5, "verify_reads": False}}
+    spec = AgentSpec.model_validate(doc)
+
+    recall, _writeback, _flush = _build_memory_nodes(
+        spec,
+        memory_env=MemoryEnv(store=store, embedder=_FixedEmbedder()),  # type: ignore[arg-type]
+        llm_caller=_no_llm,  # type: ignore[arg-type]
+    )
+    assert recall is not None
+    out = await recall(
+        {"messages": [HumanMessage(content="q")], "step_count": 0, "max_steps": 5},  # type: ignore[arg-type]
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert store.retrieve_calls == 1  # retrieve ran and returned the weak match…
+    assert out == {}  # …and it was abstained → abstain_threshold wired from spec
+
+
+@pytest.mark.asyncio
 async def test_build_agent_missing_key_raises() -> None:
     """Stream Y-2 — agent builds require a platform credential. With no
     ``provider_key_resolver`` (and the manifest ref ignored), the build fails."""

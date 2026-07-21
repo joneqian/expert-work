@@ -107,6 +107,13 @@ _memory_abstain_total = expert_work_counter(
     "below the abstention threshold (P5a).",
 )
 
+# Stream P5a (Task 7) — retrieval query rewrite outcomes.
+_memory_rewrite_total = expert_work_counter(
+    "expert_work_memory_rewrite_total",
+    "Recall query rewrites, partitioned by outcome (P5a).",
+    label_names=("outcome",),  # rewritten | unchanged | degraded
+)
+
 # Stream CM-7 — Mem0-style reconciliation of run-end memory writes.
 _memory_reconcile_total = expert_work_counter(
     "expert_work_cm_memory_reconcile_total",
@@ -380,6 +387,19 @@ def record_memory_verify(*, outcome: str) -> None:
 def record_memory_abstain() -> None:
     """Bump ``expert_work_memory_abstain_total`` (P5a abstention gate)."""
     _memory_abstain_total.inc()
+
+
+def record_memory_rewrite(*, outcome: str) -> None:
+    """Bump ``expert_work_memory_rewrite_total{outcome}`` (P5a query rewrite).
+
+    ``outcome`` ∈ ``{"rewritten", "unchanged", "degraded"}`` — ``rewritten`` =
+    the rewriter returned a non-empty query different from the original;
+    ``unchanged`` = it returned the original (empty reply or identical text);
+    ``degraded`` = the rewrite call failed and the original was kept (fail-open,
+    recall never breaks on a rewrite error). Only emitted when rewrite is
+    enabled and a rewriter is wired.
+    """
+    _memory_rewrite_total.labels(outcome=outcome).inc()
 
 
 def record_memory_reconcile(*, op: str) -> None:

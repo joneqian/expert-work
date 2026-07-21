@@ -965,6 +965,10 @@ export interface TranslationKeys {
     memory_recall_mode_help: string;
     memory_recall_per_session: string;
     memory_recall_per_turn: string;
+    memory_rewrite_reads: string;
+    memory_rewrite_reads_help: string;
+    memory_abstain_threshold: string;
+    memory_abstain_threshold_help: string;
     approval_timeout: string;
     approval_timeout_help: string;
     trajectory_recording: string;
@@ -3829,6 +3833,12 @@ const en: TranslationKeys = {
       "Where memories go in the conversation.\nPer session: inserted once for the whole session — cheaper and faster (default).\nPer turn: re-inserted every turn — for agents that edit their own memory mid-conversation.\nExample: per session",
     memory_recall_per_session: "Per session (cheaper, faster)",
     memory_recall_per_turn: "Per turn",
+    memory_rewrite_reads: "Rewrite question for recall",
+    memory_rewrite_reads_help:
+      "Before searching memories, rewrite the user's latest message into a short standalone search query — stripping instructions and trimming long messages so they don't skew what's recalled.\nCosts one extra model call; if it errors, the original message is used.\nOff by default (opt-in).\nExample: off",
+    memory_abstain_threshold: "Skip weak matches (threshold)",
+    memory_abstain_threshold_help:
+      "After searching, if the best memory's similarity to the question is below this, inject nothing instead of a weak match — avoids dragging loosely-related memories into the answer.\n0 = never skip (default); ~0.2–0.3 = skip clearly weak matches.\nExample: 0",
     approval_timeout: "Approval wait limit (seconds)",
     approval_timeout_help:
       "How long a pending approval may wait (seconds) before it is auto-rejected, so it doesn't tie up resources.\nDefault 24h (86400).\nExample: 86400",

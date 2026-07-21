@@ -43,6 +43,7 @@ from expert_work.common.uplift_metrics import (
     record_memory_redacted,
     record_memory_rerank,
     record_memory_retrieval,
+    record_memory_rewrite,
     record_memory_verify,
 )
 from expert_work.persistence import MemoryStore
@@ -433,9 +434,15 @@ async def _rewrite_query(*, llm_caller: LLMCaller, task: str, token: Cancellatio
         raise
     except Exception:
         logger.warning("memory.query_rewrite_failed — using original task", exc_info=True)
+        record_memory_rewrite(outcome="degraded")
         return task
     rewritten = _message_text(response).strip()
-    return rewritten or task
+    if not rewritten or rewritten == task:
+        # Empty reply, or the model echoed the task back — no effective rewrite.
+        record_memory_rewrite(outcome="unchanged")
+        return task
+    record_memory_rewrite(outcome="rewritten")
+    return rewritten
 
 
 def make_memory_recall_node(
@@ -540,6 +547,12 @@ def make_memory_recall_node(
                 )
                 if top_sim < abstain_threshold:
                     record_memory_abstain()
+                    # An abstained recall injects nothing — it is a retrieval
+                    # miss for observability. The normal record_memory_retrieval
+                    # call below is skipped by this early return, so bump it here
+                    # or the abstain branch silently drops off the retrieval
+                    # hit/miss dashboards.
+                    record_memory_retrieval(mode=mode, result="miss")
                     logger.info("memory.abstain top_sim=%.3f < %.3f", top_sim, abstain_threshold)
                     return {}
             if reranker is not None and memories:
