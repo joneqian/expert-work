@@ -172,3 +172,25 @@ async def test_skill_evolution_judge_sample_pct_defaults_and_round_trips() -> No
     assert updated.skill_evolution_judge_sample_pct == 25
     got = await store.get(tenant_id=tid)
     assert got is not None and got.skill_evolution_judge_sample_pct == 25
+
+
+@pytest.mark.asyncio
+async def test_memory_predictive_review_enabled_defaults_and_round_trips() -> None:
+    """P5b-2b ⑦ — predictive review opt-in defaults False, patches through.
+
+    Closes the activation-gap Critical finding on 7a8e9155 (P5b-2b T4) for
+    the in-memory store's upsert path (mirrors the SQL store round-trip).
+    """
+    store = InMemoryTenantConfigStore()
+    tid = uuid4()
+    created = await store.create(tenant_id=tid, display_name="Acme", actor_id="sys")
+    assert created.memory_predictive_review_enabled is False
+
+    updated = await store.upsert(
+        tenant_id=tid,
+        patch=TenantConfigPatch(memory_predictive_review_enabled=True),
+        actor_id="ops",
+    )
+    assert updated.memory_predictive_review_enabled is True
+    got = await store.get(tenant_id=tid)
+    assert got is not None and got.memory_predictive_review_enabled is True

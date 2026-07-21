@@ -283,3 +283,33 @@ async def test_skill_evolution_judge_sample_pct_default_and_patch(
         assert fetched is not None and fetched.skill_evolution_judge_sample_pct == 50
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_memory_predictive_review_enabled_default_and_patch(
+    tenant_config_store: tuple[SqlTenantConfigStore, AsyncEngine],
+) -> None:
+    """P5b-2b ⑦ — predictive review opt-in defaults False and round-trips True.
+
+    Closes the activation-gap Critical finding on 7a8e9155 (P5b-2b T4):
+    proves the full ``TenantConfigPatch`` → SQL store → ``TenantConfigRecord``
+    path actually turns MemoryConsolidator's SUB-PASS 3 on for a tenant,
+    not just the Pydantic model in isolation.
+    """
+    store, engine = tenant_config_store
+    try:
+        tenant = uuid4()
+        current_tenant_id_var.set(tenant)
+        created = await store.create(tenant_id=tenant, display_name="Acme", actor_id="bootstrap")
+        assert created.memory_predictive_review_enabled is False
+
+        updated = await store.upsert(
+            tenant_id=tenant,
+            patch=TenantConfigPatch(memory_predictive_review_enabled=True),
+            actor_id="ops",
+        )
+        assert updated.memory_predictive_review_enabled is True
+        fetched = await store.get(tenant_id=tenant)
+        assert fetched is not None and fetched.memory_predictive_review_enabled is True
+    finally:
+        await engine.dispose()

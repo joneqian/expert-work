@@ -118,6 +118,10 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                     row_kwargs["memory_purge_enabled"] = patch.memory_purge_enabled
                 if patch.memory_purge_min_age_days is not None:
                     row_kwargs["memory_purge_min_age_days"] = patch.memory_purge_min_age_days
+                if patch.memory_predictive_review_enabled is not None:
+                    row_kwargs["memory_predictive_review_enabled"] = (
+                        patch.memory_predictive_review_enabled
+                    )
                 # Stream O — credentials mode + tool credentials.
                 if patch.credentials_mode is not None:
                     row_kwargs["credentials_mode"] = patch.credentials_mode
@@ -165,6 +169,9 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                             ),
                             "memory_purge_enabled": patch.memory_purge_enabled,
                             "memory_purge_min_age_days": patch.memory_purge_min_age_days,
+                            "memory_predictive_review_enabled": (
+                                patch.memory_predictive_review_enabled
+                            ),
                             # Stream O — credentials mode + tool credentials.
                             "credentials_mode": patch.credentials_mode,
                             "tool_credentials": patch.tool_credentials,

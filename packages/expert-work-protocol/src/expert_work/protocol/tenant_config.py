@@ -284,6 +284,8 @@ class TenantConfigPatch(BaseModel):
     memory_purge_min_age_days: int | None = Field(
         default=None, ge=_MEMORY_PURGE_MIN_DAYS, le=_MEMORY_PURGE_MAX_DAYS
     )
+    # Stream P5b-2b ⑦ — predictive review opt-in. None = leave unchanged.
+    memory_predictive_review_enabled: bool | None = None
     # Stream Y-1 — LLM platform-exclusive. ``credentials_mode`` can only be
     # patched to ``platform`` now; Pydantic rejects other values with 422.
     credentials_mode: CredentialsMode | None = None

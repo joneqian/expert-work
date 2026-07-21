@@ -98,6 +98,13 @@ class TenantConfigRow(Base):
     memory_purge_min_age_days: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("30"), default=30
     )
+    # Stream P5b-2b ⑦ — predictive review opt-in. When True, MemoryConsolidator's
+    # SUB-PASS 3 proactively re-reviews facts whose predicted validity window
+    # has come due. Off by default (LLM cost) — tenants opt in explicitly.
+    # Added in migration 0129.
+    memory_predictive_review_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
     # Stream O — Mini-ADR O-2. Credentials mode + tool API key map.
     # Stream Y-1 narrowed ``CredentialsMode`` to ``Literal["platform"]``;
     # the CHECK constraint (migration 0058) mirrors it as ``IN ('platform')``.
