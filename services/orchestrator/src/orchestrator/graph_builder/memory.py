@@ -774,15 +774,15 @@ async def _reconcile_and_apply(
 async def _apply_update(
     item: MemoryItem, target: UUID, *, memory_store: MemoryStore, token: CancellationToken
 ) -> bool:
+    """Stream P5b — append-only UPDATE: supersede ``target`` with ``item``
+    (close old row + open new versioned row) instead of overwriting in place."""
     try:
-        updated = await token.run_cancellable(
-            memory_store.update_content(
+        written = await token.run_cancellable(
+            memory_store.supersede(
                 tenant_id=item.tenant_id,
                 user_id=item.user_id,
-                memory_id=target,
-                content=item.content,
-                embedding=item.embedding,
-                kind=item.kind,
+                old_id=target,
+                new_item=item,
             )
         )
     except RunCancelledError:
@@ -790,17 +790,17 @@ async def _apply_update(
     except Exception:
         logger.warning("memory.reconcile_update_failed id=%s", target, exc_info=True)
         return False
-    return updated is not None
+    return written is not None
 
 
 async def _apply_delete(
     item: MemoryItem, target: UUID, *, memory_store: MemoryStore, token: CancellationToken
 ) -> bool:
+    """Stream P5b — retraction: expire ``target`` (world no longer true, no
+    successor) instead of soft-deleting it (which means user-forget)."""
     try:
         return await token.run_cancellable(
-            memory_store.soft_delete(
-                tenant_id=item.tenant_id, user_id=item.user_id, memory_id=target
-            )
+            memory_store.expire(tenant_id=item.tenant_id, user_id=item.user_id, memory_id=target)
         )
     except RunCancelledError:
         raise

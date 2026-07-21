@@ -110,17 +110,28 @@ async def test_no_neighbor_adds_directly_without_ops_llm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_rewrites_existing_memory() -> None:
+async def test_update_supersedes_existing_memory() -> None:
+    """P5b — a reconcile UPDATE is append-only: the old row is kept
+    (invalidated, not rewritten) and a new versioned row is chained onto it
+    via ``supersedes`` / ``superseded_by``."""
     store = InMemoryMemoryStore()
     tenant, user = uuid4(), uuid4()
     old = await _seed(store, tenant, user, "likes light roast")
     llm = _RecordingLLM(responses=[_extraction("likes dark roast"), _ops("UPDATE", old.id)])
     written = await _flush(store, llm, _MapEmbedder({"likes dark roast": _NEAR_EAST}), tenant, user)
-    assert written == 0  # nothing direct-written — the existing row was rewritten
+    assert written == 0  # nothing direct-written — applied via store.supersede
     assert len(llm.calls) == 2
     # The ops prompt carried the existing memory for the decision.
     assert str(old.id) in str(llm.calls[1][1].content)
     assert await _live_contents(store, tenant, user) == ["likes dark roast"]
+    # Append-only trail: old row kept + invalidated (not overwritten), new
+    # row versioned onto it.
+    old_row = next(r for r in store._rows if r.id == old.id)
+    assert old_row.content == "likes light roast"  # unchanged — never rewritten
+    assert old_row.invalid_at is not None
+    new_row = next(r for r in store._rows if r.supersedes == old.id)
+    assert new_row.content == "likes dark roast"
+    assert old_row.superseded_by == new_row.id
 
 
 @pytest.mark.asyncio
@@ -136,6 +147,8 @@ async def test_noop_stores_nothing() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_retracts_existing_without_storing_candidate() -> None:
+    """P5b — a reconcile DELETE expires the target (retraction: world no
+    longer true) rather than soft-deleting it (which means user-forget)."""
     store = InMemoryMemoryStore()
     tenant, user = uuid4(), uuid4()
     old = await _seed(store, tenant, user, "works at Acme")
@@ -145,6 +158,9 @@ async def test_delete_retracts_existing_without_storing_candidate() -> None:
     )
     assert written == 0
     assert await _live_contents(store, tenant, user) == []
+    old_row = next(r for r in store._rows if r.id == old.id)
+    assert old_row.expired_at is not None
+    assert old_row.deleted_at is None  # retraction ≠ soft-delete (forget)
 
 
 @pytest.mark.asyncio
@@ -199,3 +215,85 @@ async def test_reconcile_off_writes_directly_with_single_llm_call() -> None:
         "likes dark roast",
         "likes light roast",
     ]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_update_supersedes_not_overwrites() -> None:
+    """CM-7 + P5b — a reconcile UPDATE builds an append-only version chain via
+    store.supersede (old row kept + invalidated), not a destructive rewrite."""
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+    from expert_work.runtime.cancellation import CancellationToken
+    from orchestrator.graph_builder.memory import _apply_update
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    old_id = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=old_id,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user lives in Beijing",
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+    new_item = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user lives in Shanghai",
+        embedding=(0.9, 0.1, 0.0),
+    )
+    ok = await _apply_update(new_item, old_id, memory_store=store, token=CancellationToken())
+    assert ok is True
+    old = next(r for r in store._rows if r.id == old_id)
+    assert old.invalid_at is not None and old.superseded_by == new_item.id
+    new = next(r for r in store._rows if r.id == new_item.id)
+    assert new.supersedes == old_id
+
+
+@pytest.mark.asyncio
+async def test_reconcile_delete_expires_not_softdeletes() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+    from expert_work.runtime.cancellation import CancellationToken
+    from orchestrator.graph_builder.memory import _apply_delete
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    target = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=target,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user owns a car",
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+    # The candidate item is the retraction event (its content negates the fact).
+    candidate = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user sold the car",
+        embedding=(0.9, 0.1, 0.0),
+    )
+    ok = await _apply_delete(candidate, target, memory_store=store, token=CancellationToken())
+    assert ok is True
+    row = next(r for r in store._rows if r.id == target)
+    assert row.expired_at is not None
+    assert row.deleted_at is None  # retraction ≠ soft-delete (forget)
