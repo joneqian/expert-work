@@ -725,6 +725,50 @@ async def test_memory_writeback_node_enqueues_dlq_on_embed_failure() -> None:
     assert "embed-down" in (rows[0].last_error or "")
 
 
+@pytest.mark.asyncio
+async def test_writeback_stamps_source_run_id_from_config() -> None:
+    from uuid import uuid4
+
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from orchestrator.graph_builder.memory import make_memory_writeback_node
+
+    tenant, user, thread, run = uuid4(), uuid4(), uuid4(), uuid4()
+    store = InMemoryMemoryStore()
+
+    async def _extract_llm(*, messages: object, tools: object) -> AIMessage:
+        del messages, tools
+        return AIMessage(
+            content='{"memories": [{"kind": "fact", "content": "user likes tea", '
+            '"importance": 0.9, "confidence": 0.9}]}'
+        )
+
+    class _Embedder:
+        async def embed(self, texts, *, tenant_id):  # type: ignore[no-untyped-def]
+            del tenant_id
+            return [(1.0, 0.0, 0.0) for _ in texts]
+
+    node = make_memory_writeback_node(
+        memory_store=store,
+        embedder=_Embedder(),  # type: ignore[arg-type]
+        llm_caller=_extract_llm,  # type: ignore[arg-type]
+    )
+    await node(
+        {"messages": [HumanMessage(content="I like tea")], "step_count": 1, "max_steps": 5},  # type: ignore[arg-type]
+        {
+            "configurable": {
+                "tenant_id": str(tenant),
+                "user_id": str(user),
+                "thread_id": str(thread),
+                "run_id": str(run),
+            }
+        },
+    )
+    assert len(store._rows) == 1
+    assert store._rows[0].source_run_id == str(run)
+
+
 # ---------------------------------------------------------------------------
 # end-to-end — recall injects, write-back persists
 # ---------------------------------------------------------------------------
