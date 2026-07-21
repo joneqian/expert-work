@@ -996,8 +996,7 @@ async def test_expire_hides_from_retrieve_but_keeps_row(sql_store: SqlStoreFixtu
             row = (
                 await conn.execute(
                     text(
-                        "SELECT expired_at, deleted_at, invalid_at FROM memory_item "
-                        "WHERE id = :id"
+                        "SELECT expired_at, deleted_at, invalid_at FROM memory_item WHERE id = :id"
                     ),
                     {"id": mid},
                 )

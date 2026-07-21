@@ -758,9 +758,7 @@ async def test_retrieve_keeps_future_expiry() -> None:
             )
         ]
     )
-    got = await store.retrieve(
-        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0)
-    )
+    got = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0))
     assert [m.content for m in got] == ["still valid"]
 
 
@@ -861,9 +859,7 @@ async def test_expire_hides_from_retrieve_but_keeps_row() -> None:
     )
     ok = await store.expire(tenant_id=tenant, user_id=user, memory_id=mid)
     assert ok is True
-    got = await store.retrieve(
-        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0)
-    )
+    got = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0))
     assert got == []
     row = next(r for r in store._rows if r.id == mid)
     assert row.expired_at is not None
