@@ -669,3 +669,34 @@ async def test_hybrid_ranking_reinforces_access_and_importance() -> None:
     # RRF alone (no freq/importance) would rank "widget alpha" first —
     # both sub-rankings tie and it holds rank 0 by insertion order.
     assert got[0].content == "widget beta"  # hot+important overturns the RRF tie
+
+
+async def test_inmemory_write_retrieve_preserves_bitemporal_fields() -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user, run = uuid4(), uuid4(), uuid4()
+    valid = datetime(2026, 3, 1, tzinfo=UTC)
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user works remotely",
+                embedding=(1.0, 0.0, 0.0),
+                source_run_id=str(run),
+                valid_at=valid,
+                expected_valid_days=180,
+            )
+        ]
+    )
+    [got] = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0))
+    assert got.source_run_id == str(run)
+    assert got.valid_at == valid
+    assert got.expected_valid_days == 180

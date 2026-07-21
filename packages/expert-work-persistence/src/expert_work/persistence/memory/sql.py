@@ -82,6 +82,14 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
         consolidated_from=tuple(UUID(str(uid)) for uid in row.consolidated_from),
         last_reviewed_at=row.last_reviewed_at,
         review_flagged_at=row.review_flagged_at,
+        # Stream P5b — 溯源 + bi-temporal
+        source_run_id=row.source_run_id,
+        valid_at=row.valid_at,
+        expired_at=row.expired_at,
+        invalid_at=row.invalid_at,
+        supersedes=row.supersedes,
+        superseded_by=row.superseded_by,
+        expected_valid_days=row.expected_valid_days,
     )
     # Capability Uplift Sprint #2 (Mini-ADR U-4) — drift detection.
     if row.content_hash and hash_content(row.content) != row.content_hash:
@@ -156,6 +164,12 @@ class SqlMemoryStore(MemoryStore):
                 # exercised against real ages.
                 "created_at": item.created_at if item.created_at is not None else func.now(),
                 "last_used_at": item.last_used_at if item.last_used_at is not None else func.now(),
+                # Stream P5b — provenance + world-validity anchor. valid_at
+                # defaults to now() (== created_at at insert) so new rows are
+                # "valid from creation"; supersede() overrides it explicitly.
+                "source_run_id": item.source_run_id,
+                "valid_at": item.valid_at if item.valid_at is not None else func.now(),
+                "supersedes": item.supersedes,
             }
             for item in items
         ]

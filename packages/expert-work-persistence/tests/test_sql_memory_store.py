@@ -622,3 +622,33 @@ async def test_migration_0126_adds_bitemporal_columns(sql_store: SqlStoreFixture
         "superseded_by",
         "expected_valid_days",
     } <= columns
+
+
+@pytest.mark.asyncio
+async def test_write_retrieve_roundtrips_provenance_and_valid_at(
+    sql_store: SqlStoreFixture,
+) -> None:
+    from datetime import UTC, datetime
+
+    store, _engine = sql_store
+    tenant, user, run = uuid4(), uuid4(), uuid4()
+    valid = datetime(2026, 1, 1, tzinfo=UTC)
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user prefers metric units",
+                embedding=_vec(1.0, 0.0),
+                source_run_id=str(run),
+                valid_at=valid,
+            )
+        ]
+    )
+    [got] = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0))
+    assert got.source_run_id == str(run)
+    assert got.valid_at == valid
+    assert got.invalid_at is None
+    assert got.expired_at is None
