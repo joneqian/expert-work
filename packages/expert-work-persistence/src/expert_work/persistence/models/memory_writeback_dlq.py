@@ -33,6 +33,10 @@ class MemoryWritebackDLQRow(Base):
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     source_thread_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Stream P5b — the run (agent_run.id, stringified) that produced these
+    #: extracted memories. Carried through so a retried writeback keeps run
+    #: provenance. NULL for legacy rows.
+    source_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: List of ``[kind, content]`` pairs (kind ∈ {"fact","episodic"}).
     extracted: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
