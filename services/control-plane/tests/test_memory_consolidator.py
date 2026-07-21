@@ -678,6 +678,59 @@ async def test_review_due_fact_renews_when_still_valid() -> None:
 
 
 @pytest.mark.asyncio
+async def test_review_due_fact_negative_window_falls_back_to_existing_window() -> None:
+    """Whole-branch-review fix — a negative ``expected_valid_days`` verdict
+    must not poison the fact into a re-review loop. ``_parse_due_reply``
+    normalizes a non-positive window to None, so the ``verdict.expected_valid_days
+    or item.expected_valid_days`` fallback in ``_review_due_fact`` yields the
+    item's existing *positive* window, not -5 — otherwise ``renew_review``
+    would compute a ``due_at`` in the past and the fact would come due again
+    on every tick forever."""
+    worker, store, _aux, audit_store = await _build_worker(
+        aux_replies=['{"still_valid": true, "expected_valid_days": -5}']
+    )
+    item = await _seed_due_fact(store, expected_valid_days=365)  # past due
+
+    summary = ConsolidatorRunSummary()
+    await worker._review_due_fact(tenant_id=_TENANT, user_id=_USER, item=item, summary=summary)
+
+    # Falls back to the item's existing positive window, NOT -5.
+    got = (await store.list_for_user(tenant_id=_TENANT, user_id=_USER))[0]
+    assert got.expired_at is None
+    assert got.expected_valid_days == 365
+    assert summary.renewed == 1
+    assert summary.expired == 0
+    # Re-armed from now with a positive window → not immediately due again
+    # (proves no loop).
+    assert await store.list_due_for_review(tenant_id=_TENANT, user_id=_USER, limit=10) == []
+    page = await audit_store.query(AuditQuery(tenant_id="*", limit=100))
+    actions = {entry.action for entry in page.entries}
+    assert AuditAction.MEMORY_FACT_RENEWED in actions
+
+
+@pytest.mark.asyncio
+async def test_review_due_fact_zero_window_falls_back_to_existing_window() -> None:
+    """Same loop guard for a zero verdict window (also non-positive, and
+    ``0 or item.expected_valid_days`` would already fall back correctly at
+    the ``_review_due_fact`` call site — but the parser-level normalization
+    must not regress the always-None-or-positive invariant for 0 either)."""
+    worker, store, _aux, _audit_store = await _build_worker(
+        aux_replies=['{"still_valid": true, "expected_valid_days": 0}']
+    )
+    item = await _seed_due_fact(store, expected_valid_days=365)  # past due
+
+    summary = ConsolidatorRunSummary()
+    await worker._review_due_fact(tenant_id=_TENANT, user_id=_USER, item=item, summary=summary)
+
+    got = (await store.list_for_user(tenant_id=_TENANT, user_id=_USER))[0]
+    assert got.expired_at is None
+    assert got.expected_valid_days == 365
+    assert summary.renewed == 1
+    assert summary.expired == 0
+    assert await store.list_due_for_review(tenant_id=_TENANT, user_id=_USER, limit=10) == []
+
+
+@pytest.mark.asyncio
 async def test_review_due_fact_expires_when_false() -> None:
     worker, store, _aux, audit_store = await _build_worker(
         aux_replies=['{"still_valid": false, "expected_valid_days": null}']

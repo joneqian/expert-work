@@ -441,7 +441,21 @@ def _parse_single_reply(reply: ConsolidatorLLMReply) -> SingleReviewVerdict | No
 
 
 def _parse_due_reply(reply: ConsolidatorLLMReply) -> _DueVerdict | None:
-    """Validate the due-review LLM reply; ``None`` on malformed."""
+    """Validate the due-review LLM reply; ``None`` on malformed.
+
+    ``expected_valid_days`` is normalized to None-or-positive here — a
+    non-positive value (<=0) degrades to None rather than passing through.
+    Mirrors ``orchestrator.graph_builder.memory._parse_valid_days``'s
+    tolerance philosophy for the same untrusted-LLM-output shape: a bad
+    window never rejects the verdict, it just opts out of a renewed
+    window. Without this, a negative window would flow into
+    ``_review_due_fact``'s ``verdict.expected_valid_days or
+    item.expected_valid_days`` (truthy) and then into ``renew_review``,
+    producing a ``due_at`` in the past — the fact would come due again
+    on every consolidator tick forever, and — because renewal re-arms
+    from the (now negative) stored window on subsequent null/degrade
+    verdicts — never self-heal.
+    """
     try:
         if reply.parsed is not None:
             data = _DueReviewReplyModel.model_validate(reply.parsed)
@@ -449,7 +463,10 @@ def _parse_due_reply(reply: ConsolidatorLLMReply) -> _DueVerdict | None:
             data = _DueReviewReplyModel.model_validate_json(reply.text)
     except ValidationError:
         return None
-    return _DueVerdict(still_valid=data.still_valid, expected_valid_days=data.expected_valid_days)
+    expected_valid_days = data.expected_valid_days
+    if expected_valid_days is not None and expected_valid_days <= 0:
+        expected_valid_days = None
+    return _DueVerdict(still_valid=data.still_valid, expected_valid_days=expected_valid_days)
 
 
 # ---------------------------------------------------------------------------
