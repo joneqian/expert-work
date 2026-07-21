@@ -125,12 +125,16 @@ class InMemoryMemoryStore(MemoryStore):
         agent_name: str | None = None,
         limit: int = 5,
     ) -> list[MemoryItem]:
+        now = datetime.now(UTC)
         candidates = [
             row
             for row in self._rows
             if row.tenant_id == tenant_id
             and row.user_id == user_id
             and row.deleted_at is None  # Stream K.K6 — hide soft-deleted
+            # Stream P5b — bi-temporal: hide superseded (invalid_at) + world-expired.
+            and row.invalid_at is None
+            and (row.expired_at is None or row.expired_at > now)
             # Capability Uplift Sprint #7 (Mini-ADR U-33) — skip archived
             # + skip raw transient that has been superseded by a
             # consolidated parent (prevents double-counting raw + summary).
@@ -149,7 +153,6 @@ class InMemoryMemoryStore(MemoryStore):
         # Capability Uplift Sprint #6 (Mini-ADR U-5) — hybrid path.
         # Stream CM-6 (Mini-ADR CM-G2) — temporal decay re-ranks inside the
         # recall window on both paths, mirroring the SQL store.
-        now = datetime.now(UTC)
         if query_text is not None and query_text.strip():
             keyword_hits = _keyword_rank(candidates, query_text=query_text)
             scored = rrf_fuse_scored(

@@ -700,3 +700,65 @@ async def test_inmemory_write_retrieve_preserves_bitemporal_fields() -> None:
     assert got.source_run_id == str(run)
     assert got.valid_at == valid
     assert got.expected_valid_days == 180
+
+
+async def test_retrieve_excludes_invalidated_and_expired() -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+
+    def _mem(content: str, **extra: object) -> MemoryItem:
+        return MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content=content,
+            embedding=(1.0, 0.0, 0.0),
+            **extra,  # type: ignore[arg-type]
+        )
+
+    await store.write([_mem("live fact")])
+    await store.write([_mem("superseded fact", invalid_at=datetime.now(UTC))])
+    await store.write([_mem("expired fact", expired_at=past)])
+
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10
+    )
+    contents = {m.content for m in got}
+    assert contents == {"live fact"}
+
+
+async def test_retrieve_keeps_future_expiry() -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    future = datetime.now(UTC) + timedelta(days=30)
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="still valid",
+                embedding=(1.0, 0.0, 0.0),
+                expired_at=future,
+            )
+        ]
+    )
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0)
+    )
+    assert [m.content for m in got] == ["still valid"]

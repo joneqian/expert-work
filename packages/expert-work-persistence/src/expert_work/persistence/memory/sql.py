@@ -109,6 +109,14 @@ def _retrieve_filter() -> list[ColumnElement[bool]]:
             MemoryItemRow.status == "consolidated",
             MemoryItemRow.consolidated_into.is_(None),
         ),
+        # Stream P5b — bi-temporal: exclude superseded rows (invalid_at set) and
+        # world-expired rows (expired_at in the past). Both are kept in the DB
+        # for history/audit but never enter agent recall.
+        MemoryItemRow.invalid_at.is_(None),
+        or_(
+            MemoryItemRow.expired_at.is_(None),
+            MemoryItemRow.expired_at > func.now(),
+        ),
     ]
 
 
