@@ -578,6 +578,21 @@ class VisionSpec(BaseModel):
 
 
 class WorkflowSpec(BaseModel):
+    """Agent workflow shape.
+
+    ``type`` selects the run loop. ``react`` (default) runs the ReAct
+    loop; since P3 every agent can self-plan on demand by calling the
+    implicit ``update_plan`` tool. ``plan_execute`` additionally
+    front-loads a ``planner`` node that forces an upfront plan — the
+    always-plan / compliance path.
+
+    ``custom`` (a ``type`` value) and the ``early_stop`` / ``builder``
+    fields are **deprecated**: they pass schema validation but the
+    runtime has no branch for them, so they are inert. Retained (not
+    removed) to avoid breaking existing manifests; do not author new
+    agents with them.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["react", "plan_execute", "custom"] = "react"
