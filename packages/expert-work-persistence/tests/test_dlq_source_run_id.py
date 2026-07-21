@@ -36,9 +36,12 @@ async def test_enqueue_persists_source_run_id() -> None:
     dlq = InMemoryMemoryWritebackDLQ()
     run = uuid4()
     row = await dlq.enqueue(
-        tenant_id=uuid4(), user_id=uuid4(),
-        source_thread_id="t", source_run_id=str(run),
-        extracted=[("fact", "x")], error="e",
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        source_thread_id="t",
+        source_run_id=str(run),
+        extracted=[("fact", "x")],
+        error="e",
     )
     assert row.source_run_id == str(run)
     ready = await dlq.take_ready(limit=10, now=row.next_retry_at)
