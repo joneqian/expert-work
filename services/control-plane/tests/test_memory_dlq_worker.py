@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.memory import MemoryDLQWorker
+from control_plane.memory.dlq_worker import _build_memory_items
 from expert_work.persistence import InMemoryMemoryStore
 from expert_work.persistence.memory import InMemoryMemoryWritebackDLQ
 
@@ -60,6 +61,28 @@ async def _seed_dlq(dlq: InMemoryMemoryWritebackDLQ, *, error: str = "boom") -> 
         extracted=[("fact", "Likes coffee")],
         error=error,
     )
+
+
+@pytest.mark.asyncio
+async def test_build_memory_items_carries_source_run_id() -> None:
+    """P5b-2a — DLQ-retry reconstruction must stamp the rebuilt
+    ``MemoryItem``s with the row's ``source_run_id`` so a retried memory
+    keeps its provenance link back to the run whose write-back failed."""
+    dlq = InMemoryMemoryWritebackDLQ()
+    row = await dlq.enqueue(
+        tenant_id=_TENANT,
+        user_id=_USER,
+        source_thread_id="t-1",
+        source_run_id="run-123",
+        extracted=[("fact", "Likes coffee"), ("episodic", "Visited Kyoto")],
+        error="boom",
+    )
+    vectors = [(0.1, 0.2, 0.3), (0.4, 0.5, 0.6)]
+
+    items = _build_memory_items(row, vectors)
+
+    assert len(items) == 2
+    assert all(item.source_run_id == "run-123" for item in items)
 
 
 @pytest.mark.asyncio
