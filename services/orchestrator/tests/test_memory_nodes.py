@@ -161,6 +161,40 @@ def test_parse_extracted_memories_tolerates_malformed_new_fields() -> None:
     assert out[0].is_correction is False
 
 
+def test_parse_extracted_memories_infinity_valid_days_does_not_drop_batch() -> None:
+    """Reviewer repro (P5b-2b T1 fix) — ``int(float('inf'))`` raises
+    ``OverflowError``, a sibling of ``TypeError``/``ValueError`` (not a
+    subclass), so it was previously uncaught. ``json.loads`` accepts the
+    non-standard ``Infinity`` token by default, so an LLM reply with
+    ``"expected_valid_days": Infinity`` must not blow up parsing and drop the
+    ENTIRE batch — the malformed field degrades to None (best-effort) and the
+    well-formed sibling memory in the same reply still survives."""
+    text = """{"memories": [
+      {"kind": "fact", "content": "bad window", "importance": 0.9,
+       "confidence": 0.9, "expected_valid_days": Infinity},
+      {"kind": "fact", "content": "good memory", "importance": 0.8,
+       "confidence": 0.7, "expected_valid_days": 30}
+    ]}"""
+    out = parse_extracted_memories(text)
+    assert [m.content for m in out] == ["bad window", "good memory"]
+    assert out[0].expected_valid_days is None
+    assert out[1].expected_valid_days == 30
+
+
+def test_parse_extracted_memories_zero_and_negative_valid_days_are_none() -> None:
+    # Reviewer coverage gap — the ``days > 0 else None`` branch: 0 and negative
+    # windows are not valid "stays true for N days" values, so both must fall
+    # back to None rather than being persisted as a bogus validity window.
+    text = """{"memories": [
+      {"kind": "fact", "content": "zero window", "expected_valid_days": 0},
+      {"kind": "fact", "content": "negative window", "expected_valid_days": -5}
+    ]}"""
+    out = parse_extracted_memories(text)
+    assert len(out) == 2
+    assert out[0].expected_valid_days is None
+    assert out[1].expected_valid_days is None
+
+
 # ---------------------------------------------------------------------------
 # Stream Memory-Enhance (M-3) — read-time verification
 # ---------------------------------------------------------------------------

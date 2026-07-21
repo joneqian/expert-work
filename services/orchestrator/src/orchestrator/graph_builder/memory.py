@@ -192,7 +192,13 @@ def _parse_valid_days(value: object) -> int | None:
     never drops the memory, it just opts the row out of predictive review)."""
     try:
         days = int(value)  # type: ignore[call-overload]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError — ``int(float('inf'))`` raises this (a sibling of
+        # TypeError/ValueError, not a subclass). ``json.loads`` accepts the
+        # non-standard ``Infinity`` / ``-Infinity`` tokens by default, so an
+        # LLM reply carrying ``"expected_valid_days": Infinity`` must degrade
+        # to None here rather than propagate out of ``parse_extracted_memories``
+        # and drop the whole extraction batch.
         return None
     return days if days > 0 else None
 
