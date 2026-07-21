@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -59,6 +60,7 @@ class MemoryStore(abc.ABC):
         query_text: str | None = None,
         kind: Literal["fact", "episodic"] | None = None,
         agent_name: str | None = None,
+        as_of: datetime | None = None,
         limit: int = 5,
     ) -> list[MemoryItem]:
         """Return the user's ``limit`` memories nearest ``query_embedding``,
@@ -76,7 +78,14 @@ class MemoryStore(abc.ABC):
         backward compatibility. When ``query_text`` is a non-empty string
         the retrieval is **hybrid**: vector recall is fused with Postgres
         full-text recall via Reciprocal Rank Fusion (``k=60``). Empty /
-        whitespace-only ``query_text`` degrades to the vector path."""
+        whitespace-only ``query_text`` degrades to the vector path.
+
+        Stream P5b — ``as_of`` (when given) time-travels retrieval: instead of
+        "currently valid" it returns rows that were valid AT that instant
+        (``valid_at <= as_of`` and neither superseded nor expired as of then).
+        ``None`` (default) is the current-time behaviour. ``deleted_at`` and
+        the archived/consolidated filters still apply — as_of only time-travels
+        the bi-temporal (valid/invalid/expired) dimension."""
 
     @abc.abstractmethod
     async def list_for_user(

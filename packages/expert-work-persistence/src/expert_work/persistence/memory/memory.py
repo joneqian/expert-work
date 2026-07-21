@@ -128,18 +128,29 @@ class InMemoryMemoryStore(MemoryStore):
         query_text: str | None = None,
         kind: Literal["fact", "episodic"] | None = None,
         agent_name: str | None = None,
+        as_of: datetime | None = None,
         limit: int = 5,
     ) -> list[MemoryItem]:
         now = datetime.now(UTC)
+
+        def _temporally_visible(row: MemoryItem) -> bool:
+            if as_of is None:
+                return row.invalid_at is None and (row.expired_at is None or row.expired_at > now)
+            return (
+                (row.valid_at is None or row.valid_at <= as_of)
+                and (row.invalid_at is None or row.invalid_at > as_of)
+                and (row.expired_at is None or row.expired_at > as_of)
+            )
+
         candidates = [
             row
             for row in self._rows
             if row.tenant_id == tenant_id
             and row.user_id == user_id
             and row.deleted_at is None  # Stream K.K6 — hide soft-deleted
-            # Stream P5b — bi-temporal: hide superseded (invalid_at) + world-expired.
-            and row.invalid_at is None
-            and (row.expired_at is None or row.expired_at > now)
+            # Stream P5b — bi-temporal: hide superseded (invalid_at) + world-expired
+            # (or, when as_of is given, time-travel to that instant).
+            and _temporally_visible(row)
             # Capability Uplift Sprint #7 (Mini-ADR U-33) — skip archived
             # + skip raw transient that has been superseded by a
             # consolidated parent (prevents double-counting raw + summary).

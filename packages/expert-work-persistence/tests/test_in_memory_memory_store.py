@@ -932,3 +932,91 @@ async def test_expire_unknown_returns_false() -> None:
     store = InMemoryMemoryStore()
     out = await store.expire(tenant_id=uuid4(), user_id=uuid4(), memory_id=uuid4())
     assert out is False
+
+
+async def test_retrieve_as_of_returns_historical_state() -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    t_jan = datetime(2026, 1, 1, tzinfo=UTC)
+    t_mar = datetime(2026, 3, 1, tzinfo=UTC)
+    t_jun = datetime(2026, 6, 1, tzinfo=UTC)
+
+    # "Beijing" valid Jan, superseded by "Shanghai" in Mar.
+    beijing = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user lives in Beijing",
+        embedding=(1.0, 0.0, 0.0),
+        valid_at=t_jan,
+        invalid_at=t_mar,
+    )
+    shanghai = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user lives in Shanghai",
+        embedding=(1.0, 0.0, 0.0),
+        valid_at=t_mar,
+    )
+    await store.write([beijing])
+    await store.write([shanghai])
+
+    # Current (as_of=None): only Shanghai (Beijing is invalid_at set).
+    now_hits = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10
+    )
+    assert [m.content for m in now_hits] == ["user lives in Shanghai"]
+
+    # As of Feb (between Jan valid and Mar supersede): only Beijing was valid.
+    feb = datetime(2026, 2, 1, tzinfo=UTC)
+    feb_hits = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10, as_of=feb
+    )
+    assert [m.content for m in feb_hits] == ["user lives in Beijing"]
+
+    # As of Jun: Shanghai (Beijing already superseded, Shanghai valid since Mar).
+    jun_hits = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10, as_of=t_jun
+    )
+    assert [m.content for m in jun_hits] == ["user lives in Shanghai"]
+
+
+async def test_retrieve_as_of_excludes_not_yet_valid() -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    # valid_at in the future relative to the as_of query → not yet known.
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="future fact",
+                embedding=(1.0, 0.0, 0.0),
+                valid_at=datetime(2026, 5, 1, tzinfo=UTC),
+            )
+        ]
+    )
+    hits = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0, 0.0),
+        as_of=datetime(2026, 2, 1, tzinfo=UTC),
+    )
+    assert hits == []
