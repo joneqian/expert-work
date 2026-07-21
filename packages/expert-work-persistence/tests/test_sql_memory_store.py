@@ -55,6 +55,8 @@ def _item(
     content: str,
     importance: float = 0.5,
     confidence: float = 0.5,
+    created_at: datetime | None = None,
+    expected_valid_days: int | None = None,
 ) -> MemoryItem:
     return MemoryItem(
         id=uuid4(),
@@ -65,6 +67,8 @@ def _item(
         embedding=embedding,
         importance=importance,
         confidence=confidence,
+        created_at=created_at,
+        expected_valid_days=expected_valid_days,
     )
 
 
@@ -1200,5 +1204,203 @@ async def test_retrieve_as_of_time_travel_sql(sql_store: SqlStoreFixture) -> Non
             as_of=datetime(2026, 2, 1, tzinfo=UTC),
         )
         assert [m.content for m in feb_hits] == ["user lives in Beijing"]
+    finally:
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# P5b-2b ⑦ — list_due_for_review / renew_review (predictive review due-scan)
+# ---------------------------------------------------------------------------
+#
+# ``SqlMemoryStore.write()`` persists caller-supplied ``created_at`` /
+# ``expected_valid_days`` directly (see
+# test_write_honours_caller_supplied_timestamps above) but — like
+# ``invalid_at`` / ``expired_at`` — does NOT persist ``last_reviewed_at``
+# (no production writer sets it at insert time). The rearm / expired /
+# invalid fixtures below patch it in via raw UPDATE after the write,
+# mirroring test_retrieve_excludes_invalidated_and_expired's pattern.
+
+
+@pytest.mark.asyncio
+async def test_sql_list_due_for_review_excludes_fresh_nowin_expired_invalid(
+    sql_store: SqlStoreFixture,
+) -> None:
+    """SQL counterpart of the in-memory
+    ``test_list_due_for_review_selects_only_due_live_facts`` — the real
+    Postgres ``make_interval`` due-predicate had zero coverage that ever
+    populated ``expected_valid_days`` together with the bi-temporal columns.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        now = datetime.now(UTC)
+        due = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="due",
+            created_at=now - timedelta(days=400),
+            expected_valid_days=365,
+        )
+        fresh = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="fresh",
+            created_at=now - timedelta(days=10),
+            expected_valid_days=365,
+        )
+        nowin = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="nowin",
+            created_at=now - timedelta(days=999),
+            expected_valid_days=None,
+        )
+        expired = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="expired",
+            created_at=now - timedelta(days=400),
+            expected_valid_days=365,
+        )
+        invalid = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="invalid",
+            created_at=now - timedelta(days=400),
+            expected_valid_days=365,
+        )
+        await store.write([due, fresh, nowin, expired, invalid])
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET expired_at = :past WHERE id = :id"),
+                {"past": now - timedelta(days=1), "id": expired.id},
+            )
+            await conn.execute(
+                text("UPDATE memory_item SET invalid_at = :past WHERE id = :id"),
+                {"past": now - timedelta(days=1), "id": invalid.id},
+            )
+
+        got = await store.list_due_for_review(tenant_id=tenant, user_id=user, limit=10)
+        assert [m.content for m in got] == ["due"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_list_due_for_review_rearms_on_last_reviewed_at(
+    sql_store: SqlStoreFixture,
+) -> None:
+    """SQL counterpart of the in-memory rearm test — the real
+    ``COALESCE(last_reviewed_at, created_at)`` expression must pick
+    ``last_reviewed_at`` as the due-window base when it is set."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        now = datetime.now(UTC)
+        reviewed = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="reviewed",
+            created_at=now - timedelta(days=400),
+            expected_valid_days=365,
+        )
+        await store.write([reviewed])
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET last_reviewed_at = :ts WHERE id = :id"),
+                {"ts": now - timedelta(days=10), "id": reviewed.id},
+            )
+
+        got = await store.list_due_for_review(tenant_id=tenant, user_id=user, limit=10)
+        assert got == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_renew_review_extends_window_and_restamps(
+    sql_store: SqlStoreFixture,
+) -> None:
+    """renew_review() stamps ``last_reviewed_at=now`` and re-arms the window
+    from the given ``expected_valid_days`` against the real UPDATE — a due
+    row drops out of the next scan and the raw row shows both columns
+    updated."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        now = datetime.now(UTC)
+        item = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="x",
+            created_at=now - timedelta(days=400),
+            expected_valid_days=365,
+        )
+        await store.write([item])
+
+        due_before = await store.list_due_for_review(tenant_id=tenant, user_id=user, limit=10)
+        assert [m.content for m in due_before] == ["x"]
+
+        ok = await store.renew_review(
+            tenant_id=tenant, user_id=user, memory_id=item.id, expected_valid_days=730
+        )
+        assert ok is True
+
+        due_after = await store.list_due_for_review(tenant_id=tenant, user_id=user, limit=10)
+        assert due_after == []
+
+        async with engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT last_reviewed_at, expected_valid_days "
+                        "FROM memory_item WHERE id = :id"
+                    ),
+                    {"id": item.id},
+                )
+            ).one()
+        assert row.last_reviewed_at is not None
+        assert row.last_reviewed_at > now - timedelta(minutes=1)
+        assert row.expected_valid_days == 730
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_renew_review_none_clears_window(sql_store: SqlStoreFixture) -> None:
+    """renew_review(expected_valid_days=None) clears the window against the
+    real UPDATE — the row leaves the due-scan (``expected_valid_days IS
+    NULL`` guard) even though it is still a live fact."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        now = datetime.now(UTC)
+        item = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="x",
+            created_at=now - timedelta(days=400),
+            expected_valid_days=365,
+        )
+        await store.write([item])
+
+        ok = await store.renew_review(
+            tenant_id=tenant, user_id=user, memory_id=item.id, expected_valid_days=None
+        )
+        assert ok is True
+
+        got = await store.list_due_for_review(tenant_id=tenant, user_id=user, limit=10)
+        assert got == []
+
+        [row] = await store.list_for_user(tenant_id=tenant, user_id=user)
+        assert row.expected_valid_days is None
     finally:
         await engine.dispose()

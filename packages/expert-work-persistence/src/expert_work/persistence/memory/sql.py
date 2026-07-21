@@ -820,6 +820,58 @@ class SqlMemoryStore(MemoryStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_item(r) for r in rows]
 
+    async def list_due_for_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int,
+    ) -> list[MemoryItem]:
+        now = datetime.now(UTC)
+        base_ts = func.coalesce(MemoryItemRow.last_reviewed_at, MemoryItemRow.created_at)
+        due_at = base_ts + func.make_interval(0, 0, 0, MemoryItemRow.expected_valid_days)
+        stmt = (
+            select(MemoryItemRow)
+            .where(
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.deleted_at.is_(None),
+                MemoryItemRow.invalid_at.is_(None),
+                MemoryItemRow.expired_at.is_(None),
+                MemoryItemRow.expected_valid_days.isnot(None),
+                due_at <= now,
+            )
+            .order_by(due_at.asc())
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_item(row) for row in rows]
+
+    async def renew_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+        expected_valid_days: int | None,
+    ) -> bool:
+        now = datetime.now(UTC)
+        stmt = (
+            update(MemoryItemRow)
+            .where(
+                MemoryItemRow.id == memory_id,
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.deleted_at.is_(None),
+            )
+            .values(last_reviewed_at=now, expected_valid_days=expected_valid_days)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
     async def archive(
         self,
         *,
