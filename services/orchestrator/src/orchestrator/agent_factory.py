@@ -2031,6 +2031,13 @@ def _build_memory_nodes(
         # own chat model (no platform credential); fail-open inside the node.
         verifier=llm_caller,
         verify_reads=long_term.verify_reads,
+        # Stream P5a (Task 7/8) assembly — query rewrite + abstention gate.
+        # Rewrite reuses the agent's own chat model (fail-open); abstention is
+        # observe-only until a tenant opts in. Both default off (rewrite_reads
+        # False, abstain_threshold 0.0) so existing manifests are unchanged.
+        rewrite_query=long_term.rewrite_reads,
+        rewriter=llm_caller,
+        abstain_threshold=long_term.abstain_threshold,
     )
     writeback = (
         make_memory_writeback_node(

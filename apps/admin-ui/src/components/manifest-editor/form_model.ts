@@ -44,6 +44,10 @@ export interface LongTermFields {
   // Stream RT-2 PR-2 — guaranteed token slice for user-corrected
   // (confidence=1.0) memories within the injection budget.
   correction_token_budget?: number;
+  // Stream P5a (Task 7) — rewrite the user's message into a search query before recall.
+  rewrite_reads?: boolean;
+  // Stream P5a (Task 8) — abstain (inject nothing) when top candidate similarity < this.
+  abstain_threshold?: number;
 }
 export interface RouteRuleFields {
   when?: string;
@@ -310,6 +314,10 @@ export const readReconcileWrites = (m: unknown): boolean =>
   specOf(m).memory?.long_term?.reconcile_writes ?? true;
 export const readRecallMode = (m: unknown): string =>
   specOf(m).memory?.long_term?.recall_mode ?? "per_session";
+export const readRewriteReads = (m: unknown): boolean =>
+  specOf(m).memory?.long_term?.rewrite_reads ?? false;
+export const readAbstainThreshold = (m: unknown): number =>
+  specOf(m).memory?.long_term?.abstain_threshold ?? 0;
 
 // ---- reflection evaluator (Stream J.11 routing — the `when=reflection` rule) ----
 // The "reflection evaluator model" friendly control is a curated view over the
@@ -492,6 +500,10 @@ export const setReconcileWrites = (m: unknown, on: boolean): AgentManifest =>
   patchLongTerm(m, { reconcile_writes: on });
 export const setRecallMode = (m: unknown, mode: string): AgentManifest =>
   patchLongTerm(m, { recall_mode: mode });
+export const setRewriteReads = (m: unknown, on: boolean): AgentManifest =>
+  patchLongTerm(m, { rewrite_reads: on });
+export const setAbstainThreshold = (m: unknown, v: number): AgentManifest =>
+  patchLongTerm(m, { abstain_threshold: v });
 export function setReflectionEvaluator(
   m: unknown,
   model: ModelFields | null,

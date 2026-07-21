@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from prometheus_client import REGISTRY
 
 from expert_work.protocol import MemoryItem
 from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
@@ -237,3 +238,50 @@ async def test_recall_node_rewrite_fail_open_embeds_original_task() -> None:
     assert embedder.calls == [[task]]
     assert store.calls[0]["query_text"] == task
     assert out == {"recalled_memories": []}
+
+
+# ---------------------------------------------------------------------------
+# P5a assembly — record_memory_rewrite outcome metric
+# ---------------------------------------------------------------------------
+
+
+def _rewrite_count(outcome: str) -> float:
+    """Live counter sample for one outcome label. Tests assert deltas, not
+    absolute values (the suite shares the process-wide registry)."""
+    value = REGISTRY.get_sample_value("expert_work_memory_rewrite_total", {"outcome": outcome})
+    return float(value) if value is not None else 0.0
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_records_rewritten_outcome() -> None:
+    rewriter = _StubRewriter(replies=["standalone distance query"])
+    before = _rewrite_count("rewritten")
+    await _rewrite_query(
+        llm_caller=rewriter, task="ramble, and remember metric please", token=CancellationToken()
+    )
+    assert _rewrite_count("rewritten") - before == 1.0
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_records_unchanged_on_empty_reply() -> None:
+    rewriter = _StubRewriter(replies=["   "])
+    before = _rewrite_count("unchanged")
+    await _rewrite_query(llm_caller=rewriter, task="what's the distance", token=CancellationToken())
+    assert _rewrite_count("unchanged") - before == 1.0
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_records_unchanged_when_reply_equals_task() -> None:
+    task = "distance in km"
+    rewriter = _StubRewriter(replies=[task])
+    before = _rewrite_count("unchanged")
+    out = await _rewrite_query(llm_caller=rewriter, task=task, token=CancellationToken())
+    assert out == task
+    assert _rewrite_count("unchanged") - before == 1.0
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_records_degraded_on_error() -> None:
+    before = _rewrite_count("degraded")
+    await _rewrite_query(llm_caller=_BoomRewriter(), task="x", token=CancellationToken())
+    assert _rewrite_count("degraded") - before == 1.0

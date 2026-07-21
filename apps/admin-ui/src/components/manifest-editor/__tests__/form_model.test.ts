@@ -44,11 +44,15 @@ import {
   readVerifyReads,
   readWriteMinImportance,
   readReconcileWrites,
+  readRewriteReads,
+  readAbstainThreshold,
   readRecallMode,
   setWriteBack,
   setVerifyReads,
   setWriteMinImportance,
   setReconcileWrites,
+  setRewriteReads,
+  setAbstainThreshold,
   setRecallMode,
   readApprovalTimeout,
   readTrajectoryRecording,
@@ -282,6 +286,9 @@ describe("form_model writers preserve siblings", () => {
     expect(readWriteMinImportance(bare)).toBe(0.3);
     expect(readReconcileWrites(bare)).toBe(true);
     expect(readRecallMode(bare)).toBe("per_session");
+    // P5a assembly — both opt-in, so default off / 0.
+    expect(readRewriteReads(bare)).toBe(false);
+    expect(readAbstainThreshold(bare)).toBe(0);
   });
 
   it("long_term knob setters patch one field, preserving the rest", () => {
@@ -297,6 +304,11 @@ describe("form_model writers preserve siblings", () => {
     const c = setRecallMode(setReconcileWrites(seed, false), "per_turn");
     expect(c.spec?.memory?.long_term?.reconcile_writes).toBe(false);
     expect(c.spec?.memory?.long_term?.recall_mode).toBe("per_turn");
+
+    const d = setAbstainThreshold(setRewriteReads(seed, true), 0.25);
+    expect(d.spec?.memory?.long_term?.rewrite_reads).toBe(true);
+    expect(d.spec?.memory?.long_term?.abstain_threshold).toBe(0.25);
+    expect(d.spec?.memory?.long_term?.retrieve_top_k).toBe(5);
   });
 
   it("policy knob readers default; setters share the policies block with approval", () => {

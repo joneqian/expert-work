@@ -56,6 +56,8 @@ import {
   readReflectionEvaluator,
   readReflectionEvaluatorOn,
   readRecallMode,
+  readRewriteReads,
+  readAbstainThreshold,
   readSystemPrompt,
   readTools,
   readTopK,
@@ -84,6 +86,8 @@ import {
   setPromptInjection,
   setReconcileWrites,
   setRecallMode,
+  setRewriteReads,
+  setAbstainThreshold,
   setReflectionEvaluator,
   setSystemPrompt,
   setTool,
@@ -691,6 +695,52 @@ export function FormView({
                               label: t("agent_form.memory_recall_per_turn"),
                             },
                           ]}
+                        />
+                      </div>
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 12,
+                        }}
+                      >
+                        <Switch
+                          checked={readRewriteReads(formData)}
+                          data-testid="af-memory-rewrite-reads"
+                          aria-label={t("agent_form.memory_rewrite_reads")}
+                          onChange={(on) =>
+                            onChange(setRewriteReads(formData, on))
+                          }
+                        />
+                        <Text type="secondary">
+                          {t("agent_form.memory_rewrite_reads")}
+                          <FieldHelp
+                            text={t("agent_form.memory_rewrite_reads_help")}
+                            testId="af-memory-rewrite-reads"
+                          />
+                        </Text>
+                      </label>
+                      <div
+                        style={FIELD}
+                        data-testid="af-memory-abstain-threshold"
+                      >
+                        <label style={LABEL}>
+                          {t("agent_form.memory_abstain_threshold")}
+                          <FieldHelp
+                            text={t("agent_form.memory_abstain_threshold_help")}
+                            testId="af-memory-abstain-threshold"
+                          />
+                        </label>
+                        <InputNumber
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={readAbstainThreshold(formData)}
+                          aria-label={t("agent_form.memory_abstain_threshold")}
+                          onChange={(v) =>
+                            onChange(setAbstainThreshold(formData, v ?? 0))
+                          }
                         />
                       </div>
                     </>

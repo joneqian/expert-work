@@ -182,3 +182,36 @@ async def test_default_threshold_never_abstains() -> None:
     )
     assert [m.content for m in out["recalled_memories"]] == ["opposite"]
     assert _abstain_count() - before == 0.0
+
+
+def _retrieval_count(result: str, mode: str = "hybrid") -> float:
+    value = REGISTRY.get_sample_value(
+        "expert_work_uplift_memory_retrieval_total", {"mode": mode, "result": result}
+    )
+    return float(value) if value is not None else 0.0
+
+
+@pytest.mark.asyncio
+async def test_abstain_also_records_retrieval_miss() -> None:
+    """P5a assembly — an abstained recall counts as a retrieval *miss* for
+    observability. The abstain gate returns before the node's normal
+    ``record_memory_retrieval`` call, so without an explicit bump the abstain
+    branch would silently skip the retrieval metric entirely."""
+    tenant, user = uuid4(), uuid4()
+    items = [_mem("far", (0.0, 1.0, 0.0), tenant, user)]  # cosine 0.0 → abstains
+    node = make_memory_recall_node(
+        memory_store=_ListStore(items=items),  # type: ignore[arg-type]
+        embedder=_FixedEmbedder(),  # type: ignore[arg-type]
+        top_k=5,
+        abstain_threshold=0.5,
+    )
+    # No tenant_config_store wired → recall mode defaults to hybrid.
+    miss_before = _retrieval_count("miss")
+    hit_before = _retrieval_count("hit")
+    out = await node(  # type: ignore[arg-type]
+        _state(),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert out == {}
+    assert _retrieval_count("miss") - miss_before == 1.0
+    assert _retrieval_count("hit") - hit_before == 0.0
