@@ -52,7 +52,11 @@ from expert_work.persistence.memory.base import MemoryInjectionBlockedError
 from expert_work.persistence.tenant_config import TenantConfigStore
 from expert_work.protocol import MemoryItem, MemoryRecallMode
 from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
-from orchestrator.graph_builder._config import cancellation_token, configurable_uuid
+from orchestrator.graph_builder._config import (
+    cancellation_token,
+    configurable_uuid,
+    current_run_id,
+)
 from orchestrator.llm import Embedder, LLMCaller
 from orchestrator.state import AgentState
 from orchestrator.tools.knowledge import Reranker
@@ -774,15 +778,15 @@ async def _reconcile_and_apply(
 async def _apply_update(
     item: MemoryItem, target: UUID, *, memory_store: MemoryStore, token: CancellationToken
 ) -> bool:
+    """Stream P5b — append-only UPDATE: supersede ``target`` with ``item``
+    (close old row + open new versioned row) instead of overwriting in place."""
     try:
-        updated = await token.run_cancellable(
-            memory_store.update_content(
+        written = await token.run_cancellable(
+            memory_store.supersede(
                 tenant_id=item.tenant_id,
                 user_id=item.user_id,
-                memory_id=target,
-                content=item.content,
-                embedding=item.embedding,
-                kind=item.kind,
+                old_id=target,
+                new_item=item,
             )
         )
     except RunCancelledError:
@@ -790,17 +794,17 @@ async def _apply_update(
     except Exception:
         logger.warning("memory.reconcile_update_failed id=%s", target, exc_info=True)
         return False
-    return updated is not None
+    return written is not None
 
 
 async def _apply_delete(
     item: MemoryItem, target: UUID, *, memory_store: MemoryStore, token: CancellationToken
 ) -> bool:
+    """Stream P5b — retraction: expire ``target`` (world no longer true, no
+    successor) instead of soft-deleting it (which means user-forget)."""
     try:
         return await token.run_cancellable(
-            memory_store.soft_delete(
-                tenant_id=item.tenant_id, user_id=item.user_id, memory_id=target
-            )
+            memory_store.expire(tenant_id=item.tenant_id, user_id=item.user_id, memory_id=target)
         )
     except RunCancelledError:
         raise
@@ -818,6 +822,7 @@ async def flush_messages_to_memory(
     tenant_id: UUID,
     user_id: UUID,
     thread_id: UUID | None,
+    run_id: str | None = None,
     token: CancellationToken,
     dlq: MemoryWritebackDLQ | None = None,
     log_label: str = "memory.writeback",
@@ -850,6 +855,10 @@ async def flush_messages_to_memory(
     (ADD / UPDATE / DELETE / NOOP) before persisting instead of written
     blindly. Only the run-end write-back sets it; the CM-3 pre-compaction
     flush stays a direct write (latency-sensitive, inside a turn).
+
+    ``run_id`` (P5b provenance) is stamped on every written item; the
+    DLQ-retry path does not carry it yet (follow-up), so retried memories
+    keep source_run_id NULL.
     """
     prompt = [
         SystemMessage(content=_EXTRACT_SYSTEM),
@@ -894,6 +903,7 @@ async def flush_messages_to_memory(
                 importance=mem.importance,
                 confidence=mem.confidence,
                 source_thread_id=str(thread_id) if thread_id is not None else None,
+                source_run_id=run_id,
             )
             for mem, vector in zip(extracted, vectors, strict=True)
         ]
@@ -990,6 +1000,7 @@ def make_pre_compaction_flush(
         if tenant_id is None or user_id is None:
             return 0
         thread_id = configurable_uuid(config, "thread_id")
+        run_id = current_run_id(config)
         return await flush_messages_to_memory(
             messages,
             memory_store=memory_store,
@@ -998,6 +1009,7 @@ def make_pre_compaction_flush(
             tenant_id=tenant_id,
             user_id=user_id,
             thread_id=thread_id,
+            run_id=run_id,
             token=token,
             dlq=dlq,
             log_label="memory.precompaction_flush",
@@ -1043,6 +1055,7 @@ def make_memory_writeback_node(
         if tenant_id is None or user_id is None:
             return {}
         thread_id = configurable_uuid(config, "thread_id")
+        run_id = current_run_id(config)
 
         await flush_messages_to_memory(
             list(state["messages"]),
@@ -1052,6 +1065,7 @@ def make_memory_writeback_node(
             tenant_id=tenant_id,
             user_id=user_id,
             thread_id=thread_id,
+            run_id=run_id,
             token=token,
             dlq=dlq,
             log_label="memory.writeback",

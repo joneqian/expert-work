@@ -108,6 +108,11 @@ class InMemoryMemoryStore(MemoryStore):
                 r.tenant_id == item.tenant_id
                 and r.user_id == item.user_id
                 and r.deleted_at is None
+                # Stream P5b fix (I-1) — mirrors migration 0127's rebuilt
+                # partial unique index: a superseded/expired-but-not-deleted
+                # row no longer occupies the dedup slot.
+                and r.invalid_at is None
+                and r.expired_at is None
                 and (r.content_hash or hash_content(r.content)) == content_hash
                 for r in self._rows
             ):
@@ -125,12 +130,16 @@ class InMemoryMemoryStore(MemoryStore):
         agent_name: str | None = None,
         limit: int = 5,
     ) -> list[MemoryItem]:
+        now = datetime.now(UTC)
         candidates = [
             row
             for row in self._rows
             if row.tenant_id == tenant_id
             and row.user_id == user_id
             and row.deleted_at is None  # Stream K.K6 — hide soft-deleted
+            # Stream P5b — bi-temporal: hide superseded (invalid_at) + world-expired.
+            and row.invalid_at is None
+            and (row.expired_at is None or row.expired_at > now)
             # Capability Uplift Sprint #7 (Mini-ADR U-33) — skip archived
             # + skip raw transient that has been superseded by a
             # consolidated parent (prevents double-counting raw + summary).
@@ -149,7 +158,6 @@ class InMemoryMemoryStore(MemoryStore):
         # Capability Uplift Sprint #6 (Mini-ADR U-5) — hybrid path.
         # Stream CM-6 (Mini-ADR CM-G2) — temporal decay re-ranks inside the
         # recall window on both paths, mirroring the SQL store.
-        now = datetime.now(UTC)
         if query_text is not None and query_text.strip():
             keyword_hits = _keyword_rank(candidates, query_text=query_text)
             scored = rrf_fuse_scored(
@@ -284,6 +292,63 @@ class InMemoryMemoryStore(MemoryStore):
             else row
             for row in self._rows
         ]
+
+    async def supersede(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        old_id: UUID,
+        new_item: MemoryItem,
+    ) -> MemoryItem | None:
+        now = datetime.now(UTC)
+        idx = next(
+            (
+                i
+                for i, r in enumerate(self._rows)
+                if r.id == old_id
+                and r.tenant_id == tenant_id
+                and r.user_id == user_id
+                and r.deleted_at is None
+                and r.invalid_at is None
+            ),
+            None,
+        )
+        if idx is None:
+            return None
+        self._rows[idx] = self._rows[idx].model_copy(
+            update={"invalid_at": now, "superseded_by": new_item.id}
+        )
+        content_hash = new_item.content_hash or hash_content(new_item.content)
+        written = new_item.model_copy(
+            update={
+                "content_hash": content_hash,
+                "supersedes": old_id,
+                "valid_at": now,
+                "created_at": now,
+                "last_used_at": now,
+            }
+        )
+        self._rows.append(written)
+        return written
+
+    async def expire(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+    ) -> bool:
+        for idx, row in enumerate(self._rows):
+            if (
+                row.id == memory_id
+                and row.tenant_id == tenant_id
+                and row.user_id == user_id
+                and row.deleted_at is None
+            ):
+                self._rows[idx] = row.model_copy(update={"expired_at": datetime.now(UTC)})
+                return True
+        return False
 
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)

@@ -669,3 +669,266 @@ async def test_hybrid_ranking_reinforces_access_and_importance() -> None:
     # RRF alone (no freq/importance) would rank "widget alpha" first —
     # both sub-rankings tie and it holds rank 0 by insertion order.
     assert got[0].content == "widget beta"  # hot+important overturns the RRF tie
+
+
+async def test_inmemory_write_retrieve_preserves_bitemporal_fields() -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user, run = uuid4(), uuid4(), uuid4()
+    valid = datetime(2026, 3, 1, tzinfo=UTC)
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user works remotely",
+                embedding=(1.0, 0.0, 0.0),
+                source_run_id=str(run),
+                valid_at=valid,
+                expected_valid_days=180,
+            )
+        ]
+    )
+    [got] = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0))
+    assert got.source_run_id == str(run)
+    assert got.valid_at == valid
+    assert got.expected_valid_days == 180
+
+
+async def test_retrieve_excludes_invalidated_and_expired() -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+
+    def _mem(content: str, **extra: object) -> MemoryItem:
+        return MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content=content,
+            embedding=(1.0, 0.0, 0.0),
+            **extra,  # type: ignore[arg-type]
+        )
+
+    await store.write([_mem("live fact")])
+    await store.write([_mem("superseded fact", invalid_at=datetime.now(UTC))])
+    await store.write([_mem("expired fact", expired_at=past)])
+
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10
+    )
+    contents = {m.content for m in got}
+    assert contents == {"live fact"}
+
+
+async def test_retrieve_keeps_future_expiry() -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    future = datetime.now(UTC) + timedelta(days=30)
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="still valid",
+                embedding=(1.0, 0.0, 0.0),
+                expired_at=future,
+            )
+        ]
+    )
+    got = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0))
+    assert [m.content for m in got] == ["still valid"]
+
+
+async def test_supersede_closes_old_opens_new() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    old_id = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=old_id,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user lives in Beijing",
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+    new_item = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user lives in Shanghai",
+        embedding=(0.9, 0.1, 0.0),
+    )
+    written = await store.supersede(
+        tenant_id=tenant, user_id=user, old_id=old_id, new_item=new_item
+    )
+    assert written is not None
+    assert written.supersedes == old_id
+    assert written.valid_at is not None
+
+    # Only the new fact is recalled; the old one is superseded (hidden).
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10
+    )
+    assert [m.content for m in got] == ["user lives in Shanghai"]
+
+    # The old row survives in the store with the reverse link set.
+    old = next(r for r in store._rows if r.id == old_id)
+    assert old.invalid_at is not None
+    assert old.superseded_by == new_item.id
+
+
+async def test_supersede_unknown_old_returns_none() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    new_item = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="x",
+        embedding=(1.0, 0.0, 0.0),
+    )
+    out = await store.supersede(tenant_id=tenant, user_id=user, old_id=uuid4(), new_item=new_item)
+    assert out is None
+    assert store._rows == []
+
+
+async def test_supersede_revert_to_same_content_after_dedup_fix() -> None:
+    """In-memory parity of the SQL I-1 regression test of the same name —
+    InMemoryMemoryStore.supersede() appends unconditionally (no unique
+    constraint), so it never hit the SQL dedup-index bug, but the two
+    stores must still agree on the observable outcome: reverting a fact
+    back to its prior content (same content_hash as an already-superseded
+    row) must succeed and retrieve() must return exactly the reverted
+    content."""
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    v1_id = uuid4()
+    content_a = "user lives in Beijing"
+    await store.write(
+        [
+            MemoryItem(
+                id=v1_id,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content=content_a,
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+
+    v2 = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user lives in Shanghai",
+        embedding=(0.9, 0.1, 0.0),
+    )
+    to_b = await store.supersede(tenant_id=tenant, user_id=user, old_id=v1_id, new_item=v2)
+    assert to_b is not None
+
+    v3 = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content=content_a,
+        embedding=(1.0, 0.0, 0.0),
+    )
+    reverted = await store.supersede(tenant_id=tenant, user_id=user, old_id=v2.id, new_item=v3)
+    assert reverted is not None
+
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10
+    )
+    assert [m.content for m in got] == [content_a]
+
+
+# ---------------------------------------------------------------------------
+# P5b — expire() (retraction: no successor)
+# ---------------------------------------------------------------------------
+
+
+async def test_expire_hides_from_retrieve_but_keeps_row() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    mid = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=mid,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user commutes by train",
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+    ok = await store.expire(tenant_id=tenant, user_id=user, memory_id=mid)
+    assert ok is True
+    got = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0))
+    assert got == []
+    row = next(r for r in store._rows if r.id == mid)
+    assert row.expired_at is not None
+    assert row.invalid_at is None  # retraction ≠ supersession
+
+
+async def test_expire_unknown_returns_false() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+
+    store = InMemoryMemoryStore()
+    out = await store.expire(tenant_id=uuid4(), user_id=uuid4(), memory_id=uuid4())
+    assert out is False

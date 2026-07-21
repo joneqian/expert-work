@@ -82,6 +82,14 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
         consolidated_from=tuple(UUID(str(uid)) for uid in row.consolidated_from),
         last_reviewed_at=row.last_reviewed_at,
         review_flagged_at=row.review_flagged_at,
+        # Stream P5b — 溯源 + bi-temporal
+        source_run_id=row.source_run_id,
+        valid_at=row.valid_at,
+        expired_at=row.expired_at,
+        invalid_at=row.invalid_at,
+        supersedes=row.supersedes,
+        superseded_by=row.superseded_by,
+        expected_valid_days=row.expected_valid_days,
     )
     # Capability Uplift Sprint #2 (Mini-ADR U-4) — drift detection.
     if row.content_hash and hash_content(row.content) != row.content_hash:
@@ -100,6 +108,14 @@ def _retrieve_filter() -> list[ColumnElement[bool]]:
         or_(
             MemoryItemRow.status == "consolidated",
             MemoryItemRow.consolidated_into.is_(None),
+        ),
+        # Stream P5b — bi-temporal: exclude superseded rows (invalid_at set) and
+        # world-expired rows (expired_at in the past). Both are kept in the DB
+        # for history/audit but never enter agent recall.
+        MemoryItemRow.invalid_at.is_(None),
+        or_(
+            MemoryItemRow.expired_at.is_(None),
+            MemoryItemRow.expired_at > func.now(),
         ),
     ]
 
@@ -156,6 +172,13 @@ class SqlMemoryStore(MemoryStore):
                 # exercised against real ages.
                 "created_at": item.created_at if item.created_at is not None else func.now(),
                 "last_used_at": item.last_used_at if item.last_used_at is not None else func.now(),
+                # Stream P5b — provenance + world-validity anchor. valid_at
+                # defaults to now() (== created_at at insert) so new rows are
+                # "valid from creation"; supersede() overrides it explicitly.
+                "source_run_id": item.source_run_id,
+                "valid_at": item.valid_at if item.valid_at is not None else func.now(),
+                "supersedes": item.supersedes,
+                "expected_valid_days": item.expected_valid_days,
             }
             for item in items
         ]
@@ -450,6 +473,80 @@ class SqlMemoryStore(MemoryStore):
         async with self._sf() as session:
             await session.execute(stmt)
             await session.commit()
+
+    async def supersede(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        old_id: UUID,
+        new_item: MemoryItem,
+    ) -> MemoryItem | None:
+        now = datetime.now(UTC)
+        async with self._sf() as session:
+            old = (
+                await session.execute(
+                    select(MemoryItemRow).where(
+                        MemoryItemRow.id == old_id,
+                        MemoryItemRow.tenant_id == tenant_id,
+                        MemoryItemRow.user_id == user_id,
+                        MemoryItemRow.deleted_at.is_(None),
+                        MemoryItemRow.invalid_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if old is None:
+                return None
+            old.invalid_at = now
+            old.superseded_by = new_item.id
+            content = new_item.content
+            new_row = MemoryItemRow(
+                id=new_item.id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                kind=new_item.kind,
+                agent_name=new_item.agent_name,
+                content=content,
+                content_hash=new_item.content_hash or hash_content(content),
+                embedding=list(new_item.embedding),
+                importance=new_item.importance,
+                confidence=new_item.confidence,
+                source_thread_id=new_item.source_thread_id,
+                source_run_id=new_item.source_run_id,
+                content_tsv=func.to_tsvector(_TS_CONFIG, tokenize_for_search(content)),
+                created_at=now,
+                last_used_at=now,
+                valid_at=now,
+                supersedes=old_id,
+                expected_valid_days=new_item.expected_valid_days,
+            )
+            session.add(new_row)
+            await session.commit()
+            await session.refresh(new_row)
+            return _row_to_item(new_row)
+
+    async def expire(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+    ) -> bool:
+        now = datetime.now(UTC)
+        stmt = (
+            update(MemoryItemRow)
+            .where(
+                MemoryItemRow.id == memory_id,
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.deleted_at.is_(None),
+            )
+            .values(expired_at=now)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
 
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
