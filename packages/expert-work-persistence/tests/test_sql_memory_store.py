@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -652,3 +652,71 @@ async def test_write_retrieve_roundtrips_provenance_and_valid_at(
     assert got.valid_at == valid
     assert got.invalid_at is None
     assert got.expired_at is None
+
+
+@pytest.mark.asyncio
+async def test_retrieve_excludes_invalidated_and_expired(sql_store: SqlStoreFixture) -> None:
+    """Stream P5b — bi-temporal: retrieve() excludes superseded rows
+    (``invalid_at`` set) and world-expired rows (``expired_at`` in the
+    past), keeping only the live fact. SQL counterpart of the in-memory
+    test of the same name in test_in_memory_memory_store.py — the
+    Postgres predicate (``_retrieve_filter`` in sql.py) had no coverage
+    that ever set these columns non-NULL.
+
+    ``SqlMemoryStore.write()`` does not currently persist ``invalid_at`` /
+    ``expired_at`` (no production caller sets them yet — see the fix
+    report), so — mirroring how the CM-6 decay test above backdates
+    ``last_used_at`` via a raw UPDATE — the two non-live rows are patched
+    directly after the write to drive the retrieve()-side predicate.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        past = datetime(2020, 1, 1, tzinfo=UTC)
+        live = _item(tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="live fact")
+        superseded = _item(
+            tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="superseded fact"
+        )
+        expired = _item(tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="expired fact")
+        await store.write([live, superseded, expired])
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET invalid_at = :now WHERE id = :id"),
+                {"now": datetime.now(UTC), "id": superseded.id},
+            )
+            await conn.execute(
+                text("UPDATE memory_item SET expired_at = :past WHERE id = :id"),
+                {"past": past, "id": expired.id},
+            )
+
+        hits = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0), limit=10
+        )
+        assert {h.content for h in hits} == {"live fact"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_retrieve_keeps_future_expiry(sql_store: SqlStoreFixture) -> None:
+    """Stream P5b — a fact with ``expired_at`` still in the future has
+    not lapsed yet and must still be returned. SQL counterpart of the
+    in-memory test of the same name. See the note on the sibling test
+    above re: why ``expired_at`` is patched via raw UPDATE post-write.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        future = datetime.now(UTC) + timedelta(days=30)
+        item = _item(tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="still valid")
+        await store.write([item])
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET expired_at = :future WHERE id = :id"),
+                {"future": future, "id": item.id},
+            )
+
+        hits = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0))
+        assert [h.content for h in hits] == ["still valid"]
+    finally:
+        await engine.dispose()
