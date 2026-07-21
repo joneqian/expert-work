@@ -86,6 +86,7 @@ class MemoryWritebackDLQ(abc.ABC):
         tenant_id: UUID,
         user_id: UUID,
         source_thread_id: str | None,
+        source_run_id: str | None = None,
         extracted: Sequence[tuple[str, str]],
         error: str,
     ) -> DLQRow:
@@ -147,6 +148,7 @@ class InMemoryMemoryWritebackDLQ(MemoryWritebackDLQ):
         tenant_id: UUID,
         user_id: UUID,
         source_thread_id: str | None,
+        source_run_id: str | None = None,
         extracted: Sequence[tuple[str, str]],
         error: str,
     ) -> DLQRow:
@@ -156,7 +158,7 @@ class InMemoryMemoryWritebackDLQ(MemoryWritebackDLQ):
             tenant_id=tenant_id,
             user_id=user_id,
             source_thread_id=source_thread_id,
-            source_run_id=None,
+            source_run_id=source_run_id,
             extracted=tuple((str(k), str(c)) for k, c in extracted),
             attempts=0,
             next_retry_at=now,
@@ -231,6 +233,7 @@ class SqlMemoryWritebackDLQ(MemoryWritebackDLQ):
         tenant_id: UUID,
         user_id: UUID,
         source_thread_id: str | None,
+        source_run_id: str | None = None,
         extracted: Sequence[tuple[str, str]],
         error: str,
     ) -> DLQRow:
@@ -238,6 +241,7 @@ class SqlMemoryWritebackDLQ(MemoryWritebackDLQ):
             tenant_id=tenant_id,
             user_id=user_id,
             source_thread_id=source_thread_id,
+            source_run_id=source_run_id,
             extracted=[[str(k), str(c)] for k, c in extracted],
             last_error=error,
         )
