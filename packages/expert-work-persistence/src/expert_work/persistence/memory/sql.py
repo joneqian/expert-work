@@ -178,6 +178,7 @@ class SqlMemoryStore(MemoryStore):
                 "source_run_id": item.source_run_id,
                 "valid_at": item.valid_at if item.valid_at is not None else func.now(),
                 "supersedes": item.supersedes,
+                "expected_valid_days": item.expected_valid_days,
             }
             for item in items
         ]
@@ -517,6 +518,7 @@ class SqlMemoryStore(MemoryStore):
                 last_used_at=now,
                 valid_at=now,
                 supersedes=old_id,
+                expected_valid_days=new_item.expected_valid_days,
             )
             session.add(new_row)
             await session.commit()

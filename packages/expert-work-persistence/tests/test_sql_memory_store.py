@@ -951,6 +951,75 @@ async def test_supersede_scoped_to_tenant_and_user(sql_store: SqlStoreFixture) -
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_supersede_revert_to_same_content_after_dedup_fix(
+    sql_store: SqlStoreFixture,
+) -> None:
+    """I-1 regression — migration 0127 rebuilds ``memory_item_dedup_uniq`` to
+    also exclude ``invalid_at`` / ``expired_at`` rows. Before the fix, a
+    superseded-but-not-deleted row (``deleted_at IS NULL``) still occupied
+    the dedup slot, so a reconcile that reverts a fact back to its prior
+    content (same ``content_hash``) via ``supersede()`` would raise
+    ``IntegrityError`` on the plain INSERT and silently lose the fact — the
+    exact whole-branch-review finding this test pins down.
+
+    Scenario: write "A" (v1) -> supersede to "B" (v2, "A" now hidden but not
+    deleted) -> supersede "B" back to "A" (v3, same content as v1 so the
+    content_hash collides with the still-present, still-superseded v1 row).
+    With the fix this must succeed and retrieve() must return exactly ["A"].
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        v1_id = uuid4()
+        content_a = "user lives in Beijing"
+        await store.write(
+            [
+                MemoryItem(
+                    id=v1_id,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content=content_a,
+                    embedding=_vec(1.0, 0.0),
+                )
+            ]
+        )
+
+        v2 = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content="user lives in Shanghai",
+            embedding=_vec(0.9, 0.1),
+        )
+        to_b = await store.supersede(tenant_id=tenant, user_id=user, old_id=v1_id, new_item=v2)
+        assert to_b is not None
+
+        # Reconcile reverts back to the original content — v3's content_hash
+        # collides with v1's (still deleted_at IS NULL, only invalid_at set).
+        # Pre-fix this INSERT hits memory_item_dedup_uniq and raises
+        # IntegrityError; the whole supersede() call would then fail.
+        v3 = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content=content_a,
+            embedding=_vec(1.0, 0.0),
+        )
+        reverted = await store.supersede(tenant_id=tenant, user_id=user, old_id=v2.id, new_item=v3)
+        assert reverted is not None
+
+        hits = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0), limit=10
+        )
+        assert [h.content for h in hits] == [content_a]
+    finally:
+        await engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # P5b — expire() (retraction: no successor)
 # ---------------------------------------------------------------------------

@@ -831,6 +831,64 @@ async def test_supersede_unknown_old_returns_none() -> None:
     assert store._rows == []
 
 
+async def test_supersede_revert_to_same_content_after_dedup_fix() -> None:
+    """In-memory parity of the SQL I-1 regression test of the same name —
+    InMemoryMemoryStore.supersede() appends unconditionally (no unique
+    constraint), so it never hit the SQL dedup-index bug, but the two
+    stores must still agree on the observable outcome: reverting a fact
+    back to its prior content (same content_hash as an already-superseded
+    row) must succeed and retrieve() must return exactly the reverted
+    content."""
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    v1_id = uuid4()
+    content_a = "user lives in Beijing"
+    await store.write(
+        [
+            MemoryItem(
+                id=v1_id,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content=content_a,
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+
+    v2 = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="user lives in Shanghai",
+        embedding=(0.9, 0.1, 0.0),
+    )
+    to_b = await store.supersede(tenant_id=tenant, user_id=user, old_id=v1_id, new_item=v2)
+    assert to_b is not None
+
+    v3 = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content=content_a,
+        embedding=(1.0, 0.0, 0.0),
+    )
+    reverted = await store.supersede(tenant_id=tenant, user_id=user, old_id=v2.id, new_item=v3)
+    assert reverted is not None
+
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0), limit=10
+    )
+    assert [m.content for m in got] == [content_a]
+
+
 # ---------------------------------------------------------------------------
 # P5b — expire() (retraction: no successor)
 # ---------------------------------------------------------------------------

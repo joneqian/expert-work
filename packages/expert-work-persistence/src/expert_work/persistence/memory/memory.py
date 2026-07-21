@@ -108,6 +108,11 @@ class InMemoryMemoryStore(MemoryStore):
                 r.tenant_id == item.tenant_id
                 and r.user_id == item.user_id
                 and r.deleted_at is None
+                # Stream P5b fix (I-1) — mirrors migration 0127's rebuilt
+                # partial unique index: a superseded/expired-but-not-deleted
+                # row no longer occupies the dedup slot.
+                and r.invalid_at is None
+                and r.expired_at is None
                 and (r.content_hash or hash_content(r.content)) == content_hash
                 for r in self._rows
             ):
