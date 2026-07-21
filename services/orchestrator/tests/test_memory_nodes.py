@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
@@ -21,6 +22,7 @@ from orchestrator import (
     make_memory_writeback_node,
 )
 from orchestrator.graph_builder.memory import (
+    _reconcile_and_apply,
     _verify_memories,
     parse_extracted_memories,
     parse_verify_kept,
@@ -876,6 +878,62 @@ async def test_flush_failure_enqueues_with_source_run_id() -> None:
     assert await dlq.count() == 1
     enqueued = next(iter(dlq._rows.values()))  # type: ignore[attr-defined]
     assert enqueued.source_run_id == str(run)
+
+
+# ---------------------------------------------------------------------------
+# P5b-2b ⑧ — reconcile correction hint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconcile_payload_includes_is_correction() -> None:
+    # One extracted item flagged as a correction, one existing near-neighbor
+    # above the 0.80 gate → reconcile runs and the candidate payload must
+    # carry is_correction=True for that candidate.
+    tenant, user = uuid4(), uuid4()
+    existing_id = uuid4()
+    vector = (1.0, 0.0, 0.0, 0.0)
+    store = InMemoryMemoryStore()
+    await store.write(
+        [
+            MemoryItem(
+                id=existing_id,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="lives in Paris",
+                embedding=vector,
+            )
+        ]
+    )
+    item = MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,
+        user_id=user,
+        kind="fact",
+        content="lives in Berlin",
+        embedding=vector,  # identical vector → cosine == 1.0, above the 0.80 gate
+    )
+
+    captured: dict = {}
+
+    async def spy_llm(*, messages: Sequence[BaseMessage], tools: Sequence[ToolSpec]) -> AIMessage:
+        del tools
+        # second message is the JSON candidate payload
+        captured["payload"] = json.loads(str(messages[-1].content))
+        return AIMessage(
+            content=f'{{"ops": [{{"index": 0, "op": "UPDATE", "target_id": "{existing_id}"}}]}}'
+        )
+
+    await _reconcile_and_apply(
+        [item],
+        corrections=[True],
+        memory_store=store,
+        llm_caller=spy_llm,
+        token=CancellationToken(),
+        log_label="test",
+    )
+    assert captured["payload"]["candidates"][0]["is_correction"] is True
 
 
 # ---------------------------------------------------------------------------
