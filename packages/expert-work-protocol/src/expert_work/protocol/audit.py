@@ -293,6 +293,8 @@ class AuditAction(StrEnum):
     #                             (M1-K Admin UI; Sprint #7 reserves)
     # MEMORY_ARCHIVED           — M2-C archive pipeline (Sprint #7 reserves)
     # MEMORY_CONSOLIDATOR_RUN   — per-sweep summary row (single audit per tick)
+    # MEMORY_FACT_EXPIRED       — P5b-2b ⑦ predictive review: still_valid=false retraction
+    # MEMORY_FACT_RENEWED       — P5b-2b ⑦ predictive review: still_valid=true window extended
     MEMORY_CONSOLIDATED = "memory:consolidated"
     MEMORY_CONSOLIDATION_REJECTED = "memory:consolidation_rejected"
     MEMORY_PURGED_AS_NOISE = "memory:purged_as_noise"
@@ -300,6 +302,8 @@ class AuditAction(StrEnum):
     MEMORY_DEMOTED = "memory:demoted"
     MEMORY_ARCHIVED = "memory:archived"
     MEMORY_CONSOLIDATOR_RUN = "memory:consolidator_run"
+    MEMORY_FACT_EXPIRED = "memory:fact_expired"
+    MEMORY_FACT_RENEWED = "memory:fact_renewed"
     # service_account
     SERVICE_ACCOUNT_CREATE = "service_account:create"
     SERVICE_ACCOUNT_DELETE = "service_account:delete"

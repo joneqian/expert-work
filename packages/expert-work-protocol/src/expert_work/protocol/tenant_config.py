@@ -179,6 +179,11 @@ class TenantConfigRecord(BaseModel):
     memory_purge_min_age_days: int = Field(
         default=30, ge=_MEMORY_PURGE_MIN_DAYS, le=_MEMORY_PURGE_MAX_DAYS
     )
+    # Stream P5b-2b ⑦ — predictive review opt-in. When True, MemoryConsolidator's
+    # SUB-PASS 3 proactively re-reviews facts whose predicted validity window
+    # (``expected_valid_days``) has come due, via one aux LLM call per due fact.
+    # Off by default (LLM cost) — tenants opt in explicitly.
+    memory_predictive_review_enabled: bool = False
     # Stream Y-1 — LLM platform-exclusive. ``credentials_mode`` is now
     # always ``platform`` (the only permitted value); all LLM provider +
     # tool API key lookups resolve via the platform's secret_refs.

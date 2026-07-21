@@ -51,6 +51,7 @@ from expert_work.common.uplift_metrics import (
     record_memory_cluster_candidates,
     record_memory_cluster_rejected,
     record_memory_consolidated,
+    record_memory_predictive_review,
     record_memory_purged,
     record_memory_reviewed_durable,
 )
@@ -295,6 +296,26 @@ Respond ONLY with JSON of the exact shape:
 """
 
 
+def _build_due_review_prompt(item: MemoryItem) -> str:
+    """P5b-2b ⑦ — predictive re-review of a fact whose validity window came
+    due. Verdict is still-true vs no-longer-true (NOT noise classification)."""
+    return f"""You are re-checking whether one long-term memory is still true today.
+
+Item content:
+{item.content}
+
+Decide whether this is still true now. If it is, optionally estimate how many
+more days until it is worth re-checking. If it is no longer true (the world
+changed, it lapsed, it was time-bound and has passed), mark it not valid.
+
+Respond ONLY with JSON of the exact shape:
+{{
+  "still_valid": true | false,
+  "expected_valid_days": <positive integer OR null>
+}}
+"""
+
+
 # ---------------------------------------------------------------------------
 # Reply parsing — Stream RT-1 PR-2: pydantic wire models + output_schema.
 # The *shape* is enforced by the models (and, through the specs below, by
@@ -332,11 +353,23 @@ class _SingleReviewReplyModel(BaseModel):
     category: str
 
 
+class _DueReviewReplyModel(BaseModel):
+    """Wire shape demanded by :func:`_build_due_review_prompt`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    still_valid: bool
+    expected_valid_days: int | None = None
+
+
 _CLUSTER_OUTPUT_SPEC = StructuredOutputSpec(
     schema=_ClusterReplyModel.model_json_schema(), name="memory_cluster_verdict"
 )
 _SINGLE_REVIEW_OUTPUT_SPEC = StructuredOutputSpec(
     schema=_SingleReviewReplyModel.model_json_schema(), name="memory_review_verdict"
+)
+_DUE_REVIEW_OUTPUT_SPEC = StructuredOutputSpec(
+    schema=_DueReviewReplyModel.model_json_schema(), name="memory_due_review_verdict"
 )
 
 
@@ -355,6 +388,14 @@ class SingleReviewVerdict:
 
     is_noise: bool
     category: str  # "durable" | one of _REJECT_CATEGORIES
+
+
+@dataclass(frozen=True)
+class _DueVerdict:
+    """Parsed due-review response (P5b-2b ⑦)."""
+
+    still_valid: bool
+    expected_valid_days: int | None
 
 
 def _parse_cluster_reply(reply: ConsolidatorLLMReply) -> ClusterVerdict | None:
@@ -399,6 +440,18 @@ def _parse_single_reply(reply: ConsolidatorLLMReply) -> SingleReviewVerdict | No
     return SingleReviewVerdict(is_noise=data.is_noise, category=data.category)
 
 
+def _parse_due_reply(reply: ConsolidatorLLMReply) -> _DueVerdict | None:
+    """Validate the due-review LLM reply; ``None`` on malformed."""
+    try:
+        if reply.parsed is not None:
+            data = _DueReviewReplyModel.model_validate(reply.parsed)
+        else:
+            data = _DueReviewReplyModel.model_validate_json(reply.text)
+    except ValidationError:
+        return None
+    return _DueVerdict(still_valid=data.still_valid, expected_valid_days=data.expected_valid_days)
+
+
 # ---------------------------------------------------------------------------
 # Summary types
 # ---------------------------------------------------------------------------
@@ -415,6 +468,8 @@ class ConsolidatorRunSummary:
     cluster_rejected: int = 0
     purged: int = 0
     reviewed_durable: int = 0
+    expired: int = 0
+    renewed: int = 0
     errors: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
@@ -428,6 +483,8 @@ class ConsolidatorRunSummary:
             "cluster_rejected": self.cluster_rejected,
             "purged": self.purged,
             "reviewed_durable": self.reviewed_durable,
+            "expired": self.expired,
+            "renewed": self.renewed,
             "errors": self.errors,
             "started_at": self.started_at.isoformat(),
             "finished_at": (self.finished_at.isoformat() if self.finished_at else None),
@@ -571,7 +628,7 @@ class MemoryConsolidator:
         logger.info(
             "memory_consolidator.sweep_complete tenants=%d users=%d "
             "candidates=%d consolidated=%d rejected=%d purged=%d "
-            "reviewed_durable=%d errors=%d",
+            "reviewed_durable=%d expired=%d renewed=%d errors=%d",
             summary.tenant_count,
             summary.user_count,
             summary.cluster_candidates,
@@ -579,6 +636,8 @@ class MemoryConsolidator:
             summary.cluster_rejected,
             summary.purged,
             summary.reviewed_durable,
+            summary.expired,
+            summary.renewed,
             summary.errors,
         )
         return summary
@@ -670,6 +729,32 @@ class MemoryConsolidator:
                 except Exception:
                     logger.exception(
                         "memory_consolidator.lone_review_failed tenant=%s user=%s id=%s",
+                        tenant_id,
+                        user_id,
+                        item.id,
+                    )
+                    summary.errors += 1
+
+        # SUB-PASS 3 (P5b-2b ⑦): predictive review of facts whose validity
+        # window came due. Opt-in per tenant (LLM cost per due fact); reuses
+        # the lone-item review skeleton with a still-true/false verdict.
+        if cfg.predictive_review_enabled:
+            due = await self._memory.list_due_for_review(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                limit=_MAX_PURGE_PER_USER,
+            )
+            for item in due:
+                try:
+                    await self._review_due_fact(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        item=item,
+                        summary=summary,
+                    )
+                except Exception:
+                    logger.exception(
+                        "memory_consolidator.due_review_failed tenant=%s user=%s id=%s",
                         tenant_id,
                         user_id,
                         item.id,
@@ -893,6 +978,81 @@ class MemoryConsolidator:
             details={"user_id": str(user_id)},
         )
 
+    async def _review_due_fact(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        item: MemoryItem,
+        summary: ConsolidatorRunSummary,
+    ) -> None:
+        """P5b-2b ⑦ — SUB-PASS 3 per-item verdict: still-true → renew_review
+        (extend the window), no-longer-true → expire(). Mirrors
+        :meth:`_review_lone_item`'s degrade-conservatively shape."""
+        prompt = _build_due_review_prompt(item)
+        try:
+            reply = await self._aux(
+                prompt=prompt,
+                model=None,
+                tenant_id=tenant_id,
+                output_schema=_DUE_REVIEW_OUTPUT_SPEC,
+            )
+        except LLMOutputValidationError:
+            # RT-ADR-3 — validation retries exhausted; conservative degrade:
+            # keep + re-arm from the existing window so we don't loop on
+            # this item forever.
+            await self._memory.renew_review(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                memory_id=item.id,
+                expected_valid_days=item.expected_valid_days,
+            )
+            record_memory_predictive_review(outcome="degraded")
+            return
+        record_consolidator_llm_tokens(
+            model=reply.model or self._default_model,
+            input_tokens=reply.input_tokens,
+            output_tokens=reply.output_tokens,
+        )
+        await self._record_aux_usage(reply, tenant_id=tenant_id, user_id=user_id)
+        verdict = _parse_due_reply(reply)
+        if verdict is None:
+            # Malformed — same conservative degrade as above.
+            await self._memory.renew_review(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                memory_id=item.id,
+                expected_valid_days=item.expected_valid_days,
+            )
+            record_memory_predictive_review(outcome="degraded")
+            return
+        if not verdict.still_valid:
+            await self._memory.expire(tenant_id=tenant_id, user_id=user_id, memory_id=item.id)
+            record_memory_predictive_review(outcome="expired")
+            summary.expired += 1
+            await self._safe_audit(
+                tenant_id=tenant_id,
+                action=AuditAction.MEMORY_FACT_EXPIRED,
+                resource_id=str(item.id),
+                details={"user_id": str(user_id), "content_snapshot": item.content},
+            )
+            return
+        new_window = verdict.expected_valid_days or item.expected_valid_days
+        await self._memory.renew_review(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            memory_id=item.id,
+            expected_valid_days=new_window,
+        )
+        record_memory_predictive_review(outcome="renewed")
+        summary.renewed += 1
+        await self._safe_audit(
+            tenant_id=tenant_id,
+            action=AuditAction.MEMORY_FACT_RENEWED,
+            resource_id=str(item.id),
+            details={"user_id": str(user_id), "expected_valid_days": new_window},
+        )
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -921,6 +1081,7 @@ class MemoryConsolidator:
             similarity=cfg.memory_consolidation_similarity,
             purge_enabled=cfg.memory_purge_enabled,
             purge_min_age_days=cfg.memory_purge_min_age_days,
+            predictive_review_enabled=cfg.memory_predictive_review_enabled,
         )
 
     async def _safe_audit(
@@ -961,6 +1122,7 @@ class _ResolvedThresholds:
     similarity: float
     purge_enabled: bool
     purge_min_age_days: int
+    predictive_review_enabled: bool
 
     @classmethod
     def defaults(cls) -> _ResolvedThresholds:
@@ -969,6 +1131,7 @@ class _ResolvedThresholds:
             similarity=0.85,
             purge_enabled=True,
             purge_min_age_days=30,
+            predictive_review_enabled=False,
         )
 
 

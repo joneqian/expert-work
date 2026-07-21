@@ -22,9 +22,11 @@ import pytest
 
 from control_plane.memory_consolidator import (
     ConsolidatorLLMReply,
+    ConsolidatorRunSummary,
     MemoryConsolidator,
     _parse_cluster_reply,
     _parse_single_reply,
+    _ResolvedThresholds,
     make_null_consolidator_aux_model,
 )
 from control_plane.tenancy import TenantConfigService
@@ -131,6 +133,33 @@ def _seed_transient(
         store._rows.append(item)
         ids.append(item.id)
     return ids
+
+
+async def _seed_due_fact(
+    store: InMemoryMemoryStore,
+    *,
+    expected_valid_days: int,
+    content: str = "user's trial plan expires in 30 days",
+) -> MemoryItem:
+    """Seed one live transient fact whose predictive-review window has
+    already come due — ``created_at`` is far enough in the past that
+    ``created_at + expected_valid_days`` days has already elapsed
+    (P5b-2b ⑦, mirrors :func:`_seed_transient` for the due-review shape)."""
+    created_at = _NOW - timedelta(days=expected_valid_days + 30)
+    item = MemoryItem(
+        id=uuid4(),
+        tenant_id=_TENANT,
+        user_id=_USER,
+        kind="fact",
+        content=content,
+        embedding=(1.0, 0.0),
+        content_hash=hash_content(content),
+        created_at=created_at,
+        last_used_at=created_at,
+        expected_valid_days=expected_valid_days,
+    )
+    store._rows.append(item)
+    return item
 
 
 async def _seed_tenant_config(service: TenantConfigService) -> None:
@@ -621,3 +650,71 @@ async def test_aux_calls_write_token_usage_rows() -> None:
     assert row.user_id == _USER
     assert row.agent_name == "memory-consolidator"
     assert row.input_tokens >= 0
+
+
+# ─── P5b-2b ⑦ — SUB-PASS 3: predictive review of due facts ────────────
+
+
+@pytest.mark.asyncio
+async def test_review_due_fact_renews_when_still_valid() -> None:
+    worker, store, _aux, audit_store = await _build_worker(
+        aux_replies=['{"still_valid": true, "expected_valid_days": 730}']
+    )
+    item = await _seed_due_fact(store, expected_valid_days=365)  # past due
+
+    summary = ConsolidatorRunSummary()
+    await worker._review_due_fact(tenant_id=_TENANT, user_id=_USER, item=item, summary=summary)
+
+    # Re-armed → no longer due; window extended; not expired.
+    assert await store.list_due_for_review(tenant_id=_TENANT, user_id=_USER, limit=10) == []
+    got = (await store.list_for_user(tenant_id=_TENANT, user_id=_USER))[0]
+    assert got.expired_at is None
+    assert got.expected_valid_days == 730
+    assert summary.renewed == 1
+    assert summary.expired == 0
+    page = await audit_store.query(AuditQuery(tenant_id="*", limit=100))
+    actions = {entry.action for entry in page.entries}
+    assert AuditAction.MEMORY_FACT_RENEWED in actions
+
+
+@pytest.mark.asyncio
+async def test_review_due_fact_expires_when_false() -> None:
+    worker, store, _aux, audit_store = await _build_worker(
+        aux_replies=['{"still_valid": false, "expected_valid_days": null}']
+    )
+    item = await _seed_due_fact(store, expected_valid_days=365)
+
+    summary = ConsolidatorRunSummary()
+    await worker._review_due_fact(tenant_id=_TENANT, user_id=_USER, item=item, summary=summary)
+
+    got = (await store.list_for_user(tenant_id=_TENANT, user_id=_USER))[0]
+    assert got.expired_at is not None
+    assert summary.expired == 1
+    assert summary.renewed == 0
+    page = await audit_store.query(AuditQuery(tenant_id="*", limit=100))
+    actions = {entry.action for entry in page.entries}
+    assert AuditAction.MEMORY_FACT_EXPIRED in actions
+
+
+@pytest.mark.asyncio
+async def test_sweep_skips_predictive_review_when_disabled() -> None:
+    worker, store, aux, _audit_store = await _build_worker(
+        aux_replies=['{"still_valid": false}']  # would expire if the sub-pass ran
+    )
+    await _seed_due_fact(store, expected_valid_days=365)
+    cfg = _ResolvedThresholds(
+        min_cluster_size=3,
+        similarity=0.85,
+        purge_enabled=False,
+        purge_min_age_days=30,
+        predictive_review_enabled=False,
+    )
+
+    summary = ConsolidatorRunSummary()
+    await worker._sweep_user(tenant_id=_TENANT, user_id=_USER, cfg=cfg, summary=summary)
+
+    got = (await store.list_for_user(tenant_id=_TENANT, user_id=_USER))[0]
+    assert got.expired_at is None  # sub-pass gated off → untouched
+    assert aux.calls == []
+    assert summary.expired == 0
+    assert summary.renewed == 0

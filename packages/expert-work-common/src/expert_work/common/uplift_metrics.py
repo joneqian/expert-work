@@ -246,6 +246,15 @@ _memory_reviewed_durable_total = expert_work_counter(
     "(Mini-ADR U-37 protection #3).",
 )
 
+# Stream P5b-2b ⑦ — MemoryConsolidator SUB-PASS 3 predictive review.
+_memory_predictive_review_total = expert_work_counter(
+    "expert_work_memory_predictive_review_total",
+    "Predictive review verdicts by outcome — a fact whose predicted "
+    "validity window (expected_valid_days) came due was re-reviewed by "
+    "the aux LLM.",
+    label_names=("outcome",),  # outcome ∈ renewed | expired | degraded
+)
+
 _consolidator_llm_tokens_total = expert_work_counter(
     "expert_work_uplift_consolidator_llm_tokens_total",
     "Aux model token consumption by the MemoryConsolidator. Cost "
@@ -552,6 +561,18 @@ def record_memory_reviewed_durable() -> None:
     _memory_reviewed_durable_total.inc()
 
 
+def record_memory_predictive_review(*, outcome: str) -> None:
+    """Bump ``expert_work_memory_predictive_review_total{outcome}`` (P5b-2b ⑦).
+
+    ``outcome`` ∈ ``{"renewed", "expired", "degraded"}`` — ``renewed`` = the
+    fact was judged still true and its validity window extended;
+    ``expired`` = the fact was judged no longer true and retracted;
+    ``degraded`` = the verdict call failed or was malformed and the fact
+    was conservatively kept + re-armed (never silently drop a fact).
+    """
+    _memory_predictive_review_total.labels(outcome=outcome).inc()
+
+
 def record_consolidator_llm_tokens(*, model: str, input_tokens: int, output_tokens: int) -> None:
     """Bump ``expert_work_uplift_consolidator_llm_tokens_total{model,kind}``.
 
@@ -614,6 +635,7 @@ __all__ = [
     "record_memory_consolidated",
     "record_memory_drift",
     "record_memory_inject_mode",
+    "record_memory_predictive_review",
     "record_memory_purged",
     "record_memory_redacted",
     "record_memory_retrieval",
