@@ -16,10 +16,11 @@ The reflect node's existing ``revise`` path (Stream J.2) already
 covers reflective replans; ``update_plan`` adds the agent-initiated
 path.
 
-The tool is implicit — never declared in the manifest. The factory
-registers it exactly when ``workflow.type == "plan_execute"``, so a
-react-mode agent does not see it (and cannot accidentally rewrite a
-plan it never had).
+The tool is implicit — never declared in the manifest. Since P3 the
+factory registers it for **every** agent (not just ``plan_execute``):
+a react-mode agent calls it to *create* a plan on demand, a
+plan_execute agent's planner node seeds an initial plan that this tool
+then *replaces*.
 """
 
 from __future__ import annotations
@@ -50,13 +51,13 @@ _MAX_STEP_DESCRIPTION_CHARS: int = 500
 
 @dataclass(frozen=True)
 class UpdatePlanTool:
-    """``update_plan(steps, reason)`` — agent-initiated replan.
+    """``update_plan(steps, reason)`` — agent-initiated create-or-replace.
 
-    Replaces the run's :class:`Plan` with a new ordered set of steps.
-    The replacement is *complete* (not a patch) — modelling partial
-    diffs would add a lot of surface for arguable gain. ``reason`` is
-    captured for trace / audit only; it is not rendered back to the
-    agent.
+    Creates the run's :class:`Plan` if none exists yet, otherwise
+    replaces it with a new ordered set of steps. The replacement is
+    *complete* (not a patch) — modelling partial diffs would add a lot
+    of surface for arguable gain. ``reason`` is captured for trace /
+    audit only; it is not rendered back to the agent.
     """
 
     @property
@@ -64,9 +65,11 @@ class UpdatePlanTool:
         return ToolSpec(
             name="update_plan",
             description=(
-                "Replace your current plan with a revised ordered list of "
-                "steps. Use this when execution has diverged from the "
-                "initial plan and you need to chart a fresh path."
+                "Create or replace your plan with an ordered list of steps. "
+                "Use this when a task needs 3+ distinct steps or spans "
+                "multiple tools; skip it for simple one-shot tasks. Mark "
+                "steps completed / in_progress as you go so the recitation "
+                "tracks progress."
             ),
             parameters={
                 "type": "object",
@@ -103,22 +106,28 @@ class UpdatePlanTool:
                             "the trace, not fed back to the agent."
                         ),
                     },
+                    "goal": {
+                        "type": "string",
+                        "description": (
+                            "One-sentence restatement of what the plan "
+                            "achieves. Provide it when first creating a plan; "
+                            "on a later revise it is optional — the existing "
+                            "goal is kept unless you pass a new one."
+                        ),
+                    },
                 },
                 "required": ["steps", "reason"],
             },
         )
 
     async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
-        if ctx.plan is None:
-            # The factory only registers ``update_plan`` for plan_execute
-            # workflows, so we should normally see a plan. Defend
-            # against an ordering bug (tool dispatched before the
-            # planner node ran) so the LLM gets a clean error rather
-            # than a crash.
-            msg = "update_plan called before a plan was established; nothing to revise"
-            raise ValueError(msg)
+        # P3 create-or-replace — a react-mode run reaches this tool with no
+        # seeded plan (``ctx.plan is None``); the first call *creates* the
+        # plan instead of raising. plan_execute runs still arrive with the
+        # planner node's initial plan and this call *replaces* it.
         steps_raw = args.get("steps")
         reason = str(args.get("reason", "")).strip()
+        goal_arg = str(args.get("goal", "")).strip()
 
         if not isinstance(steps_raw, list) or not steps_raw:
             msg = "update_plan requires a non-empty 'steps' array"
@@ -157,7 +166,17 @@ class UpdatePlanTool:
         if len(cleaned) > _MAX_STEPS:
             cleaned = cleaned[:_MAX_STEPS]
 
-        new_plan = Plan(goal=ctx.plan.goal, steps=tuple(cleaned))
+        # Goal source (P3): an explicit ``goal`` arg wins (create, or rename
+        # on revise); else keep the existing plan's goal (revise); else — a
+        # create with no goal — fall back to the first step so the
+        # recitation's ``Goal:`` line is never blank.
+        if goal_arg:
+            goal = goal_arg
+        elif ctx.plan is not None:
+            goal = ctx.plan.goal
+        else:
+            goal = cleaned[0].description
+        new_plan = Plan(goal=goal, steps=tuple(cleaned))
         logger.info("update_plan.applied n_steps=%d reason=%r", len(cleaned), reason)
 
         rendered = "\n".join(

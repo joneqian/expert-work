@@ -65,21 +65,68 @@ async def test_update_plan_replaces_steps_and_keeps_original_goal() -> None:
 
 
 # ---------------------------------------------------------------------------
-# safety: tool can only run inside a plan_execute workflow
+# create-or-replace: no existing plan seeds one (P3)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_update_plan_rejects_when_no_plan_in_context() -> None:
-    """The factory only registers ``update_plan`` for plan_execute, but
-    defend the tool against an ordering bug in case it ever fires with
-    no plan in the context."""
+async def test_update_plan_seeds_a_new_plan_when_context_has_none() -> None:
+    """P3 create-or-replace: a react-mode run has no seeded plan; the first
+    ``update_plan`` call creates one from the supplied goal + steps rather
+    than raising."""
     tool = UpdatePlanTool()
-    with pytest.raises(ValueError, match="nothing to revise"):
-        await tool.call(
-            {"steps": ["step"], "reason": "x"},
-            ctx=_ctx_with_plan(plan=None),
-        )
+    result = await tool.call(
+        {
+            "steps": ["Scope the change", "Write the test", "Implement"],
+            "reason": "Task turned out to need multiple steps",
+            "goal": "Add adaptive planning to the agent",
+        },
+        ctx=_ctx_with_plan(plan=None),
+    )
+    new_plan = result.state_updates["plan"]
+    assert isinstance(new_plan, Plan)
+    assert new_plan.goal == "Add adaptive planning to the agent"
+    assert [s.description for s in new_plan.steps] == [
+        "Scope the change",
+        "Write the test",
+        "Implement",
+    ]
+    assert [s.id for s in new_plan.steps] == ["1", "2", "3"]
+
+
+@pytest.mark.asyncio
+async def test_update_plan_create_without_goal_falls_back_to_first_step() -> None:
+    """Create path with no explicit goal: fall back to the first step's
+    description so the recitation's ``Goal:`` line is never blank."""
+    tool = UpdatePlanTool()
+    result = await tool.call(
+        {"steps": ["Investigate the bug", "Fix it"], "reason": "multi-step"},
+        ctx=_ctx_with_plan(plan=None),
+    )
+    assert result.state_updates["plan"].goal == "Investigate the bug"
+
+
+@pytest.mark.asyncio
+async def test_update_plan_explicit_goal_overrides_existing_goal() -> None:
+    """Revise path: an explicit ``goal`` renames the plan; without it the
+    existing goal is preserved (covered by
+    test_update_plan_replaces_steps_and_keeps_original_goal)."""
+    tool = UpdatePlanTool()
+    result = await tool.call(
+        {"steps": ["redo"], "reason": "pivot", "goal": "Pursue the new direction"},
+        ctx=_ctx_with_plan(),  # _INITIAL_PLAN present
+    )
+    assert result.state_updates["plan"].goal == "Pursue the new direction"
+
+
+@pytest.mark.asyncio
+async def test_update_plan_description_carries_complexity_guidance() -> None:
+    """guidance-in-schema-only: the model learns *when* to plan from the
+    tool description, not a system-prompt mutation."""
+    spec = UpdatePlanTool().spec
+    assert "3+ " in spec.description
+    assert "goal" in spec.parameters["properties"]
+    assert spec.parameters["required"] == ["steps", "reason"]
 
 
 # ---------------------------------------------------------------------------
