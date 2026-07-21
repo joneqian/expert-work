@@ -414,6 +414,8 @@ export interface TranslationKeys {
     col_created: string;
     col_source: string;
     source_run: string;
+    as_of_placeholder: string;
+    as_of_banner: string;
   };
   knowledge_page: {
     page_title: string;
@@ -3183,6 +3185,8 @@ const en: TranslationKeys = {
     col_created: "Created",
     col_source: "Source",
     source_run: "View run",
+    as_of_placeholder: "View memories as of…",
+    as_of_banner: "Historical view — memories valid at {{at}}",
   },
   knowledge_page: {
     page_title: "Knowledge",

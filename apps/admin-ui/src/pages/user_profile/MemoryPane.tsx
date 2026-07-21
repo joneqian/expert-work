@@ -8,6 +8,7 @@ import {
   Alert,
   App,
   Button,
+  DatePicker,
   Empty,
   Input,
   Modal,
@@ -46,6 +47,7 @@ export function MemoryPane({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [asOf, setAsOf] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<MemoryItem | null>(null);
   const [draftContent, setDraftContent] = useState("");
@@ -56,13 +58,13 @@ export function MemoryPane({ userId }: { userId: string }) {
     setLoading(true);
     setError(null);
     try {
-      setData(await listMemories({ userId }));
+      setData(await listMemories({ userId, as_of: asOf ?? undefined }));
     } catch (err) {
       setError(errMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, asOf]);
 
   useEffect(() => {
     void refresh();
@@ -186,6 +188,7 @@ export function MemoryPane({ userId }: { userId: string }) {
               size="small"
               icon={<Pencil size={13} strokeWidth={1.5} />}
               onClick={() => openEdit(record)}
+              disabled={asOf !== null}
               data-testid={`memory-edit-${record.id}`}
             >
               {t("user_profile.memory_edit")}
@@ -201,6 +204,7 @@ export function MemoryPane({ userId }: { userId: string }) {
                 danger
                 icon={<Trash2 size={13} strokeWidth={1.5} />}
                 loading={busyId === record.id}
+                disabled={asOf !== null}
                 data-testid={`memory-forget-${record.id}`}
               >
                 {t("user_profile.memory_forget")}
@@ -210,7 +214,7 @@ export function MemoryPane({ userId }: { userId: string }) {
         ),
       },
     ],
-    [t, busyId, openEdit, handleForget, navigate],
+    [t, busyId, openEdit, handleForget, navigate, asOf],
   );
 
   return (
@@ -223,6 +227,23 @@ export function MemoryPane({ userId }: { userId: string }) {
         style={{ marginBottom: 12 }}
       />
       {error !== null && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
+      <Space style={{ marginBottom: 12 }}>
+        <DatePicker
+          showTime
+          allowClear
+          placeholder={t("memory_tab.as_of_placeholder")}
+          onChange={(d) => setAsOf(d ? d.toISOString() : null)}
+          data-testid="memory-as-of-picker"
+        />
+        {asOf !== null && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("memory_tab.as_of_banner", { at: new Date(asOf).toLocaleString() })}
+            data-testid="memory-as-of-banner"
+          />
+        )}
+      </Space>
       <Table<MemoryItem>
         size="small"
         columns={columns}

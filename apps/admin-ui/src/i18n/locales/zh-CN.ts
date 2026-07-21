@@ -422,6 +422,8 @@ const zhCN: TranslationKeys = {
     col_created: "创建时间",
     col_source: "来源",
     source_run: "查看运行",
+    as_of_placeholder: "查看某时刻的记忆…",
+    as_of_banner: "历史视图 —— {{at}} 时有效的记忆",
   },
   knowledge_page: {
     page_title: "知识库",
