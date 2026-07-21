@@ -98,6 +98,13 @@ class InMemoryMemoryStore(MemoryStore):
                 blocked.append((item.id, findings))
         if blocked:
             raise MemoryInjectionBlockedError(blocked)  # type: ignore[arg-type]
+        # Stream P5b-2c T1 — mirrors SqlMemoryStore.write()'s func.now()
+        # fallback (sql.py:175/181) so an in-memory item written without
+        # explicit timestamps doesn't diverge from SQL (never "due" for
+        # predictive review, different as_of time-travel behavior against a
+        # null valid_at). Computed once, outside the loop, so a multi-item
+        # batch backfills to the same instant rather than drifting per row.
+        now = datetime.now(UTC)
         for item in items:
             # Stream K.K7 — fill content_hash if the caller didn't, and
             # skip the row when an identical live entry already exists
@@ -117,7 +124,15 @@ class InMemoryMemoryStore(MemoryStore):
                 for r in self._rows
             ):
                 continue
-            self._rows.append(item.model_copy(update={"content_hash": content_hash}))
+            self._rows.append(
+                item.model_copy(
+                    update={
+                        "content_hash": content_hash,
+                        "created_at": item.created_at if item.created_at is not None else now,
+                        "valid_at": item.valid_at if item.valid_at is not None else now,
+                    }
+                )
+            )
 
     async def retrieve(
         self,

@@ -1208,6 +1208,50 @@ async def test_retrieve_as_of_time_travel_sql(sql_store: SqlStoreFixture) -> Non
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_retrieve_excludes_future_valid_at(sql_store: SqlStoreFixture) -> None:
+    """Stream P5b-2c T1 (deferred from the P5b-2a review) — SQL counterpart of
+    ``test_retrieve_as_of_excludes_not_yet_valid`` in
+    test_in_memory_memory_store.py: a memory whose ``valid_at`` is still in
+    the future relative to the queried ``as_of`` instant is "not yet known"
+    and must be excluded from that historical view. ``write()`` persists
+    ``valid_at`` directly (sql.py:181), so — unlike the ``invalid_at`` /
+    ``expired_at`` tests above — no raw-UPDATE patch is needed here.
+
+    Note: this is an ``as_of``-branch test, not the ``as_of=None`` (current-
+    time) branch — ``_retrieve_filter``'s ``as_of is None`` arm (sql.py:113-116)
+    does not consult ``valid_at`` at all (mirrored by ``_temporally_visible``
+    in memory.py), so a future-``valid_at`` row is *not* excluded from the
+    plain "now" view today; no production writer ever sets a future
+    ``valid_at`` (verified via grep), so this pre-existing gap has no known
+    behavioral impact and is out of this task's scope to change.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        future = datetime.now(UTC) + timedelta(days=30)
+        item = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content="not-yet-valid",
+            embedding=_vec(1.0, 0.0),
+            valid_at=future,
+        )
+        await store.write([item])
+        hits = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user,
+            query_embedding=_vec(1.0, 0.0),
+            limit=10,
+            as_of=datetime.now(UTC),
+        )
+        assert hits == []
+    finally:
+        await engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # P5b-2b ⑦ — list_due_for_review / renew_review (predictive review due-scan)
 # ---------------------------------------------------------------------------

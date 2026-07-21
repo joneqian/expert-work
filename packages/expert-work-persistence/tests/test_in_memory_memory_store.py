@@ -1033,6 +1033,7 @@ def _mem(
     user: object,
     content: str,
     created_at: datetime | None = None,
+    valid_at: datetime | None = None,
     expected_valid_days: int | None = None,
     last_reviewed_at: datetime | None = None,
     invalid_at: datetime | None = None,
@@ -1046,6 +1047,7 @@ def _mem(
         content=content,
         embedding=(1.0, 0.0, 0.0),
         created_at=created_at,
+        valid_at=valid_at,
         expected_valid_days=expected_valid_days,
         last_reviewed_at=last_reviewed_at,
         invalid_at=invalid_at,
@@ -1159,3 +1161,27 @@ async def test_renew_review_none_clears_window() -> None:
     await store.renew_review(tenant_id=t, user_id=u, memory_id=item.id, expected_valid_days=None)
     got = await store.list_for_user(tenant_id=t, user_id=u)
     assert got[0].expected_valid_days is None
+
+
+# ---------------------------------------------------------------------------
+# P5b-2c T1 — write() backfills created_at/valid_at (SQL parity)
+# ---------------------------------------------------------------------------
+#
+# SqlMemoryStore.write() backfills created_at/valid_at to func.now() when the
+# caller leaves them None (sql.py:175/181); InMemoryMemoryStore.write() did
+# not mirror this, so an in-memory item written without explicit timestamps
+# (mirrors flush's MemoryItem(...) construction) diverged from SQL — never
+# "due" for predictive review (list_due_for_review needs created_at) and
+# behaving differently under as_of time-travel (valid_at is the anchor).
+
+
+@pytest.mark.asyncio
+async def test_in_memory_write_backfills_created_and_valid_at() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    # item with created_at/valid_at left None (mirrors flush's MemoryItem(...))
+    item = _mem(tenant=t, user=u, content="x", created_at=None, valid_at=None)
+    await store.write([item])
+    got = (await store.list_for_user(tenant_id=t, user_id=u))[0]
+    assert got.created_at is not None
+    assert got.valid_at is not None
