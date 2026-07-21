@@ -831,3 +831,50 @@ async def test_supersede_unknown_old_returns_none() -> None:
     out = await store.supersede(tenant_id=tenant, user_id=user, old_id=uuid4(), new_item=new_item)
     assert out is None
     assert store._rows == []
+
+
+# ---------------------------------------------------------------------------
+# P5b — expire() (retraction: no successor)
+# ---------------------------------------------------------------------------
+
+
+async def test_expire_hides_from_retrieve_but_keeps_row() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
+
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    mid = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=mid,
+                tenant_id=tenant,
+                user_id=user,
+                kind="fact",
+                content="user commutes by train",
+                embedding=(1.0, 0.0, 0.0),
+            )
+        ]
+    )
+    ok = await store.expire(tenant_id=tenant, user_id=user, memory_id=mid)
+    assert ok is True
+    got = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0, 0.0)
+    )
+    assert got == []
+    row = next(r for r in store._rows if r.id == mid)
+    assert row.expired_at is not None
+    assert row.invalid_at is None  # retraction ≠ supersession
+
+
+async def test_expire_unknown_returns_false() -> None:
+    from uuid import uuid4
+
+    from expert_work.persistence.memory.memory import InMemoryMemoryStore
+
+    store = InMemoryMemoryStore()
+    out = await store.expire(tenant_id=uuid4(), user_id=uuid4(), memory_id=uuid4())
+    assert out is False

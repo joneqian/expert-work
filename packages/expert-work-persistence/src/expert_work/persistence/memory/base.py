@@ -175,6 +175,20 @@ class MemoryStore(abc.ABC):
         write). Tenant- AND user-scoped."""
 
     @abc.abstractmethod
+    async def expire(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+    ) -> bool:
+        """P5b — retraction: stamp ``expired_at=now`` on a fact that stopped
+        being true in the world with NO successor (orthogonal to ``supersede``'s
+        ``invalid_at``). The row is KEPT (history/audit) but excluded from
+        default retrieve. Returns ``False`` for unknown id / wrong tenant-user.
+        Tenant- AND user-scoped."""
+
+    @abc.abstractmethod
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         """Phase 3a (purge_user) — soft-delete EVERY live memory for a user.
 

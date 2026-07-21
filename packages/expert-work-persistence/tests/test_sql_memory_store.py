@@ -949,3 +949,119 @@ async def test_supersede_scoped_to_tenant_and_user(sql_store: SqlStoreFixture) -
         assert await store.list_for_user(tenant_id=other_tenant, user_id=user, limit=10) == []
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# P5b — expire() (retraction: no successor)
+# ---------------------------------------------------------------------------
+#
+# SQL counterpart of the in-memory tests in test_in_memory_memory_store.py
+# (Task 6) — the real Postgres UPDATE ... WHERE ... transaction had zero
+# integration coverage. Mirrors the supersede() SQL-coverage gap fix above.
+
+
+@pytest.mark.asyncio
+async def test_expire_hides_from_retrieve_but_keeps_row(sql_store: SqlStoreFixture) -> None:
+    """Happy path against the real Postgres transaction: expire() stamps
+    ``expired_at``, ``retrieve()`` hides the row (Task 4's bi-temporal
+    filter), but the row survives (queryable raw) with ``deleted_at`` /
+    ``invalid_at`` untouched — retraction is neither soft-delete nor
+    supersession."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        mid = uuid4()
+        await store.write(
+            [
+                MemoryItem(
+                    id=mid,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="user commutes by train",
+                    embedding=_vec(1.0, 0.0, 0.0),
+                )
+            ]
+        )
+        ok = await store.expire(tenant_id=tenant, user_id=user, memory_id=mid)
+        assert ok is True
+
+        got = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0, 0.0)
+        )
+        assert got == []
+
+        # The row survives — query it raw since retrieve() now hides it.
+        async with engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT expired_at, deleted_at, invalid_at FROM memory_item "
+                        "WHERE id = :id"
+                    ),
+                    {"id": mid},
+                )
+            ).one()
+        assert row.expired_at is not None
+        assert row.deleted_at is None  # retraction ≠ soft-delete
+        assert row.invalid_at is None  # retraction ≠ supersession
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expire_unknown_returns_false(sql_store: SqlStoreFixture) -> None:
+    """SQL counterpart of the in-memory test of the same name."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        out = await store.expire(tenant_id=tenant, user_id=user, memory_id=uuid4())
+        assert out is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expire_scoped_to_tenant_and_user(sql_store: SqlStoreFixture) -> None:
+    """The tenant/user predicate is defensive — expire() must not touch a
+    row that belongs to a different tenant or a different user, even when
+    the caller passes the correct memory_id (mirrors
+    ``test_supersede_scoped_to_tenant_and_user`` above)."""
+    store, engine = sql_store
+    try:
+        tenant, user, other_tenant, other_user = uuid4(), uuid4(), uuid4(), uuid4()
+        mid = uuid4()
+        await store.write(
+            [
+                MemoryItem(
+                    id=mid,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="mine",
+                    embedding=_vec(1.0, 0.0, 0.0),
+                )
+            ]
+        )
+
+        out_wrong_user = await store.expire(tenant_id=tenant, user_id=other_user, memory_id=mid)
+        assert out_wrong_user is False
+
+        out_wrong_tenant = await store.expire(tenant_id=other_tenant, user_id=user, memory_id=mid)
+        assert out_wrong_tenant is False
+
+        # Nothing changed — the row is still live under its own scope.
+        async with engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text("SELECT expired_at FROM memory_item WHERE id = :id"),
+                    {"id": mid},
+                )
+            ).one()
+        assert row.expired_at is None
+        got = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0, 0.0)
+        )
+        assert [m.content for m in got] == ["mine"]
+    finally:
+        await engine.dispose()

@@ -327,6 +327,24 @@ class InMemoryMemoryStore(MemoryStore):
         self._rows.append(written)
         return written
 
+    async def expire(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+    ) -> bool:
+        for idx, row in enumerate(self._rows):
+            if (
+                row.id == memory_id
+                and row.tenant_id == tenant_id
+                and row.user_id == user_id
+                and row.deleted_at is None
+            ):
+                self._rows[idx] = row.model_copy(update={"expired_at": datetime.now(UTC)})
+                return True
+        return False
+
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
         removed = 0

@@ -523,6 +523,29 @@ class SqlMemoryStore(MemoryStore):
             await session.refresh(new_row)
             return _row_to_item(new_row)
 
+    async def expire(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        memory_id: UUID,
+    ) -> bool:
+        now = datetime.now(UTC)
+        stmt = (
+            update(MemoryItemRow)
+            .where(
+                MemoryItemRow.id == memory_id,
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.deleted_at.is_(None),
+            )
+            .values(expired_at=now)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
     async def delete_all_for_user(self, *, tenant_id: UUID, user_id: UUID) -> int:
         now = datetime.now(UTC)
         stmt = (
