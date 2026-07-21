@@ -70,7 +70,7 @@ describe("RunBudgetSection", () => {
       screen.getByText(optionContent("plan_execute (plan, then execute)")),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(optionContent("custom (not wired up)")),
+      screen.getByText(optionContent("custom (deprecated — same as react)")),
     ).toBeInTheDocument();
   });
 

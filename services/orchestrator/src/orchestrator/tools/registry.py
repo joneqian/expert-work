@@ -176,10 +176,11 @@ class ToolContext:
     #: ``None`` when the caller has no OAuth identity (service principals).
     oauth_user_id: str | None = None
     cancellation_token: CancellationToken | None = None
-    #: Stream K.K8 — current plan (when ``workflow.type == "plan_execute"``).
-    #: ``update_plan`` reads ``plan.goal`` so the agent's revised plan keeps
-    #: the original goal (the tool only rewrites ``steps``). ``None`` for
-    #: react-mode runs and any run before the planner node has executed.
+    #: Stream K.K8 / P3 — current plan. Set by the planner node
+    #: (``plan_execute``) or by the ``update_plan`` tool, which any agent can
+    #: call to create or revise a plan. ``update_plan`` keeps ``plan.goal`` on
+    #: a revise unless a new goal is supplied. ``None`` only before the first
+    #: plan is established.
     plan: Plan | None = None
     #: Mini-ADR J-40 (J.4-补强-2) — wall-clock deadline (``time.monotonic``
     #: timestamp) for the *current run including any sub-agent recursion*.

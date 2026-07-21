@@ -753,13 +753,14 @@ async def build_agent(
     planner_node = (
         make_planner_node(routers.planning) if spec.spec.workflow.type == "plan_execute" else None
     )
-    # Stream K.K8 — the agent-initiated replan path. Closing the J.1
-    # loop: planner sets the initial plan, ``update_plan`` lets the
-    # agent revise it during the run. Implicit tool — never declared in
-    # the manifest, registered exactly when the workflow is plan_execute
-    # so react-mode runs do not see it.
-    if spec.spec.workflow.type == "plan_execute":
-        registry.register(UpdatePlanTool())
+    # Stream K.K8 + P3 — the plan tool. Implicit (never declared in the
+    # manifest). Registered for EVERY workflow so any agent can self-plan
+    # on demand (create-or-replace): a react agent calls it to create a
+    # plan when a task is complex; a plan_execute agent's planner node
+    # seeds an initial plan that this tool then revises. The planner node
+    # itself stays plan_execute-only (below) — that is the forced-plan /
+    # compliance path (B).
+    registry.register(UpdatePlanTool())
     # Stream J.2 — a ``reflection:`` block inserts a self-critique node
     # before the run ends.
     reflection = spec.spec.reflection

@@ -31,6 +31,7 @@ from orchestrator.agent_factory import _build_provider, _chat_stream_deadline_s
 from orchestrator.llm import FakeEmbedder, RateLimitedProvider
 from orchestrator.llm.providers.openai_compatible import OpenAICompatibleProvider
 from orchestrator.tools import KnowledgeRetriever, RecordingTavilyClient
+from orchestrator.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -578,6 +579,46 @@ async def test_build_agent_plan_execute_adds_planner_node() -> None:
         built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "planner" in built.graph.nodes
     assert "agent" in built.graph.nodes
+
+
+def _spy_on_register(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch ``ToolRegistry.register`` to record registered tool names."""
+    registered: list[str] = []
+    original = ToolRegistry.register
+
+    def _spy(self: ToolRegistry, tool: Any, *args: Any, **kwargs: Any) -> None:
+        registered.append(tool.spec.name)
+        return original(self, tool, *args, **kwargs)
+
+    monkeypatch.setattr(ToolRegistry, "register", _spy)
+    return registered
+
+
+@pytest.mark.asyncio
+async def test_build_agent_react_registers_update_plan_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P3 — update_plan is default-registered for every workflow, so a
+    react agent can self-plan (previously gated to plan_execute)."""
+    registered = _spy_on_register(monkeypatch)
+    async with make_checkpointer("memory") as cp:
+        await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert "update_plan" in registered
+
+
+@pytest.mark.asyncio
+async def test_build_agent_plan_execute_still_registers_update_plan_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: plan_execute keeps update_plan (now via the same
+    unconditional registration path)."""
+    registered = _spy_on_register(monkeypatch)
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["workflow"] = {"type": "plan_execute"}
+    spec = AgentSpec.model_validate(doc)
+    async with make_checkpointer("memory") as cp:
+        await _build(spec, secret_store=_secret_store(), checkpointer=cp)
+    assert "update_plan" in registered
 
 
 @pytest.mark.asyncio
