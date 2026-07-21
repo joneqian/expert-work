@@ -85,10 +85,19 @@ _EXTRACT_SYSTEM = (
     '"importance" (how reusable it is in future sessions — rare stable '
     'user facts high, one-off chatter low) and "confidence" (how sure '
     "you are it is true — explicit statements high, inferred or hedged "
-    "low). Respond with ONLY a JSON object, no prose and no code "
-    "fences:\n"
+    "low). Also give:\n"
+    '- "expected_valid_days": how many days you expect this to stay true '
+    "before it is worth re-checking — a rough guide: volatile/ephemeral "
+    "~7, seasonal/plans ~90, yearly ~365, stable preferences ~1095, "
+    "near-permanent identity facts ~3650. Omit or null if you cannot "
+    "estimate.\n"
+    '- "is_correction": true ONLY if this memory explicitly corrects or '
+    "updates something stated earlier in the conversation (e.g. the user "
+    "says they moved, changed jobs, renamed a thing); otherwise false.\n"
+    "Respond with ONLY a JSON object, no prose and no code fences:\n"
     '{"memories": [{"kind": "fact" | "episodic", "content": "<one concise '
-    'sentence>", "importance": <0-1>, "confidence": <0-1>}]}\n'
+    'sentence>", "importance": <0-1>, "confidence": <0-1>, '
+    '"expected_valid_days": <int or null>, "is_correction": <bool>}]}\n'
     'If there is nothing worth remembering, return {"memories": []}.'
 )
 
@@ -141,6 +150,12 @@ class ExtractedMemory:
     content: str
     importance: float = 0.5
     confidence: float = 0.5
+    # P5b-2b ⑦ — LLM-predicted validity window (days); drives the consolidator
+    # due-scan. None = no prediction (never scanned for predictive review).
+    expected_valid_days: int | None = None
+    # P5b-2b ⑧ — LLM flag: this memory explicitly corrects prior info. Transient
+    # (never persisted); threaded into reconcile to bias the UPDATE decision.
+    is_correction: bool = False
 
 
 #: Stream RT-2 PR-2 (review HIGH) — ceiling for extraction-scored confidence.
@@ -169,6 +184,17 @@ def _clamp_score(value: object) -> float:
     if math.isnan(score):
         return 0.5
     return min(1.0, max(0.0, score))
+
+
+def _parse_valid_days(value: object) -> int | None:
+    """P5b-2b ⑦ — parse a model-supplied validity window into a positive int,
+    or None on anything non-numeric / non-positive (best-effort — a bad window
+    never drops the memory, it just opts the row out of predictive review)."""
+    try:
+        days = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+    return days if days > 0 else None
 
 
 def parse_extracted_memories(text: str) -> list[ExtractedMemory]:
@@ -205,6 +231,10 @@ def parse_extracted_memories(text: str) -> list[ExtractedMemory]:
                     # Capped below the M-4 sentinel — see
                     # ``_MAX_EXTRACTED_CONFIDENCE`` above.
                     confidence=min(_MAX_EXTRACTED_CONFIDENCE, _clamp_score(row.get("confidence"))),
+                    expected_valid_days=_parse_valid_days(row.get("expected_valid_days")),
+                    # Strict bool — only a real JSON `true` counts as a correction
+                    # (a truthy string must not silently trip UPDATE recall).
+                    is_correction=row.get("is_correction") is True,
                 )
             )
     return out
@@ -905,6 +935,9 @@ async def flush_messages_to_memory(
                 confidence=mem.confidence,
                 source_thread_id=str(thread_id) if thread_id is not None else None,
                 source_run_id=run_id,
+                # P5b-2b ⑦ — persist the predicted window so the consolidator
+                # due-scan can find this fact when it comes due.
+                expected_valid_days=mem.expected_valid_days,
             )
             for mem, vector in zip(extracted, vectors, strict=True)
         ]

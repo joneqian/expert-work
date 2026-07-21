@@ -134,6 +134,33 @@ def test_parse_extracted_memories_tolerates_garbage(text: str) -> None:
     assert parse_extracted_memories(text) == []
 
 
+def test_parse_extracted_memories_reads_expected_valid_days_and_is_correction() -> None:
+    text = """{"memories": [
+      {"kind": "fact", "content": "User lives in Shanghai", "importance": 0.9,
+       "confidence": 0.9, "expected_valid_days": 365, "is_correction": true}
+    ]}"""
+    out = parse_extracted_memories(text)
+    assert len(out) == 1
+    assert out[0].expected_valid_days == 365
+    assert out[0].is_correction is True
+
+
+def test_parse_extracted_memories_defaults_new_fields_when_absent() -> None:
+    text = '{"memories": [{"kind": "fact", "content": "x", "importance": 0.9, "confidence": 0.9}]}'
+    out = parse_extracted_memories(text)
+    assert out[0].expected_valid_days is None
+    assert out[0].is_correction is False
+
+
+def test_parse_extracted_memories_tolerates_malformed_new_fields() -> None:
+    text = """{"memories": [{"kind": "fact", "content": "x", "importance": 0.9,
+      "confidence": 0.9, "expected_valid_days": "soon", "is_correction": "yes"}]}"""
+    out = parse_extracted_memories(text)
+    # Malformed window → None (never drop the memory); non-bool truthy string → False (strict).
+    assert out[0].expected_valid_days is None
+    assert out[0].is_correction is False
+
+
 # ---------------------------------------------------------------------------
 # Stream Memory-Enhance (M-3) — read-time verification
 # ---------------------------------------------------------------------------
