@@ -136,3 +136,41 @@ class MemoryItem(BaseModel):
         "flagged items regardless of age and clears the flag via "
         "mark_reviewed; soft-deleted noise clears implicitly.",
     )
+    # ---- Stream P5b (溯源 + bi-temporal 时间模型) ----
+    source_run_id: str | None = Field(
+        default=None,
+        description="P5b — the run (agent_run.id, stringified) that triggered this "
+        "memory's extraction. Mirrors source_thread_id's str storage. NULL for "
+        "legacy rows and DLQ-retried writes.",
+    )
+    valid_at: datetime | None = Field(
+        default=None,
+        description="P5b — when the fact became true in the world (backfilled = "
+        "created_at). Anchors time-travel retrieval (as_of, P5b-2).",
+    )
+    expired_at: datetime | None = Field(
+        default=None,
+        description="P5b — when the fact stopped being true in the world with NO "
+        "successor (a retraction). Default retrieve excludes rows where this is "
+        "past. Orthogonal to invalid_at.",
+    )
+    invalid_at: datetime | None = Field(
+        default=None,
+        description="P5b — when this row was superseded by a newer version (db-layer "
+        "supersession). Default retrieve excludes non-NULL. Orthogonal to expired_at.",
+    )
+    supersedes: UUID | None = Field(
+        default=None,
+        description="P5b — the older memory id this row replaces (forward link of the "
+        "append-only version chain).",
+    )
+    superseded_by: UUID | None = Field(
+        default=None,
+        description="P5b — the newer memory id that replaced this row (reverse link; "
+        "set together with invalid_at when superseded).",
+    )
+    expected_valid_days: int | None = Field(
+        default=None,
+        description="P5b — LLM-estimated validity window in days (per-fact predictive "
+        "review input, read in P5b-2; column reserved here).",
+    )
