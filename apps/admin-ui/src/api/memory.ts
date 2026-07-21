@@ -33,6 +33,13 @@ export interface MemoryItem {
    *  write-filter; ``confidence`` is 1.0 after a user correction (M-4). */
   importance: number;
   confidence: number;
+  // P5b provenance + bi-temporal (already on the wire via full model_dump).
+  source_thread_id?: string | null;
+  source_run_id?: string | null;
+  valid_at?: string | null;
+  expired_at?: string | null;
+  invalid_at?: string | null;
+  expected_valid_days?: number | null;
 }
 
 export interface MemoryList {
@@ -48,13 +55,16 @@ export interface ListMemoriesParams {
   /** Tenant-admin governance view of one member's memories (M2 user
    *  detail). Non-admins asking for someone else get a 403. */
   userId?: string;
+  /** ISO8601 — time-travel: memories as they were valid at this instant.
+   *  Omit for the current view. */
+  as_of?: string;
 }
 
 export async function listMemories(
   params: ListMemoriesParams = {},
 ): Promise<MemoryList> {
-  const { tenantScope, kind, limit, userId } = params;
-  const query = withTenantScope({ kind, limit, user_id: userId }, tenantScope);
+  const { tenantScope, kind, limit, userId, as_of } = params;
+  const query = withTenantScope({ kind, limit, user_id: userId, as_of }, tenantScope);
   return getJson<MemoryList>("/v1/memory", { params: query });
 }
 

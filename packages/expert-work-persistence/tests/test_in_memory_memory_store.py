@@ -1033,6 +1033,7 @@ def _mem(
     user: object,
     content: str,
     created_at: datetime | None = None,
+    valid_at: datetime | None = None,
     expected_valid_days: int | None = None,
     last_reviewed_at: datetime | None = None,
     invalid_at: datetime | None = None,
@@ -1046,6 +1047,7 @@ def _mem(
         content=content,
         embedding=(1.0, 0.0, 0.0),
         created_at=created_at,
+        valid_at=valid_at,
         expected_valid_days=expected_valid_days,
         last_reviewed_at=last_reviewed_at,
         invalid_at=invalid_at,
@@ -1159,3 +1161,51 @@ async def test_renew_review_none_clears_window() -> None:
     await store.renew_review(tenant_id=t, user_id=u, memory_id=item.id, expected_valid_days=None)
     got = await store.list_for_user(tenant_id=t, user_id=u)
     assert got[0].expected_valid_days is None
+
+
+# ---------------------------------------------------------------------------
+# P5b-2c T1 — write() backfills created_at/valid_at (SQL parity)
+# ---------------------------------------------------------------------------
+#
+# SqlMemoryStore.write() backfills created_at/valid_at to func.now() when the
+# caller leaves them None (sql.py:175/181); InMemoryMemoryStore.write() did
+# not mirror this, so an in-memory item written without explicit timestamps
+# (mirrors flush's MemoryItem(...) construction) diverged from SQL — never
+# "due" for predictive review (list_due_for_review needs created_at) and
+# behaving differently under as_of time-travel (valid_at is the anchor).
+
+
+@pytest.mark.asyncio
+async def test_in_memory_write_backfills_created_and_valid_at() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    # item with created_at/valid_at left None (mirrors flush's MemoryItem(...))
+    item = _mem(tenant=t, user=u, content="x", created_at=None, valid_at=None)
+    await store.write([item])
+    got = (await store.list_for_user(tenant_id=t, user_id=u))[0]
+    assert got.created_at is not None
+    assert got.valid_at is not None
+
+
+# ---------------------------------------------------------------------------
+# P5b-2c T2 — list_for_user(as_of=...) time-travel (memory-tab back-end)
+# ---------------------------------------------------------------------------
+#
+# retrieve() already time-travels via as_of (P5b-2a); the memory tab reads
+# list_for_user() instead, which never applied the bi-temporal filter at
+# all. as_of=None must keep list_for_user()'s existing behavior (deleted_at
+# + optional kind only, no bi-temporal predicate) — only as_of=<instant>
+# ANDs the three time-travel predicates (mirrors retrieve()'s
+# _temporally_visible as_of branch).
+
+
+@pytest.mark.asyncio
+async def test_list_for_user_as_of_time_travel() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+    # valid from 2021, so invisible at as_of=2020 but visible with as_of=None
+    later = _mem(tenant=t, user=u, content="later", valid_at=datetime(2021, 1, 1, tzinfo=UTC))
+    await store.write([later])
+    assert [m.content for m in await store.list_for_user(tenant_id=t, user_id=u)] == ["later"]
+    assert await store.list_for_user(tenant_id=t, user_id=u, as_of=past) == []

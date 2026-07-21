@@ -355,19 +355,34 @@ class SqlMemoryStore(MemoryStore):
         tenant_id: UUID,
         user_id: UUID,
         kind: Literal["fact", "episodic"] | None = None,
+        as_of: datetime | None = None,
         limit: int = 50,
     ) -> list[MemoryItem]:
-        stmt = select(MemoryItemRow).where(
+        conds: list[ColumnElement[bool]] = [
             MemoryItemRow.tenant_id == tenant_id,
             MemoryItemRow.user_id == user_id,
             MemoryItemRow.deleted_at.is_(None),
-        )
+        ]
         if kind is not None:
-            stmt = stmt.where(MemoryItemRow.kind == kind)
+            conds.append(MemoryItemRow.kind == kind)
+        # Stream P5b-2c — as_of=None keeps the pre-existing behavior (no
+        # bi-temporal predicate at all, so a superseded/not-yet-valid row
+        # still surfaces here for direct inspection). Only when as_of is
+        # given do we AND the same three time-travel predicates retrieve()'s
+        # _retrieve_filter applies (sql.py:118-121).
+        if as_of is not None:
+            conds.append(or_(MemoryItemRow.valid_at.is_(None), MemoryItemRow.valid_at <= as_of))
+            conds.append(or_(MemoryItemRow.invalid_at.is_(None), MemoryItemRow.invalid_at > as_of))
+            conds.append(or_(MemoryItemRow.expired_at.is_(None), MemoryItemRow.expired_at > as_of))
         # newest first; ``memory_item_live_user_idx`` (migration 0024) is
         # a partial index on (user_id, created_at DESC) WHERE
         # deleted_at IS NULL — query shape matches.
-        stmt = stmt.order_by(MemoryItemRow.created_at.desc()).limit(limit)
+        stmt = (
+            select(MemoryItemRow)
+            .where(*conds)
+            .order_by(MemoryItemRow.created_at.desc())
+            .limit(limit)
+        )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_item(row) for row in rows]

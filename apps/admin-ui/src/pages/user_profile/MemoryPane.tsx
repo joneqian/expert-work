@@ -8,6 +8,7 @@ import {
   Alert,
   App,
   Button,
+  DatePicker,
   Empty,
   Input,
   Modal,
@@ -21,6 +22,7 @@ import {
 import type { TableColumnsType } from "antd";
 import { Pencil, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 import {
   deleteMemory,
@@ -39,11 +41,13 @@ const KIND_OPTIONS: MemoryKind[] = ["fact", "episodic"];
 export function MemoryPane({ userId }: { userId: string }) {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const navigate = useNavigate();
 
   const [data, setData] = useState<MemoryList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [asOf, setAsOf] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<MemoryItem | null>(null);
   const [draftContent, setDraftContent] = useState("");
@@ -54,13 +58,13 @@ export function MemoryPane({ userId }: { userId: string }) {
     setLoading(true);
     setError(null);
     try {
-      setData(await listMemories({ userId }));
+      setData(await listMemories({ userId, as_of: asOf ?? undefined }));
     } catch (err) {
       setError(errMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, asOf]);
 
   useEffect(() => {
     void refresh();
@@ -151,6 +155,30 @@ export function MemoryPane({ userId }: { userId: string }) {
         ),
       },
       {
+        title: t("memory_tab.col_source"),
+        key: "source",
+        width: 110,
+        render: (_: unknown, record) =>
+          record.source_thread_id && record.source_run_id ? (
+            <Button
+              size="small"
+              type="link"
+              onClick={() =>
+                navigate(
+                  `/runs/${encodeURIComponent(record.source_thread_id!)}/${encodeURIComponent(record.source_run_id!)}`,
+                )
+              }
+              data-testid={`memory-source-run-${record.id}`}
+            >
+              {t("memory_tab.source_run")}
+            </Button>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              —
+            </Text>
+          ),
+      },
+      {
         title: t("user_profile.memory_col_actions"),
         key: "actions",
         width: 160,
@@ -160,6 +188,7 @@ export function MemoryPane({ userId }: { userId: string }) {
               size="small"
               icon={<Pencil size={13} strokeWidth={1.5} />}
               onClick={() => openEdit(record)}
+              disabled={asOf !== null}
               data-testid={`memory-edit-${record.id}`}
             >
               {t("user_profile.memory_edit")}
@@ -175,6 +204,7 @@ export function MemoryPane({ userId }: { userId: string }) {
                 danger
                 icon={<Trash2 size={13} strokeWidth={1.5} />}
                 loading={busyId === record.id}
+                disabled={asOf !== null}
                 data-testid={`memory-forget-${record.id}`}
               >
                 {t("user_profile.memory_forget")}
@@ -184,7 +214,7 @@ export function MemoryPane({ userId }: { userId: string }) {
         ),
       },
     ],
-    [t, busyId, openEdit, handleForget],
+    [t, busyId, openEdit, handleForget, navigate, asOf],
   );
 
   return (
@@ -197,6 +227,23 @@ export function MemoryPane({ userId }: { userId: string }) {
         style={{ marginBottom: 12 }}
       />
       {error !== null && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
+      <Space style={{ marginBottom: 12 }}>
+        <DatePicker
+          showTime
+          allowClear
+          placeholder={t("memory_tab.as_of_placeholder")}
+          onChange={(d) => setAsOf(d ? d.toISOString() : null)}
+          data-testid="memory-as-of-picker"
+        />
+        {asOf !== null && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("memory_tab.as_of_banner", { at: new Date(asOf).toLocaleString() })}
+            data-testid="memory-as-of-banner"
+          />
+        )}
+      </Space>
       <Table<MemoryItem>
         size="small"
         columns={columns}

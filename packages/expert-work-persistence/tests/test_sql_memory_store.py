@@ -1208,6 +1208,136 @@ async def test_retrieve_as_of_time_travel_sql(sql_store: SqlStoreFixture) -> Non
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_retrieve_excludes_future_valid_at(sql_store: SqlStoreFixture) -> None:
+    """Stream P5b-2c T1 (deferred from the P5b-2a review) — SQL counterpart of
+    ``test_retrieve_as_of_excludes_not_yet_valid`` in
+    test_in_memory_memory_store.py: a memory whose ``valid_at`` is still in
+    the future relative to the queried ``as_of`` instant is "not yet known"
+    and must be excluded from that historical view. ``write()`` persists
+    ``valid_at`` directly (sql.py:181), so — unlike the ``invalid_at`` /
+    ``expired_at`` tests above — no raw-UPDATE patch is needed here.
+
+    Note: this is an ``as_of``-branch test, not the ``as_of=None`` (current-
+    time) branch — ``_retrieve_filter``'s ``as_of is None`` arm (sql.py:113-116)
+    does not consult ``valid_at`` at all (mirrored by ``_temporally_visible``
+    in memory.py), so a future-``valid_at`` row is *not* excluded from the
+    plain "now" view today; no production writer ever sets a future
+    ``valid_at`` (verified via grep), so this pre-existing gap has no known
+    behavioral impact and is out of this task's scope to change.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        future = datetime.now(UTC) + timedelta(days=30)
+        item = MemoryItem(
+            id=uuid4(),
+            tenant_id=tenant,
+            user_id=user,
+            kind="fact",
+            content="not-yet-valid",
+            embedding=_vec(1.0, 0.0),
+            valid_at=future,
+        )
+        await store.write([item])
+        hits = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user,
+            query_embedding=_vec(1.0, 0.0),
+            limit=10,
+            as_of=datetime.now(UTC),
+        )
+        assert hits == []
+    finally:
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# P5b-2c T2 — list_for_user(as_of=...) time-travel (memory-tab back-end)
+# ---------------------------------------------------------------------------
+#
+# list_for_user() never applied the bi-temporal filter at all (unlike
+# retrieve()); this task adds as_of so the memory tab can time-travel it.
+# The existing SQL fixtures in this file are NULL-bitemporal (valid_at set,
+# invalid_at/expired_at NULL) — an inverted predicate (e.g. valid_at > as_of
+# instead of <=) would pass those silently, so this fixture deliberately
+# sets both a future valid_at row AND a superseded (invalid_at) row with
+# fixed 2026 dates (never real "now") so the assertions are deterministic
+# regardless of wall-clock time.
+
+
+@pytest.mark.asyncio
+async def test_list_for_user_as_of_time_travel(sql_store: SqlStoreFixture) -> None:
+    """as_of=None keeps list_for_user()'s pre-existing behavior (no
+    bi-temporal predicate — both rows list, matching
+    ``test_supersede_closes_old_opens_new``'s use of list_for_user() to
+    surface a closed row for inspection). as_of=<instant> ANDs the three
+    time-travel predicates: a future-valid_at row is excluded before its
+    valid_at, and a superseded row is included before its invalid_at /
+    excluded after — the exact scenario an inverted predicate would get
+    backwards.
+    """
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        t_jan = datetime(2026, 1, 1, tzinfo=UTC)
+        t_mar = datetime(2026, 3, 1, tzinfo=UTC)
+        t_dec = datetime(2026, 12, 1, tzinfo=UTC)
+        superseded_id = uuid4()
+        await store.write(
+            [
+                MemoryItem(
+                    id=uuid4(),
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="not-yet-valid",
+                    embedding=_vec(1.0, 0.0),
+                    valid_at=t_dec,
+                ),
+                MemoryItem(
+                    id=superseded_id,
+                    tenant_id=tenant,
+                    user_id=user,
+                    kind="fact",
+                    content="superseded-in-mar",
+                    embedding=_vec(0.0, 1.0),
+                    valid_at=t_jan,
+                ),
+            ]
+        )
+        # write() does not persist invalid_at (no production writer sets it
+        # at insert time — see test_retrieve_excludes_invalidated_and_expired
+        # above) — patch it in via raw UPDATE, same pattern.
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE memory_item SET invalid_at = :invalid_at WHERE id = :id"),
+                {"invalid_at": t_mar, "id": superseded_id},
+            )
+
+        # as_of=None: no bi-temporal filter at all — both rows list,
+        # including the not-yet-valid and the already-superseded one.
+        no_as_of = await store.list_for_user(tenant_id=tenant, user_id=user, limit=10)
+        assert {r.content for r in no_as_of} == {"not-yet-valid", "superseded-in-mar"}
+
+        # as_of=Feb: after Jan's valid_at, before Mar's supersession —
+        # only the superseded-in-mar row was live; not-yet-valid (Dec)
+        # is still in the future.
+        feb_hits = await store.list_for_user(
+            tenant_id=tenant, user_id=user, as_of=datetime(2026, 2, 1, tzinfo=UTC), limit=10
+        )
+        assert {r.content for r in feb_hits} == {"superseded-in-mar"}
+
+        # as_of=Apr: after Mar's supersession — superseded-in-mar is now
+        # hidden; not-yet-valid (Dec) is still in the future. Empty.
+        apr_hits = await store.list_for_user(
+            tenant_id=tenant, user_id=user, as_of=datetime(2026, 4, 1, tzinfo=UTC), limit=10
+        )
+        assert apr_hits == []
+    finally:
+        await engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # P5b-2b ⑦ — list_due_for_review / renew_review (predictive review due-scan)
 # ---------------------------------------------------------------------------

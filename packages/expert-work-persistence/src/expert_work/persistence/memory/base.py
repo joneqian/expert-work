@@ -94,6 +94,7 @@ class MemoryStore(abc.ABC):
         tenant_id: UUID,
         user_id: UUID,
         kind: Literal["fact", "episodic"] | None = None,
+        as_of: datetime | None = None,
         limit: int = 50,
     ) -> list[MemoryItem]:
         """Stream K.K6 — list a user's live memories, newest first.
@@ -101,7 +102,16 @@ class MemoryStore(abc.ABC):
         Soft-deleted rows are filtered out so the UI / API caller never
         sees a forgotten memory. ``kind`` optionally narrows. The
         ``embedding`` field is still populated (callers may project it
-        away at the API boundary)."""
+        away at the API boundary).
+
+        Stream P5b-2c — ``as_of`` (when given) time-travels the bi-temporal
+        (valid/invalid/expired) dimension the same way :meth:`retrieve` does:
+        instead of "currently live" it returns rows that were valid AT that
+        instant. ``None`` (default) applies NO bi-temporal filter — today's
+        behavior (only ``deleted_at`` + optional ``kind``) is unchanged, so
+        e.g. a superseded or not-yet-valid row still surfaces for direct
+        inspection (mirrors how ``supersede()``'s closed old row is reached
+        via this method)."""
 
     @abc.abstractmethod
     async def list_all_tenants(
