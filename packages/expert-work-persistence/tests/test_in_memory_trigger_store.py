@@ -421,3 +421,39 @@ async def test_memory_roundtrips_delivery_routing() -> None:
     assert got is not None
     assert got.originating_thread_id == thread
     assert got.context_mode == "reuse_thread"
+
+
+# --- Task 3 — user-scoped uniqueness (matches Task 1's partial unique indexes) --
+
+
+@pytest.mark.asyncio
+async def test_memory_two_users_same_name_allowed() -> None:
+    store = InMemoryTriggerStore()
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "daily"}
+        )
+    )
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u2, "name": "daily"}
+        )
+    )  # 不放异常即通过
+
+
+@pytest.mark.asyncio
+async def test_memory_same_user_same_name_conflicts() -> None:
+    store = InMemoryTriggerStore()
+    tenant, u1 = uuid4(), uuid4()
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "daily"}
+        )
+    )
+    with pytest.raises(ValueError):
+        await store.create(
+            _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+                update={"user_id": u1, "name": "daily"}
+            )
+        )

@@ -397,3 +397,36 @@ async def test_create_defaults_context_mode(trigger_store: SqlTriggerStore) -> N
     assert got is not None
     assert got.originating_thread_id is None
     assert got.context_mode == "fresh_thread_per_run"
+
+
+# --- Task 3 — user-scoped uniqueness (Task 1's partial unique indexes) ----
+
+
+@pytest.mark.asyncio
+async def test_two_users_same_name_allowed(trigger_store: SqlTriggerStore) -> None:
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    r1 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u1, "name": "daily"}
+    )
+    r2 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u2, "name": "daily"}
+    )
+    await trigger_store.create(r1)
+    await trigger_store.create(r2)  # 不同 user 同名 —— 放行
+    assert (await trigger_store.get(trigger_id=r2.id, tenant_id=tenant)) is not None
+
+
+@pytest.mark.asyncio
+async def test_same_user_same_name_conflicts(trigger_store: SqlTriggerStore) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    tenant, u1 = uuid4(), uuid4()
+    r1 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u1, "name": "daily"}
+    )
+    r2 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u1, "name": "daily"}
+    )
+    await trigger_store.create(r1)
+    with pytest.raises(IntegrityError):
+        await trigger_store.create(r2)

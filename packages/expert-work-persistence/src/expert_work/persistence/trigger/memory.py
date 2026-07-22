@@ -18,12 +18,17 @@ class InMemoryTriggerStore(TriggerStore):
 
     async def create(self, record: TriggerRecord) -> TriggerRecord:
         for existing in self._rows.values():
-            if (
+            same_scope = (
                 existing.tenant_id == record.tenant_id
                 and existing.agent_name == record.agent_name
                 and existing.name == record.name
-            ):
-                msg = f"trigger {record.name!r} already exists for agent {record.agent_name!r}"
+                and existing.user_id == record.user_id
+            )
+            if same_scope:
+                msg = (
+                    f"trigger {record.name!r} already exists for agent "
+                    f"{record.agent_name!r} (user {record.user_id})"
+                )
                 raise ValueError(msg)
         self._rows[record.id] = record
         return record
