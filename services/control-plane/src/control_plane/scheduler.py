@@ -22,16 +22,14 @@ slot via ``TriggerStore.claim_cron_fire`` (CAS on ``last_fired_at``) and
 ``_retry_due`` claims a retrying firing via ``TriggerRunStore.claim_retry``
 (CAS ``retrying`` → ``fired``) — exactly one instance wins each, so blue+green
 never double-spawn. The reconcile pass's status transition is idempotent (both
-instances derive the same terminal status from the same run outcome), but its
-result-delivery side effect (Spec 1 PR3 — appending a fired run's result into
-the originating conversation) is NOT: two instances reconciling the same
-``fired`` row would both append, duplicating the user's message. Harmless
-single-replica (below); before going multi-replica, delivery must be made
-idempotent — dedup by ``expert_work_source_run_id`` in ``inject_delivery``, or a
-CAS claim gating the ``fired`` → ``succeeded`` transition. (Deployment still single-
-replicas the scheduler today because the co-located ``SkillCurator`` shares the
-``enable_scheduler`` gate and is not yet CAS-hardened; the guards here remove the
-scheduler's own double-fire hazard and are the prerequisite for going wider.)
+instances derive the same terminal status from the same run outcome). Its
+result-delivery side effect (Spec 1 PR3/PR4 — appending a fired run's result
+into the originating conversation) is now idempotent too: ``inject_delivery``
+dedups by ``expert_work_source_run_id``, so two reconcilers — or the scheduler
+racing the manual ``:fire`` endpoint (Spec 1 PR4) — append at most one copy.
+(A duplicate reconcile still emits a redundant ``TRIGGER_COMPLETED`` audit
+entry; a CAS claim gating the ``fired`` → ``succeeded`` transition would make
+that exactly-once too — deferred, cosmetic.)
 
 Wiring (in :func:`control_plane.app.create_app`): started from the
 FastAPI ``lifespan`` ``yield``, stopped via :meth:`stop` from the

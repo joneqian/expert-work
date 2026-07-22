@@ -172,3 +172,36 @@ async def test_delivery_into_empty_thread() -> None:
         )
         turns = await read_turns(cp, thread, include_hidden=False)
         assert any(t.role == "assistant" and t.content == "standalone" for t in turns)
+
+
+@pytest.mark.asyncio
+async def test_inject_delivery_is_idempotent_by_source_run_id() -> None:
+    """同一 source_run_id 重复投递只落一条消息(FU1a)——消除 fire-now 端点与
+    scheduler reconcile 同进程双投递导致的重复贴。"""
+    tenant, thread = uuid4(), uuid4()
+    src, trig = uuid4(), uuid4()
+    async with make_checkpointer("memory") as cp:
+        graph = await _built_graph(cp)
+        config = {"configurable": {"thread_id": str(thread), "tenant_id": str(tenant)}}
+        await graph.aupdate_state(
+            config,
+            {
+                "messages": [
+                    HumanMessage(content="set up my task"),
+                    AIMessage(content="done, it's scheduled"),
+                ]
+            },
+            as_node="agent",
+        )
+        for _ in range(2):
+            await inject_delivery(
+                graph,
+                thread_id=thread,
+                tenant_id=tenant,
+                result_text="今日 AI 新闻:...",
+                source_run_id=src,
+                trigger_id=trig,
+            )
+        turns = await read_turns(cp, thread, include_hidden=True)
+        delivered = [t for t in turns if t.content == "今日 AI 新闻:..."]
+        assert len(delivered) == 1  # 两次调用,只贴一条

@@ -38,13 +38,26 @@ async def inject_delivery(
     task's originating thread), so the has-history path — left in a clean
     turn-complete state after an assistant message with no tool calls — is the
     one that matters.
+
+    Idempotent by ``source_run_id``: a repeat call for a ``source_run_id``
+    already delivered is a no-op. This is what lets the scheduler's reconcile
+    pass and the manual ``:fire`` endpoint (Spec 1 PR4) race on the same fired
+    run without double-appending the result.
     """
     config: RunnableConfig = {
         "configurable": {"thread_id": str(thread_id), "tenant_id": str(tenant_id)}
     }
     snapshot = await graph.aget_state(config)
     values = snapshot.values if isinstance(snapshot.values, dict) else {}
-    has_history = bool(values.get("messages"))
+    existing = values.get("messages") or []
+    # FU1a — 幂等:同一 source_run_id 已投递过则跳过。fire-now 端点与 scheduler
+    # reconcile 可能同进程各投递一次同一 run 的结果;去重保证只贴一条。
+    tag = str(source_run_id)
+    for m in existing:
+        ak = getattr(m, "additional_kwargs", None)
+        if isinstance(ak, dict) and ak.get("expert_work_source_run_id") == tag:
+            return
+    has_history = bool(existing)
     message = AIMessage(
         content=result_text,
         additional_kwargs={
