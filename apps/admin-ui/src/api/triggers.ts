@@ -112,3 +112,30 @@ export async function patchTrigger(
 export async function deleteTrigger(triggerId: string): Promise<void> {
   await apiClient.delete(`/v1/triggers/${encodeURIComponent(triggerId)}`);
 }
+
+/** Spec 1 PR4 Task 3's synchronous "run now" result — mirrors the backend's
+ *  ``_FireNowResponse`` (``POST /v1/triggers/{id}:fire``). ``delivery`` is
+ *  one of ``delivered / pending / skipped / no_output / no_checkpointer /
+ *  agent_unavailable / error``; ``delivered_text`` is only set when
+ *  ``delivery === "delivered"``. */
+export interface FireNowResult {
+  run_id: string;
+  thread_id: string;
+  run_status: string;
+  trigger_run_status: string;
+  delivery: string;
+  delivered_text?: string | null;
+}
+
+/** Fire a cron task immediately (debug-console 立即触发). The backend holds
+ *  the request open for a bounded poll (``trigger_fire_now_timeout_s``,
+ *  default 60s) until the run reaches a terminal state, so callers must
+ *  show a loading state for up to that long. ``:fire`` is a literal URL
+ *  segment (not part of the id) — same ``:verb`` suffix convention as
+ *  ``purgeSession``'s ``:purge``, so only the id itself is encoded. */
+export async function fireTriggerNow(triggerId: string): Promise<FireNowResult> {
+  const response = await apiClient.post<FireNowResult>(
+    `/v1/triggers/${encodeURIComponent(triggerId)}:fire`,
+  );
+  return response.data;
+}

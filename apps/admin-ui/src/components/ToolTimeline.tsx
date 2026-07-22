@@ -8,12 +8,14 @@
  * tool/MCP X, with what, and did it work?" at a glance — which the raw
  * event dump does not.
  */
-import { useMemo, type ReactNode } from "react";
-import { Collapse, Empty, Tag, Typography } from "antd";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { App, Button, Collapse, Empty, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
+import { ApiError } from "../api/client";
 import type { SseEvent } from "../api/sessions";
 import { parseToolCalls, type ToolCallEntry, type ToolCallStatus } from "../api/tool_timeline";
+import { fireTriggerNow, type FireNowResult } from "../api/triggers";
 import { cleanUntrusted } from "../pages/agent_detail/playground/untrusted_clean";
 
 const { Text } = Typography;
@@ -37,9 +39,14 @@ interface ToolTimelineProps {
   events: readonly SseEvent[];
   /** The run paused at an approval gate — render blocked tools as 待审批. */
   awaitingApproval?: boolean;
+  /** Spec 1 PR4 Task 4 — fired when the 「立即触发」 button on a
+   *  ``manage_task`` card completes a fire-now call. Optional: Task 5 wires
+   *  a real handler to render the delivered result; omitted here, the card
+   *  still fires and shows its own inline delivery status. */
+  onFireResult?: (result: FireNowResult) => void;
 }
 
-export function ToolTimeline({ events, awaitingApproval = false }: ToolTimelineProps) {
+export function ToolTimeline({ events, awaitingApproval = false, onFireResult }: ToolTimelineProps) {
   const { t } = useTranslation();
   const entries = useMemo(
     () => parseToolCalls(events, awaitingApproval),
@@ -53,13 +60,20 @@ export function ToolTimeline({ events, awaitingApproval = false }: ToolTimelineP
   return (
     <div data-testid="tool-timeline" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {entries.map((entry, idx) => (
-        <ToolCallCard key={`${entry.id}-${idx}`} entry={entry} />
+        <ToolCallCard key={`${entry.id}-${idx}`} entry={entry} onFireResult={onFireResult} />
       ))}
     </div>
   );
 }
 
-export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
+export function ToolCallCard({
+  entry,
+  onFireResult,
+}: {
+  entry: ToolCallEntry;
+  /** See ``ToolTimelineProps.onFireResult``. */
+  onFireResult?: (result: FireNowResult) => void;
+}) {
   const { t } = useTranslation();
   const statusLabel = t(`tool_timeline.status_${entry.status}`);
   const hasArgs = Object.keys(entry.args).length > 0;
@@ -182,6 +196,9 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
         <Tag color={STATUS_COLOR[entry.status]} bordered={false} style={{ margin: 0 }}>
           {statusLabel}
         </Tag>
+        {entry.toolName === "manage_task" && entry.status === "success" && entry.triggerId ? (
+          <FireNowButton triggerId={entry.triggerId} onFireResult={onFireResult} />
+        ) : null}
       </div>
       {items.length > 0 && (
         <Collapse
@@ -193,6 +210,75 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
         />
       )}
     </div>
+  );
+}
+
+/** 「立即触发」— a ``manage_task`` create card's shortcut to fire the new
+ *  cron task right away (Spec 1 PR4 Task 4), instead of waiting for its
+ *  schedule. The backend call is a bounded synchronous poll (up to
+ *  ``trigger_fire_now_timeout_s``, ~60s), so the button stays in its
+ *  loading state for however long that takes. */
+function FireNowButton({
+  triggerId,
+  onFireResult,
+}: {
+  triggerId: string;
+  onFireResult?: (result: FireNowResult) => void;
+}) {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [firing, setFiring] = useState(false);
+  const [delivery, setDelivery] = useState<string | null>(null);
+
+  const handleFire = useCallback(async () => {
+    setFiring(true);
+    try {
+      const result = await fireTriggerNow(triggerId);
+      setDelivery(result.delivery);
+      onFireResult?.(result);
+    } catch (err) {
+      const detail = err instanceof ApiError ? `${err.code}: ${err.message}` : String(err);
+      message.error(`${t("tool_timeline.fire_failed")}: ${detail}`);
+    } finally {
+      setFiring(false);
+    }
+  }, [triggerId, onFireResult, message, t]);
+
+  let statusText: string | null = null;
+  let statusColor = "error";
+  if (delivery === "delivered") {
+    statusText = t("tool_timeline.fire_delivered");
+    statusColor = "success";
+  } else if (delivery === "pending") {
+    statusText = t("tool_timeline.fire_pending");
+    statusColor = "processing";
+  } else if (delivery !== null) {
+    // Any other terminal ``delivery`` (skipped / no_output / no_checkpointer
+    // / agent_unavailable / error) reads as "didn't land in the chat".
+    statusText = t("tool_timeline.fire_failed");
+  }
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <Button
+        size="small"
+        loading={firing}
+        onClick={() => void handleFire()}
+        data-testid="tool-fire-now"
+      >
+        {firing ? t("tool_timeline.firing") : t("tool_timeline.fire_now")}
+      </Button>
+      {statusText !== null && (
+        <Tag
+          bordered={false}
+          color={statusColor}
+          data-testid="tool-fire-status"
+          style={{ margin: 0 }}
+        >
+          {statusText}
+        </Tag>
+      )}
+    </span>
   );
 }
 

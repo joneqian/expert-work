@@ -12,6 +12,7 @@ import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentStep, AuxNodeItem, MarkerItem, TimelineItem } from "../../../api/timeline";
+import type { FireNowResult } from "../../../api/triggers";
 import type { WorkerStatus, WorkerTimeline } from "../../../api/worker_timeline";
 import { ToolCallCard } from "../../../components/ToolTimeline";
 import { fmtDuration } from "./duration_format";
@@ -35,6 +36,9 @@ export interface StepTimelineProps {
   ttftMs?: number | null;
   /** Run ended — orphan live steps (no authoritative card) render as interrupted. */
   finalized?: boolean;
+  /** Spec 1 PR4 Task 4 — see ``ToolTimelineProps.onFireResult``; threaded
+   *  down to each ``manage_task`` tool card's 「立即触发」 button. */
+  onFireResult?: (result: FireNowResult) => void;
 }
 
 /** Renders `fmtDuration(ms)` with the `tl_duration` aria-label — used for the
@@ -51,7 +55,13 @@ function DurationBadge({ ms, style }: { ms: number | null; style?: CSSProperties
   );
 }
 
-export function StepTimeline({ items, liveByStep, ttftMs = null, finalized = false }: StepTimelineProps) {
+export function StepTimeline({
+  items,
+  liveByStep,
+  ttftMs = null,
+  finalized = false,
+  onFireResult,
+}: StepTimelineProps) {
   // Steps that already have an authoritative card — their live buffer is superseded.
   const settled = new Set<number>();
   for (const it of items) {
@@ -81,7 +91,7 @@ export function StepTimeline({ items, liveByStep, ttftMs = null, finalized = fal
         {items.map((item) => {
           switch (item.kind) {
             case "agent":
-              return <AgentStepCard key={item.seq} item={item} />;
+              return <AgentStepCard key={item.seq} item={item} onFireResult={onFireResult} />;
             case "compaction":
             case "retry":
             case "error":
@@ -108,7 +118,13 @@ export function StepTimeline({ items, liveByStep, ttftMs = null, finalized = fal
   );
 }
 
-function AgentStepCard({ item }: { item: AgentStep }) {
+function AgentStepCard({
+  item,
+  onFireResult,
+}: {
+  item: AgentStep;
+  onFireResult?: (result: FireNowResult) => void;
+}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(item.hasError);
   const isFinal = item.tools.length === 0;
@@ -241,7 +257,7 @@ function AgentStepCard({ item }: { item: AgentStep }) {
                   paddingRight: tool.durationMs !== null ? 56 : 0,
                 }}
               >
-                <ToolCallCard entry={tool} />
+                <ToolCallCard entry={tool} onFireResult={onFireResult} />
                 <DurationBadge
                   ms={tool.durationMs}
                   style={{

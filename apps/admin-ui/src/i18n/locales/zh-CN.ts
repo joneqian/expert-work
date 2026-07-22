@@ -1312,6 +1312,11 @@ const zhCN: TranslationKeys = {
     exit_code: "退出码",
     stdout_label: "stdout",
     stderr_label: "stderr",
+    fire_now: "立即触发",
+    firing: "触发中…",
+    fire_delivered: "结果已落回对话",
+    fire_pending: "已触发,运行中",
+    fire_failed: "触发失败",
   },
   approval_card: {
     awaiting_human: "等待审批",

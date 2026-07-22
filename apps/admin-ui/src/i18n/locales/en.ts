@@ -1235,6 +1235,11 @@ export interface TranslationKeys {
     exit_code: string;
     stdout_label: string;
     stderr_label: string;
+    fire_now: string;
+    firing: string;
+    fire_delivered: string;
+    fire_pending: string;
+    fire_failed: string;
   };
   approval_card: {
     awaiting_human: string;
@@ -4131,6 +4136,11 @@ const en: TranslationKeys = {
     exit_code: "Exit code",
     stdout_label: "stdout",
     stderr_label: "stderr",
+    fire_now: "Run now",
+    firing: "Running…",
+    fire_delivered: "Result delivered",
+    fire_pending: "Fired, still running",
+    fire_failed: "Fire failed",
   },
   approval_card: {
     awaiting_human: "awaiting approval",
