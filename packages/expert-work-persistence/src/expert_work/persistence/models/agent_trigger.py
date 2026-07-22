@@ -18,7 +18,6 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
-    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -50,6 +49,10 @@ class AgentTriggerRow(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     source: Mapped[str] = mapped_column(Text, nullable=False)
     webhook_secret_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    originating_thread_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    context_mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'fresh_thread_per_run'")
+    )
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -57,7 +60,27 @@ class AgentTriggerRow(Base):
     __table_args__ = (
         CheckConstraint(f"kind IN {_KIND_VALUES}", name="agent_trigger_kind_valid"),
         CheckConstraint(f"source IN {_SOURCE_VALUES}", name="agent_trigger_source_valid"),
-        UniqueConstraint("tenant_id", "agent_name", "name", name="agent_trigger_name_uniq"),
+        CheckConstraint(
+            "context_mode IN ('reuse_thread', 'fresh_thread_per_run')",
+            name="agent_trigger_context_mode_valid",
+        ),
+        Index(
+            "ix_agent_trigger_user_name_uniq",
+            "tenant_id",
+            "agent_name",
+            "user_id",
+            "name",
+            unique=True,
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_agent_trigger_null_user_name_uniq",
+            "tenant_id",
+            "agent_name",
+            "name",
+            unique=True,
+            postgresql_where=text("user_id IS NULL"),
+        ),
         Index("ix_agent_trigger_tenant_id", "tenant_id"),
         Index(
             "ix_agent_trigger_cron_enabled",
