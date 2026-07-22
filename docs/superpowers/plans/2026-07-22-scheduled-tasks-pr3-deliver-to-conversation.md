@@ -320,14 +320,9 @@ git commit -m "feat(triggers): inject_delivery —— aupdate_state 把任务结
 
 `test_scheduler.py` 全内存:`_build_scheduler`(:75)建 InMemory* store + `stub_agent_runtime()`(该 stub **无** 真 `durable_checkpointer`/`get_agent`);`_MANIFEST`(:35)+ `AgentSpec.model_validate(_MANIFEST)` 是 "reporter/1.0.0" agent;`test_reconcile_marks_succeeded`(:251)是 reconcile 模型;`_run_info`(:105)建 RunInfo。三处 harness 需小扩(见实现者注)。加三测:
 
-```python
-# 新 import(加到文件顶部）:
-# from langchain_core.messages import AIMessage, HumanMessage
-# from control_plane.transcript import read_turns
-# from expert_work.runtime.checkpointer import make_checkpointer
-# from orchestrator.agent_factory import build_agent
-# 以及一个 secret store（复制 orchestrator/tests/test_agent_factory.py::_secret_store 或 import LocalDevSecretStore）
+**新 import(加到 test_scheduler.py 顶部,与现有 import 合并)**:`from langchain_core.messages import AIMessage, HumanMessage`、`from control_plane.transcript import read_turns`、`from expert_work.runtime.checkpointer import make_checkpointer`、`from orchestrator.agent_factory import build_agent`、`from expert_work.persistence.audit_log import InMemoryAuditLogStore`、`from expert_work.protocol import AuditAction, AuditQuery`;并复制 `test_agent_factory.py` 的 `_MINIMAL_SPEC`/`_secret_store()`/`_platform_resolver`(见注③)。
 
+```python
 def _reuse_thread_trigger(*, originating_thread_id: UUID) -> TriggerRecord:
     return TriggerRecord(
         id=uuid4(), tenant_id=_TENANT, agent_name="reporter", agent_version="1.0.0",
@@ -346,6 +341,7 @@ async def test_reconcile_delivers_result_to_originating_thread(
     """reuse_thread trigger + SUCCESS run → the run's final assistant reply is
     appended to the originating conversation + TRIGGER_COMPLETED audited."""
     orig_thread, scratch_thread, run_id = uuid4(), uuid4(), uuid4()
+    audit = InMemoryAuditLogStore()
     async with make_checkpointer("memory") as cp:
         built = await build_agent(
             AgentSpec.model_validate(_MANIFEST),
@@ -369,17 +365,12 @@ async def test_reconcile_delivers_result_to_originating_thread(
         )
         trig = _reuse_thread_trigger(originating_thread_id=orig_thread)
         await triggers.create(trig)
-        await trigger_runs.create(
-            TriggerRunRecord(
-                id=uuid4(), tenant_id=_TENANT, trigger_id=trig.id, run_id=run_id,
-                status=TriggerRunStatus.FIRED, attempt=1, triggered_at=_BASE,
-            )
+        fired = await trigger_runs.create(_fired_run(trigger_id=trig.id, run_id=run_id))
+        await run_store.create(_run_info(run_id, status=RunStatus.SUCCESS, thread_id=scratch_thread))
+        scheduler, runtime = await _build_scheduler(
+            trigger_store=triggers, trigger_run_store=trigger_runs, run_store=run_store,
+            audit_store=audit,  # new optional param — hold the handle for assertions
         )
-        # seed a SUCCESS run whose scratch thread == scratch_thread (see _run_info注)
-        await _seed_run(run_store, run_id, status=RunStatus.SUCCESS, thread_id=scratch_thread)
-        scheduler, runtime, audit_store = await _build_scheduler(
-            trigger_store=triggers, trigger_run_store=trigger_runs, run_store=run_store
-        )  # _build_scheduler extended to also return the InMemoryAuditLogStore
         runtime.durable_checkpointer = cp
 
         async def _get_agent(**_kwargs: Any) -> Any:
@@ -391,79 +382,62 @@ async def test_reconcile_delivers_result_to_originating_thread(
 
         turns = await read_turns(cp, orig_thread, include_hidden=False)
         assert turns[-1].role == "assistant" and turns[-1].content == "Today's AI news: X"
-        assert not await trigger_runs.list_fired(limit=10)  # left FIRED → now SUCCEEDED
-        actions = [e.action for e in await audit_store.list_recent(tenant_id=_TENANT, limit=10)]
-        assert AuditAction.TRIGGER_COMPLETED in actions
+        row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+        assert row is not None and row.status is TriggerRunStatus.SUCCEEDED
+        page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_COMPLETED))
+        assert page.entries and page.entries[0].details.get("delivery") == "delivered"
 
 
 @pytest.mark.asyncio
-async def test_reconcile_fresh_thread_does_not_deliver(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_reconcile_fresh_thread_does_not_deliver() -> None:
     """Default context_mode (fresh_thread_per_run) → no delivery; still SUCCEEDED
-    + TRIGGER_COMPLETED with delivery='skipped'."""
-    run_id, scratch_thread = uuid4(), uuid4()
-    async with make_checkpointer("memory") as cp:
-        built = await build_agent(
-            AgentSpec.model_validate(_MANIFEST),
-            secret_store=_secret_store(),
-            checkpointer=cp,
-            provider_key_resolver=_platform_resolver,  # required (Stream Y-2)
-        )
-        triggers, trigger_runs, run_store = (
-            InMemoryTriggerStore(), InMemoryTriggerRunStore(), InMemoryRunStore(),
-        )
-        trig = _trigger()  # default context_mode=fresh_thread_per_run, no originating_thread_id
-        await triggers.create(trig)
-        await trigger_runs.create(
-            TriggerRunRecord(
-                id=uuid4(), tenant_id=_TENANT, trigger_id=trig.id, run_id=run_id,
-                status=TriggerRunStatus.FIRED, attempt=1, triggered_at=_BASE,
-            )
-        )
-        await _seed_run(run_store, run_id, status=RunStatus.SUCCESS, thread_id=scratch_thread)
-        scheduler, runtime, audit_store = await _build_scheduler(
-            trigger_store=triggers, trigger_run_store=trigger_runs, run_store=run_store
-        )
-        runtime.durable_checkpointer = cp
-        captured: list[Any] = []
-        monkeypatch.setattr(
-            "control_plane.scheduler.inject_delivery",
-            lambda *a, **k: captured.append((a, k)),  # must not be called
-        )
-        await scheduler._reconcile_fired()
-        assert not captured  # fresh_thread → inject_delivery never called
-        actions = [e.action for e in await audit_store.list_recent(tenant_id=_TENANT, limit=10)]
-        assert AuditAction.TRIGGER_COMPLETED in actions
+    + TRIGGER_COMPLETED with delivery='skipped'. No graph/checkpointer needed —
+    _deliver short-circuits on the context_mode check before touching either."""
+    run_id = uuid4()
+    audit = InMemoryAuditLogStore()
+    triggers, trigger_runs, run_store = (
+        InMemoryTriggerStore(), InMemoryTriggerRunStore(), InMemoryRunStore(),
+    )
+    trig = _trigger()  # default context_mode=fresh_thread_per_run, no originating_thread_id
+    await triggers.create(trig)
+    await trigger_runs.create(_fired_run(trigger_id=trig.id, run_id=run_id))
+    await run_store.create(_run_info(run_id, status=RunStatus.SUCCESS))
+    scheduler, _runtime = await _build_scheduler(
+        trigger_store=triggers, trigger_run_store=trigger_runs, run_store=run_store,
+        audit_store=audit,
+    )
+    await scheduler._reconcile_fired()
+    page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_COMPLETED))
+    assert page.entries and page.entries[0].details.get("delivery") == "skipped"
 
 
 @pytest.mark.asyncio
 async def test_reconcile_interrupted_emits_trigger_failed() -> None:
     """A terminal (INTERRUPTED→FAILED) firing emits TRIGGER_FAILED."""
     run_id = uuid4()
+    audit = InMemoryAuditLogStore()
     triggers, trigger_runs, run_store = (
         InMemoryTriggerStore(), InMemoryTriggerRunStore(), InMemoryRunStore(),
     )
     trig = _trigger()
     await triggers.create(trig)
-    await trigger_runs.create(
-        TriggerRunRecord(
-            id=uuid4(), tenant_id=_TENANT, trigger_id=trig.id, run_id=run_id,
-            status=TriggerRunStatus.FIRED, attempt=1, triggered_at=_BASE,
-        )
-    )
-    await _seed_run(run_store, run_id, status=RunStatus.INTERRUPTED)
-    scheduler, _runtime, audit_store = await _build_scheduler(
-        trigger_store=triggers, trigger_run_store=trigger_runs, run_store=run_store
+    await trigger_runs.create(_fired_run(trigger_id=trig.id, run_id=run_id))
+    await run_store.create(_run_info(run_id, status=RunStatus.INTERRUPTED))
+    scheduler, _runtime = await _build_scheduler(
+        trigger_store=triggers, trigger_run_store=trigger_runs, run_store=run_store,
+        audit_store=audit,
     )
     await scheduler._reconcile_fired()
-    actions = [e.action for e in await audit_store.list_recent(tenant_id=_TENANT, limit=10)]
-    assert AuditAction.TRIGGER_FAILED in actions
+    page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_FAILED))
+    assert page.entries
 ```
 
-> **实现者注 — 三处 harness 小扩(读现有代码后照做)**:
-> ① **`_build_scheduler` 多返 audit store**:现内联 `build_default_audit_logger(InMemoryAuditLogStore())`。抽出该 `InMemoryAuditLogStore()` 为变量,返回 `(scheduler, runtime, audit_store)`;**更新现有所有 `_build_scheduler` 调用点**解包三元组(现是二元)。审计断言用 `InMemoryAuditLogStore` 的实际读方法(grep 其类找 `list_recent`/`list`/`query` 真名,上例 `list_recent(tenant_id=, limit=)` 是占位,以真实签名为准)。
-> ② **`_seed_run(run_store, run_id, *, status, thread_id=uuid4())` 助手**:照 `_run_info`(:105)建 RunInfo(**加 `thread_id` 参**,现 `_run_info` 恒 `uuid4()`)+ 用 `InMemoryRunStore` 的真实播种法插入(读 `test_reconcile_marks_succeeded`:251 怎么把 run 塞进 run_store —— 照它)。
-> ③ **build harness**:复制 `orchestrator/tests/test_agent_factory.py` 的 `_secret_store()`(`LocalDevSecretStore` + `_ANTHROPIC_KEY_NAME`/`_OPENAI_KEY_NAME`/`_KIMI_KEY_NAME` 常量)**和** `_platform_resolver`(`build_agent` 必需 `provider_key_resolver`,Stream Y-2,缺则 raise)到本文件。
-> `build_agent` 仅编译 graph 不调 LLM(播种/投递走 checkpoint state,无网络)。`_get_agent` monkeypatch 让 reconcile 的 `runtime.get_agent` 返回真 built(stub runtime 无此)。全程内存,`DOCKER_HOST=` 空。
+> **实现者注 — harness 小扩(全部向后兼容,零现有调用点 churn)**:
+> ① **`_build_scheduler` 加可选 `audit_store` 参**:签名加 `audit_store: InMemoryAuditLogStore | None = None`;函数内 `store = audit_store or InMemoryAuditLogStore()`,`audit_logger=build_default_audit_logger(store)`。**返回签名不变(仍 `(scheduler, runtime)`)** → 现有 16 个调用点一个都不用改;新测传入自己的 `audit` 以持句柄断言。audit 读用 `audit.query(AuditQuery(tenant_id=_TENANT, action=...))` → `AuditPage.entries`(**已核** memory.py:46 `query`,AuditQuery 字段 tenant_id/action,AuditPage.entries)。
+> ② **`_run_info` 加 `thread_id` 参**:现签名 `_run_info(run_id, *, status, error=None)`(:105,恒 `thread_id=uuid4()`)→ 加 `thread_id: UUID | None = None`,`thread_id=thread_id or uuid4()`。现有调用点省略即默认,零 churn。用现成 `_fired_run(*, trigger_id, run_id)`(:121)建 FIRED trigger_run、`run_store.create(_run_info(...))` 播种 run(**照** `test_reconcile_marks_succeeded`:251 路数)。
+> ③ **build harness**:复制 `test_agent_factory.py` 的 `_secret_store()`(`LocalDevSecretStore` + 三个键名常量)**和** `_platform_resolver`(`build_agent` 必需 `provider_key_resolver`,缺则 raise)到本文件。`_MANIFEST`/`AgentSpec.model_validate(_MANIFEST)` 已在本文件(:35)。
+> ④ **seeded agent 须 ACTIVE**:`_build_scheduler(seed_agent=True)` 往 `InMemoryAgentSpecStore` 建 "reporter/1.0.0";`_deliver` 查 `spec_record.status is AgentSpecStatus.ACTIVE`。确认 `InMemoryAgentSpecStore.create` 默认建 ACTIVE(否则 delivery 返 "agent_unavailable" 而非 "delivered",第一个测会挂 —— 那就在测里把它激活或确认默认态)。
+> `build_agent` 仅编译 graph 不调 LLM。`_get_agent` monkeypatch 让 reconcile 的 `runtime.get_agent` 返真 built(stub runtime 无此)。全程内存,`DOCKER_HOST=` 空。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -620,7 +594,7 @@ from expert_work.protocol.agent_spec import AgentSpecStatus
 - [ ] **Step 6: 跑测试确认通过**
 
 Run: `cd /Users/mac/src/github/jone_qian/expert-work && DOCKER_HOST= uv run --project services/control-plane pytest services/control-plane/tests/test_scheduler.py -q`
-Expected: PASS(新三测 + 现有 reconcile/DLQ 测不回归 —— 注意 `_build_scheduler` 改三元组返回后,**现有调用点全部解包更新**才不挂)。
+Expected: PASS(新三测 + 现有 reconcile/DLQ 测不回归 —— `_build_scheduler` 加可选 `audit_store` 参、返回签名不变,现有 16 调用点无需改)。
 
 - [ ] **Step 7: lint + type + 回归**
 
