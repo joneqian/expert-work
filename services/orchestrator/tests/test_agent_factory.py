@@ -10,7 +10,7 @@ import pytest
 from langgraph.graph.state import CompiledStateGraph
 
 from expert_work.persistence import InMemoryKnowledgeStore, InMemoryMemoryStore
-from expert_work.protocol import AgentSpec, ModelSpec, StructuredOutputSpec
+from expert_work.protocol import AgentSpec, BuiltinToolSpec, ModelSpec, StructuredOutputSpec
 from expert_work.runtime.checkpointer import make_checkpointer
 from expert_work.runtime.middleware import RecordingLangfuseClient
 from expert_work.runtime.secret_store import LocalDevSecretStore
@@ -619,6 +619,60 @@ async def test_build_agent_plan_execute_still_registers_update_plan_tool(
     async with make_checkpointer("memory") as cp:
         await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "update_plan" in registered
+
+
+# ---------------------------------------------------------------------------
+# build_agent — manage_task builtin mount (Spec 1 PR2 Task 4)
+# ---------------------------------------------------------------------------
+
+
+def _spec_with_manage_task() -> AgentSpec:
+    """A minimal spec whose manifest declares the manage_task builtin."""
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["tools"] = [BuiltinToolSpec(name="manage_task")]
+    return AgentSpec.model_validate(doc)
+
+
+class _FakeTriggerStore:
+    async def create(self, record: Any) -> Any:  # pragma: no cover - unused in build test
+        return record
+
+
+@pytest.mark.asyncio
+async def test_build_agent_registers_manage_task_when_declared_and_wired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = _spy_on_register(monkeypatch)
+    async with make_checkpointer("memory") as cp:
+        await _build(
+            _spec_with_manage_task(),
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            trigger_store=_FakeTriggerStore(),
+        )
+    assert "manage_task" in registered
+
+
+@pytest.mark.asyncio
+async def test_build_agent_manage_task_declared_without_store_raises() -> None:
+    async with make_checkpointer("memory") as cp:
+        with pytest.raises(AgentFactoryError, match="manage_task"):
+            await _build(
+                _spec_with_manage_task(),
+                secret_store=_secret_store(),
+                checkpointer=cp,
+                trigger_store=None,
+            )
+
+
+@pytest.mark.asyncio
+async def test_build_agent_no_manage_task_when_not_declared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = _spy_on_register(monkeypatch)
+    async with make_checkpointer("memory") as cp:
+        await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert "manage_task" not in registered
 
 
 @pytest.mark.asyncio

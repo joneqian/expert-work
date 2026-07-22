@@ -40,6 +40,7 @@ from expert_work.common.url_validation import validate_remote_url
 from expert_work.persistence import ArtifactStore, KnowledgeStore
 from expert_work.persistence.skill import SkillStore
 from expert_work.persistence.token_usage_store import TokenUsageStore
+from expert_work.persistence.trigger import TriggerStore
 from expert_work.protocol import (
     AgentSpec,
     ModelSpec,
@@ -591,6 +592,9 @@ def make_agent_builder(
     # Phase 3 — platform tool-output-budget master switch (DB-wins over env).
     platform_tool_budget_config_service: PlatformToolBudgetConfigService | None = None,
     skill_store: SkillStore | None = None,
+    # Spec 1 PR2 — backs the manage_task builtin (conversational scheduled
+    # tasks). ``None`` → a manifest that declares manage_task fails the build.
+    trigger_store: TriggerStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     # skill-asset-store — object store for externalized skill supporting files.
     skill_asset_store: SkillAssetStore | None = None,
@@ -767,6 +771,8 @@ def make_agent_builder(
             skill_activity_recorder=skill_activity_recorder,
             # Stream SE (SE-3b) — raw store + audit for in-session authoring.
             skill_store=skill_store,
+            # Spec 1 PR2 — backs the manage_task builtin.
+            trigger_store=trigger_store,
             audit_logger=audit_logger,
             # Stream PI-2b-3 — gated model-backed output judge.
             output_judge=output_judge,
