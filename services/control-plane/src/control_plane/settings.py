@@ -417,6 +417,11 @@ class Settings(BaseSettings):
     #: Max triggers fired per scheduler sweep — caps a single cycle's work.
     trigger_scheduler_batch_size: int = Field(default=100, gt=0)
 
+    #: Spec 1 PR4 Task 3 — the debug console's "fire now" synchronous endpoint
+    #: polls the fired run to a terminal status, capped at this many seconds;
+    #: past it the endpoint returns ``delivery="pending"``.
+    trigger_fire_now_timeout_s: int = Field(default=60, gt=0)
+
     # --- Stream 9.4 (HA failover) — orphaned-run sweep ----------------------
     #: Master switch for the orphaned-run recovery sweep.
     enable_orphan_sweep: bool = Field(default=True)
