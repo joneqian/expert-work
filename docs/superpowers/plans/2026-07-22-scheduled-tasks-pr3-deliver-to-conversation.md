@@ -130,15 +130,21 @@ from control_plane.trigger_delivery import inject_delivery
 from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator.agent_factory import build_agent
 
-# --- Minimal graph build (replicate orchestrator/tests/test_agent_factory.py
-# --- _spec() + _secret_store(): a single react agent, no tools needed) -------
-# Implementer: copy those two helpers' bodies here (they are boilerplate — a
-# minimal AgentSpec and a LocalDevSecretStore). Keep them local to this test.
+# --- Minimal graph build. Replicate from orchestrator/tests/test_agent_factory.py:
+# ---   _MINIMAL_SPEC, _spec(), _secret_store() (LocalDevSecretStore + the
+# ---   _ANTHROPIC_KEY_NAME/_OPENAI_KEY_NAME/_KIMI_KEY_NAME constants), and
+# ---   _platform_resolver (build_agent REQUIRES provider_key_resolver — Stream
+# ---   Y-2 — or it raises). Keep them local to this test file.
 
 
 async def _built_graph(cp):
-    spec = _spec()  # replicate from test_agent_factory
-    built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+    spec = _spec()  # a single react agent, no tools needed
+    built = await build_agent(
+        spec,
+        secret_store=_secret_store(),
+        checkpointer=cp,
+        provider_key_resolver=_platform_resolver,  # required — build_agent raises without it
+    )
     return built.graph
 
 
@@ -342,7 +348,10 @@ async def test_reconcile_delivers_result_to_originating_thread(
     orig_thread, scratch_thread, run_id = uuid4(), uuid4(), uuid4()
     async with make_checkpointer("memory") as cp:
         built = await build_agent(
-            AgentSpec.model_validate(_MANIFEST), secret_store=_secret_store(), checkpointer=cp
+            AgentSpec.model_validate(_MANIFEST),
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            provider_key_resolver=_platform_resolver,  # required (Stream Y-2)
         )
         # seed originating conversation (has history) + the run's scratch thread (its result)
         await built.graph.aupdate_state(
@@ -394,7 +403,10 @@ async def test_reconcile_fresh_thread_does_not_deliver(monkeypatch: pytest.Monke
     run_id, scratch_thread = uuid4(), uuid4()
     async with make_checkpointer("memory") as cp:
         built = await build_agent(
-            AgentSpec.model_validate(_MANIFEST), secret_store=_secret_store(), checkpointer=cp
+            AgentSpec.model_validate(_MANIFEST),
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            provider_key_resolver=_platform_resolver,  # required (Stream Y-2)
         )
         triggers, trigger_runs, run_store = (
             InMemoryTriggerStore(), InMemoryTriggerRunStore(), InMemoryRunStore(),
@@ -450,7 +462,7 @@ async def test_reconcile_interrupted_emits_trigger_failed() -> None:
 > **实现者注 — 三处 harness 小扩(读现有代码后照做)**:
 > ① **`_build_scheduler` 多返 audit store**:现内联 `build_default_audit_logger(InMemoryAuditLogStore())`。抽出该 `InMemoryAuditLogStore()` 为变量,返回 `(scheduler, runtime, audit_store)`;**更新现有所有 `_build_scheduler` 调用点**解包三元组(现是二元)。审计断言用 `InMemoryAuditLogStore` 的实际读方法(grep 其类找 `list_recent`/`list`/`query` 真名,上例 `list_recent(tenant_id=, limit=)` 是占位,以真实签名为准)。
 > ② **`_seed_run(run_store, run_id, *, status, thread_id=uuid4())` 助手**:照 `_run_info`(:105)建 RunInfo(**加 `thread_id` 参**,现 `_run_info` 恒 `uuid4()`)+ 用 `InMemoryRunStore` 的真实播种法插入(读 `test_reconcile_marks_succeeded`:251 怎么把 run 塞进 run_store —— 照它)。
-> ③ **secret store**:复制 `orchestrator/tests/test_agent_factory.py::_secret_store()`(`LocalDevSecretStore`)到本文件或直接 import。
+> ③ **build harness**:复制 `orchestrator/tests/test_agent_factory.py` 的 `_secret_store()`(`LocalDevSecretStore` + `_ANTHROPIC_KEY_NAME`/`_OPENAI_KEY_NAME`/`_KIMI_KEY_NAME` 常量)**和** `_platform_resolver`(`build_agent` 必需 `provider_key_resolver`,Stream Y-2,缺则 raise)到本文件。
 > `build_agent` 仅编译 graph 不调 LLM(播种/投递走 checkpoint state,无网络)。`_get_agent` monkeypatch 让 reconcile 的 `runtime.get_agent` 返回真 built(stub runtime 无此)。全程内存,`DOCKER_HOST=` 空。
 
 - [ ] **Step 2: 跑测试确认失败**
