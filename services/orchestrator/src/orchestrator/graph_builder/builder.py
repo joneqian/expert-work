@@ -2653,6 +2653,8 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
     tenant_id = _parse_uuid(configurable.get("tenant_id"))
     run_id = _parse_uuid(configurable.get("run_id"))
     user_id = _parse_uuid(configurable.get("user_id"))
+    thread_id = _parse_uuid(configurable.get("thread_id"))
+    trigger_origin = bool(configurable.get("trigger_origin", False))
     # Mini-ADR J-40 — global deadline lands in config["configurable"]
     # ["deadline_at"] (a ``time.monotonic`` timestamp). ``None`` when the
     # manifest carries no ``policies.run_deadline_s``.
@@ -2677,6 +2679,8 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
         tenant_id=tenant_id,
         run_id=run_id,
         user_id=user_id,
+        thread_id=thread_id,
+        trigger_origin=trigger_origin,
         oauth_user_id=oauth_user_id,
         cancellation_token=cancellation_token(config),
         plan=plan,

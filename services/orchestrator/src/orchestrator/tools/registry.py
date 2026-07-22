@@ -168,6 +168,13 @@ class ToolContext:
     tenant_id: UUID | None = None
     run_id: UUID | None = None
     user_id: UUID | None = None
+    #: originating conversation thread — set on the normal + trigger run paths;
+    #: manage_task stamps it as a task's delivery target (Spec 1).
+    thread_id: UUID | None = None
+    #: True when this run was started by the scheduler (fire_trigger). The
+    #: manage_task tool is filtered from the LLM bind list and refuses to run
+    #: under it (self-scheduling guardrail, Spec 1 D-13).
+    trigger_origin: bool = False
     #: Stream MCP-OAUTH (OA-3b-后续) — the caller's OAuth subject id (the JWT
     #: ``sub`` / ``mcp_oauth_connection.user_id``), distinct from ``user_id``
     #: (the ``tenant_user.id`` UUID). Carried so a ``SubAgentTool`` /
