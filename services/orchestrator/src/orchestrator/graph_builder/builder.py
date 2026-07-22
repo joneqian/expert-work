@@ -174,6 +174,7 @@ from orchestrator.tools.registry import (
     ToolNotFoundError,
     ToolRegistry,
     ToolResult,
+    ToolSpec,
 )
 from orchestrator.tools.scheduling import MAX_TOOL_WORKERS, plan_stages
 
@@ -596,6 +597,14 @@ def build_react_graph(
             ]
         else:
             tools = [*tool_registry.specs(), *tool_registry.deferred_specs(promoted)]
+        # Spec 1 D-13 — self-scheduling guardrail: withhold manage_task from the
+        # LLM bind on a scheduler-fired run, regardless of which branch above
+        # built ``tools``. ManageTaskTool.call also blocks a direct call under
+        # this flag (defense-in-depth) — this is the "LLM never sees it" half.
+        tools = _filter_scheduling_tools(
+            tools,
+            trigger_origin=bool((config.get("configurable") or {}).get("trigger_origin", False)),
+        )
         messages = list(state["messages"])
         # Stream CM-12 — mechanical tool-result prune: the cheapest, least-lossy
         # gate, run FIRST. When over threshold it collapses OLD tool results
@@ -2633,6 +2642,15 @@ async def _project_workspace_state(
         _cm_projection_total.labels(outcome="projected").inc()
         await _emit_state_projected_audit(audit_logger, ctx, written=result.written)
     return result
+
+
+def _filter_scheduling_tools(tools: list[ToolSpec], *, trigger_origin: bool) -> list[ToolSpec]:
+    """Withhold manage_task from the LLM under a scheduler-triggered run so the
+    model can't self-schedule (Spec 1 D-13). Applied to the final bind list,
+    independent of which branch built it."""
+    if not trigger_origin:
+        return tools
+    return [s for s in tools if s.name != "manage_task"]
 
 
 def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> ToolContext:

@@ -268,6 +268,12 @@ async def fire_trigger(
         configurable["user_id"] = str(trigger.user_id)
     if built.run_deadline_s > 0:
         configurable["deadline_at"] = time.monotonic() + float(built.run_deadline_s)
+    # Spec 1 D-13 — self-scheduling guardrail: a scheduler-fired run must not
+    # be able to schedule more tasks. This flag flows into ToolContext.trigger_
+    # origin (orchestrator._build_tool_context) and drives both the agent
+    # node's bind-time filter (manage_task withheld from the LLM) and the
+    # tool's own call-time block (defense-in-depth).
+    configurable["trigger_origin"] = True
     config: RunnableConfig = {"configurable": configurable}
 
     worker = asyncio.create_task(
