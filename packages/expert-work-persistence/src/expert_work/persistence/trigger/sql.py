@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID
 
 from sqlalchemy import delete as sa_delete
@@ -36,6 +36,10 @@ def _row_to_dto(row: AgentTriggerRow) -> TriggerRecord:
         enabled=row.enabled,
         source=cast(TriggerSource, row.source),
         webhook_secret_hash=row.webhook_secret_hash,
+        originating_thread_id=row.originating_thread_id,
+        context_mode=cast(
+            Literal["reuse_thread", "fresh_thread_per_run"], row.context_mode
+        ),
         last_fired_at=row.last_fired_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -63,6 +67,8 @@ class SqlTriggerStore(TriggerStore):
                     enabled=record.enabled,
                     source=record.source,
                     webhook_secret_hash=record.webhook_secret_hash,
+                    originating_thread_id=record.originating_thread_id,
+                    context_mode=record.context_mode,
                     last_fired_at=record.last_fired_at,
                     created_at=record.created_at,
                     updated_at=record.updated_at,
@@ -172,6 +178,8 @@ class SqlTriggerStore(TriggerStore):
                     enabled=record.enabled,
                     source=record.source,
                     webhook_secret_hash=record.webhook_secret_hash,
+                    originating_thread_id=record.originating_thread_id,
+                    context_mode=record.context_mode,
                     last_fired_at=record.last_fired_at,
                     updated_at=record.updated_at,
                 )

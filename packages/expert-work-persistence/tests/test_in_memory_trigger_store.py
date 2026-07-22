@@ -407,3 +407,17 @@ async def test_claim_retry_false_when_not_retrying_or_cross_tenant() -> None:
     # Not in retrying → no claim; right row wrong tenant → no claim.
     assert await store.claim_retry(trigger_run_id=rid, tenant_id=tenant) is False
     assert await store.claim_retry(trigger_run_id=rid, tenant_id=uuid4()) is False
+
+
+@pytest.mark.asyncio
+async def test_memory_roundtrips_delivery_routing() -> None:
+    store = InMemoryTriggerStore()
+    tid, tenant, thread = uuid4(), uuid4(), uuid4()
+    rec = _record(trigger_id=tid, tenant_id=tenant).model_copy(
+        update={"originating_thread_id": thread, "context_mode": "reuse_thread"}
+    )
+    await store.create(rec)
+    got = await store.get(trigger_id=tid, tenant_id=tenant)
+    assert got is not None
+    assert got.originating_thread_id == thread
+    assert got.context_mode == "reuse_thread"

@@ -115,6 +115,8 @@ class TriggerRecord(BaseModel):
     enabled: bool = True
     source: TriggerSource = "api"
     webhook_secret_hash: str | None = None
+    originating_thread_id: UUID | None = None
+    context_mode: Literal["reuse_thread", "fresh_thread_per_run"] = "fresh_thread_per_run"
     last_fired_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

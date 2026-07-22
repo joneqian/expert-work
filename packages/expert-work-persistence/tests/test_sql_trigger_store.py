@@ -374,3 +374,26 @@ async def test_claim_retry_concurrent_wins_exactly_one(
     assert row is not None
     assert row.status is TriggerRunStatus.FIRED
     assert row.next_retry_at is None
+
+
+@pytest.mark.asyncio
+async def test_create_roundtrips_delivery_routing(trigger_store: SqlTriggerStore) -> None:
+    tid, tenant, thread = uuid4(), uuid4(), uuid4()
+    rec = _record(trigger_id=tid, tenant_id=tenant).model_copy(
+        update={"originating_thread_id": thread, "context_mode": "reuse_thread"}
+    )
+    await trigger_store.create(rec)
+    got = await trigger_store.get(trigger_id=tid, tenant_id=tenant)
+    assert got is not None
+    assert got.originating_thread_id == thread
+    assert got.context_mode == "reuse_thread"
+
+
+@pytest.mark.asyncio
+async def test_create_defaults_context_mode(trigger_store: SqlTriggerStore) -> None:
+    tid, tenant = uuid4(), uuid4()
+    await trigger_store.create(_record(trigger_id=tid, tenant_id=tenant))
+    got = await trigger_store.get(trigger_id=tid, tenant_id=tenant)
+    assert got is not None
+    assert got.originating_thread_id is None
+    assert got.context_mode == "fresh_thread_per_run"
