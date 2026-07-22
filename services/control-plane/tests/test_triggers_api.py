@@ -654,3 +654,45 @@ async def test_list_triggers_service_principal_sees_empty(triggers_client: Async
         resp = await sa.get("/v1/triggers")
     assert resp.status_code == 200
     assert resp.json() == {"items": [], "total": 0, "cross_tenant": False}
+
+
+# --- 终审 Important#1 — null-owner trigger admin guard ---------------------
+#
+# ``resolve_target_user_id`` treats ``requested=None`` as "no target
+# specified — default to the caller". GET/PATCH/DELETE passed
+# ``requested=record.user_id`` straight through, so a null-owner row
+# (manifest-declared, or — as built below — created by a SERVICE
+# principal, which owns nothing per ``resolve_caller_user_id``) resolved
+# to "caller" for ANY non-admin caller, with no 403. A non-admin who
+# merely knew a null-owner trigger's id could read/modify/delete it.
+# Closed: null-owner rows now require ``is_admin`` explicitly.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_null_owner_trigger_delete_requires_admin(triggers_client: AsyncClient) -> None:
+    """无主触发器(user_id IS NULL)DELETE —— 非 admin 403,admin 200。
+
+    用 SERVICE principal 建触发器:``resolve_caller_user_id`` 对
+    ``subject_type != "user"`` 返回 None,所以建出来的行 ``user_id IS
+    NULL`` —— 与 manifest 建的无主触发器同构。attacker 是另一个不同
+    subject、非 admin 的真实 user principal(不是同一 caller 打自己),
+    若堵所有权洞的 admin 闸被撤掉,``resolve_target_user_id`` 会把
+    ``requested=None`` 解成 attacker 自己的 caller_user_id 而不报 403 ——
+    此断言会随之失败,证明测试确实在验证这道闸。
+    """
+    sa = _client_as(triggers_client, subject="svc-1", roles=(), sub_type="service_account")
+    async with sa:
+        created = await _create_cron(sa, name="unowned")
+    trigger_id = created["id"]
+
+    attacker = _client_as(triggers_client, subject="user-attacker", roles=("viewer",))
+    async with attacker:
+        resp = await attacker.delete(f"/v1/triggers/{trigger_id}")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+    admin = _client_as(triggers_client, subject="admin-x", roles=("admin",))
+    async with admin:
+        resp = await admin.delete(f"/v1/triggers/{trigger_id}")
+    assert resp.status_code == 200

@@ -408,7 +408,20 @@ def build_triggers_router() -> APIRouter:
         if record is None:
             raise HTTPException(status_code=404, detail="trigger not found")
         # H.8-F1 所有权闸:有主触发器仅 owner / admin 可读;resolve 对越权抛 403。
-        await resolve_target_user_id(request, users, requested=record.user_id)
+        # 终审 Important#1:record.user_id is None(manifest/service 建的无主触发器)时
+        # resolve_target_user_id 会把 requested=None 直接判成"caller 自己"放行——非
+        # admin 只要知道 id 就能读无主触发器。无主触发器只许 admin 操作。
+        if record.user_id is None:
+            if not is_admin(request.state.principal):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "USER_SCOPE_FORBIDDEN",
+                        "message": "only tenant admins may act on unowned triggers",
+                    },
+                )
+        else:
+            await resolve_target_user_id(request, users, requested=record.user_id)
         return JSONResponse(content=_trigger_dict(record))
 
     @router.patch("/{trigger_id}", response_model=None)
@@ -425,7 +438,17 @@ def build_triggers_router() -> APIRouter:
         record = await triggers.get(trigger_id=trigger_id, tenant_id=tenant_id)
         if record is None:
             raise HTTPException(status_code=404, detail="trigger not found")
-        await resolve_target_user_id(request, users, requested=record.user_id)
+        if record.user_id is None:
+            if not is_admin(request.state.principal):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "USER_SCOPE_FORBIDDEN",
+                        "message": "only tenant admins may act on unowned triggers",
+                    },
+                )
+        else:
+            await resolve_target_user_id(request, users, requested=record.user_id)
 
         new_config = body.config if body.config is not None else record.config
         if body.config is not None:
@@ -470,7 +493,17 @@ def build_triggers_router() -> APIRouter:
         record = await triggers.get(trigger_id=trigger_id, tenant_id=tenant_id)
         if record is None:
             raise HTTPException(status_code=404, detail="trigger not found")
-        await resolve_target_user_id(request, users, requested=record.user_id)
+        if record.user_id is None:
+            if not is_admin(request.state.principal):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "USER_SCOPE_FORBIDDEN",
+                        "message": "only tenant admins may act on unowned triggers",
+                    },
+                )
+        else:
+            await resolve_target_user_id(request, users, requested=record.user_id)
         deleted = await triggers.delete(trigger_id=trigger_id, tenant_id=tenant_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="trigger not found")
