@@ -974,6 +974,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint" },
     { name = "mcp" },
+    { name = "python-dateutil" },
     { name = "rank-bm25" },
 ]
 
@@ -990,6 +991,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.0.10" },
     { name = "langgraph-checkpoint", specifier = ">=4.1.1" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
+    { name = "python-dateutil", specifier = ">=2.9,<3" },
     { name = "rank-bm25", specifier = ">=0.2,<1" },
 ]
 
