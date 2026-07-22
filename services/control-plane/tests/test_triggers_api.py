@@ -85,6 +85,30 @@ def _bare_client(authed: AsyncClient) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://control-plane.test")
 
 
+def _client_as(
+    authed: AsyncClient,
+    *,
+    subject: str,
+    roles: tuple[str, ...] = ("viewer",),
+    sub_type: str = "user",
+) -> AsyncClient:
+    """A client over the same app, authenticated as a distinct principal.
+
+    ``triggers_client``'s own JWT (subject ``dev-user``) defaults
+    ``roles=("admin",)`` — so a caller built from this helper must pass
+    ``roles`` explicitly whenever admin-vs-non-admin matters.
+    """
+    app = authed._transport.app  # type: ignore[attr-defined,union-attr]
+    token = make_test_jwt(
+        tenant_id=_DEFAULT_TENANT, subject=subject, roles=roles, sub_type=sub_type
+    )
+    return AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://control-plane.test",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
 async def _create_cron(client: AsyncClient, *, name: str = "nightly") -> dict[str, object]:
     resp = await client.post(
         "/v1/triggers",
@@ -507,3 +531,126 @@ async def test_list_triggers_agent_version_filter(triggers_client: AsyncClient) 
 async def test_list_triggers_bare_agent_version_is_422(triggers_client: AsyncClient) -> None:
     resp = await triggers_client.get("/v1/triggers", params={"agent_version": "1.0.0"})
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Task 6 (H.8-F1) — trigger ownership. GET/PATCH/DELETE were tenant-scoped
+# only (no owner check): any tenant member could read/modify/delete any
+# other member's trigger; LIST returned every tenant trigger regardless of
+# owner. Closed via the existing ``resolve_target_user_id`` gate (self /
+# tenant-admin-targeting-other / else 403).
+#
+# ``triggers_client``'s default JWT (subject "dev-user") has roles=("admin",)
+# — it is both an admin AND the owner of anything it creates, so the plain
+# CRUD tests above never exercised the "non-owner" or "non-admin owner"
+# branches. These tests build distinct-subject principals via ``_client_as``.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_non_owner_cannot_delete_others_trigger(triggers_client: AsyncClient) -> None:
+    """user A(triggers_client)建的触发器,user B(不同 subject,非 admin)删不了 —— 403。"""
+    created = await _create_cron(triggers_client, name="a-owned")
+    trigger_id = created["id"]
+
+    other = _client_as(triggers_client, subject="user-b", roles=("viewer",))
+    async with other:
+        resp = await other.delete(f"/v1/triggers/{trigger_id}")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_non_owner_cannot_get_others_trigger(triggers_client: AsyncClient) -> None:
+    """user A 建的触发器,user B(不同 subject,非 admin)读不了 —— 403。"""
+    created = await _create_cron(triggers_client, name="a-owned-get")
+    trigger_id = created["id"]
+
+    other = _client_as(triggers_client, subject="user-b", roles=("viewer",))
+    async with other:
+        resp = await other.get(f"/v1/triggers/{trigger_id}")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_non_owner_cannot_patch_others_trigger(triggers_client: AsyncClient) -> None:
+    """user A 建的触发器,user B(不同 subject,非 admin)改不了 —— 403。"""
+    created = await _create_cron(triggers_client, name="a-owned-patch")
+    trigger_id = created["id"]
+
+    other = _client_as(triggers_client, subject="user-b", roles=("viewer",))
+    async with other:
+        resp = await other.patch(f"/v1/triggers/{trigger_id}", json={"enabled": False})
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_admin_can_delete_others_trigger(triggers_client: AsyncClient) -> None:
+    """非 admin user(user-owner)建的触发器,admin(不同 subject)可删 —— 200。
+
+    验证 ``resolve_target_user_id`` 的 admin-targeting-other 分支——owner
+    与 admin 是两个不同的 subject,而不是同一 caller 删自己建的(那个分支
+    已由 self 路径覆盖,见 ``test_owner_non_admin_can_get_patch_delete_own_trigger``)。
+    """
+    owner = _client_as(triggers_client, subject="user-owner", roles=("viewer",))
+    async with owner:
+        created = await _create_cron(owner, name="admin-target")
+    trigger_id = created["id"]
+
+    admin = _client_as(triggers_client, subject="admin-other", roles=("admin",))
+    async with admin:
+        resp = await admin.delete(f"/v1/triggers/{trigger_id}")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_owner_non_admin_can_get_patch_delete_own_trigger(
+    triggers_client: AsyncClient,
+) -> None:
+    """非 admin 的 owner 仍可读/改/删自己建的触发器 —— ownership 闸的 self 分支不看角色。"""
+    owner = _client_as(triggers_client, subject="user-c", roles=("viewer",))
+    async with owner:
+        created = await _create_cron(owner, name="c-owned")
+        trigger_id = created["id"]
+
+        got = await owner.get(f"/v1/triggers/{trigger_id}")
+        assert got.status_code == 200
+
+        patched = await owner.patch(f"/v1/triggers/{trigger_id}", json={"enabled": False})
+        assert patched.status_code == 200
+
+        deleted = await owner.delete(f"/v1/triggers/{trigger_id}")
+        assert deleted.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_list_triggers_non_admin_sees_only_own(triggers_client: AsyncClient) -> None:
+    """非 admin LIST 只见自己建的,看不到租户内其他 user 建的(同一 agent 下)。"""
+    await _create_cron(triggers_client, name="admin-owned")  # a different owner
+
+    user_b = _client_as(triggers_client, subject="user-b", roles=("viewer",))
+    async with user_b:
+        await _create_cron(user_b, name="b-owned")
+        listed = await user_b.get("/v1/triggers", params={"agent_name": "reporter"})
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["total"] == 1
+    assert [t["name"] for t in body["items"]] == ["b-owned"]
+    assert body["cross_tenant"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_triggers_service_principal_sees_empty(triggers_client: AsyncClient) -> None:
+    """服务(非 user)principal 非 admin LIST —— 空列表而非报错或越权 —— named risk 确认。
+
+    先建一个别人的触发器作 distractor:旧代码(无 scoping)会把它一并列出;
+    新代码 caller_user_id 为 None 时提前判空,必须看不到它。
+    """
+    await _create_cron(triggers_client, name="someone-elses")
+    sa = _client_as(triggers_client, subject="svc-1", roles=(), sub_type="service_account")
+    async with sa:
+        resp = await sa.get("/v1/triggers")
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "total": 0, "cross_tenant": False}

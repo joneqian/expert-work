@@ -28,8 +28,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from control_plane.agent_disable_status import AgentDisableService
-from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
+from control_plane.api._user_scope import (
+    get_user_repo,
+    resolve_caller_user_id,
+    resolve_target_user_id,
+)
 from control_plane.audit import emit
+from control_plane.auth.rbac import is_admin
 from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
 from control_plane.tenant_scope import (
@@ -335,6 +340,7 @@ def build_triggers_router() -> APIRouter:
     async def list_triggers(
         request: Request,
         triggers: Annotated[TriggerStore, Depends(_get_trigger_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         agent_name: Annotated[str | None, Query(min_length=1)] = None,
         agent_version: Annotated[str | None, Query(min_length=1)] = None,
@@ -345,6 +351,23 @@ def build_triggers_router() -> APIRouter:
             raise HTTPException(
                 status_code=422,
                 detail="agent_version requires agent_name",
+            )
+        # H.8-F1 (Task 6):非 admin 只见自己的触发器;admin 走原租户/跨租户列表。
+        if not is_admin(request.state.principal):
+            caller_user_id = await resolve_caller_user_id(request, users)
+            if caller_user_id is None:
+                return JSONResponse(content={"items": [], "total": 0, "cross_tenant": False})
+            items = await triggers.list_by_user(
+                tenant_id=request.state.tenant_id,
+                user_id=caller_user_id,
+                agent_name=agent_name,
+            )
+            return JSONResponse(
+                content={
+                    "items": [_trigger_dict(t) for t in items],
+                    "total": len(items),
+                    "cross_tenant": False,
+                }
             )
         scope = await ensure_tenant_scope(
             request.state.principal,
@@ -378,11 +401,14 @@ def build_triggers_router() -> APIRouter:
         trigger_id: UUID,
         request: Request,
         triggers: Annotated[TriggerStore, Depends(_get_trigger_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
     ) -> JSONResponse:
         tenant_id: UUID = request.state.tenant_id
         record = await triggers.get(trigger_id=trigger_id, tenant_id=tenant_id)
         if record is None:
             raise HTTPException(status_code=404, detail="trigger not found")
+        # H.8-F1 所有权闸:有主触发器仅 owner / admin 可读;resolve 对越权抛 403。
+        await resolve_target_user_id(request, users, requested=record.user_id)
         return JSONResponse(content=_trigger_dict(record))
 
     @router.patch("/{trigger_id}", response_model=None)
@@ -391,6 +417,7 @@ def build_triggers_router() -> APIRouter:
         body: _PatchTriggerBody,
         request: Request,
         triggers: Annotated[TriggerStore, Depends(_get_trigger_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> JSONResponse:
         tenant_id: UUID = request.state.tenant_id
@@ -398,6 +425,7 @@ def build_triggers_router() -> APIRouter:
         record = await triggers.get(trigger_id=trigger_id, tenant_id=tenant_id)
         if record is None:
             raise HTTPException(status_code=404, detail="trigger not found")
+        await resolve_target_user_id(request, users, requested=record.user_id)
 
         new_config = body.config if body.config is not None else record.config
         if body.config is not None:
@@ -434,10 +462,15 @@ def build_triggers_router() -> APIRouter:
         trigger_id: UUID,
         request: Request,
         triggers: Annotated[TriggerStore, Depends(_get_trigger_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> JSONResponse:
         tenant_id: UUID = request.state.tenant_id
         actor_id: str = request.state.actor_id
+        record = await triggers.get(trigger_id=trigger_id, tenant_id=tenant_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="trigger not found")
+        await resolve_target_user_id(request, users, requested=record.user_id)
         deleted = await triggers.delete(trigger_id=trigger_id, tenant_id=tenant_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="trigger not found")
