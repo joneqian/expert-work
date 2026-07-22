@@ -261,6 +261,41 @@ async def test_fire_enabled_agent_still_fires_with_services_wired() -> None:
     assert "trigger:fire" in await _audit_actions(ctx)
 
 
+# ---------------------------------------------------------------------------
+# Self-scheduling guardrail (Spec 1 D-13) — fire_trigger flags the run so the
+# agent node withholds ``manage_task`` from the LLM bind + the tool blocks any
+# direct call, stopping a scheduler-fired run from self-scheduling more tasks.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fire_puts_trigger_origin_in_run_agent_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``fire_trigger`` must stamp ``configurable["trigger_origin"] = True`` on
+    the ``RunnableConfig`` it hands to ``run_agent`` — that's what flows into
+    ``ToolContext.trigger_origin`` (via ``_build_tool_context``) and drives
+    both the bind-time filter and the call-time block."""
+    captured: dict[str, Any] = {}
+
+    async def _fake_run_agent(**kwargs: Any) -> None:
+        captured["config"] = kwargs["config"]
+
+    monkeypatch.setattr("control_plane.trigger_firing.run_agent", _fake_run_agent)
+
+    ctx = await _build_ctx()
+    run_id = await fire_trigger(
+        _trigger(seed_input="Summarise last week's open PRs."),
+        now=_NOW,
+        **{k: v for k, v in ctx.items() if k != "audit_store"},
+        agent_disable_service=AgentDisableService(store=InMemoryAgentDisableStore()),
+        tenant_status_service=TenantStatusService(store=ctx["tenant_config_store"]),
+    )
+    assert run_id is not None
+    await _drain(ctx, run_id)
+    assert captured["config"]["configurable"]["trigger_origin"] is True
+
+
 @pytest.mark.asyncio
 async def test_fire_block_does_not_advance_last_fired_at() -> None:
     """Blocked fire must not stamp ``last_fired_at`` — drift telemetry stays clean."""

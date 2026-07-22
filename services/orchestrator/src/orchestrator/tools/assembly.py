@@ -94,6 +94,10 @@ KNOWN_BUILTINS = frozenset(
         "note_behavior_patch",
         "clarify_tool_usage",
         "remember",
+        # Spec 1 PR2 — conversational scheduled tasks. Registered in
+        # ``agent_factory.build_agent`` (it has agent_name/version + TriggerStore);
+        # ``_register_builtin`` treats it as a no-op.
+        "manage_task",
     }
 )
 
@@ -476,6 +480,9 @@ def _register_builtin(
     elif entry.name in SKILL_AUTHORING_BUILTINS:
         # Stream SE (SE-3b) — registered in ``agent_factory.build_agent``
         # (it has agent_name + the SkillStore); no-op here.
+        pass
+    elif entry.name == "manage_task":
+        # Spec 1 PR2 — registered in build_agent (store + agent_name/version there).
         pass
 
 

@@ -55,6 +55,7 @@ from expert_work.persistence import MemoryStore
 from expert_work.persistence.memory import MemoryWritebackDLQ
 from expert_work.persistence.skill.base import SkillStore
 from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.persistence.trigger.base import TriggerStore
 from expert_work.protocol import (
     AgentSpec,
     BuiltinToolSpec,
@@ -126,6 +127,7 @@ from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
 from orchestrator.tools.file_ops import SandboxWorkspaceWriter
 from orchestrator.tools.knowledge import Reranker
+from orchestrator.tools.manage_task import ManageTaskTool
 from orchestrator.tools.overflow import tool_output_budget_enabled
 from orchestrator.tools.registry import ToolContext, ToolRegistry
 from orchestrator.tools.sandbox import EgressContext, SupervisorClient, bind_egress
@@ -523,6 +525,9 @@ async def build_agent(
     # authoring tools WRITE. ``None`` → a manifest that declares an authoring
     # builtin raises :class:`AgentFactoryError` (dep not wired).
     skill_store: SkillStore | None = None,
+    #: Spec 1 PR2 — the TriggerStore backing the manage_task builtin. ``None`` →
+    #: a manifest that declares manage_task raises AgentFactoryError.
+    trigger_store: TriggerStore | None = None,
     audit_logger: AuditLogger | None = None,
     # Stream PI-2b — the model-backed output judge. Activated only when the
     # manifest opts in (``defenses.output_judge == "block"``); ``None`` (the
@@ -901,6 +906,26 @@ async def build_agent(
             audit_logger=audit_logger,
         ):
             registry.register(tool)
+
+    # Spec 1 PR2 — conversational scheduled-task management. Opt-in: a manifest
+    # declares "manage_task" in tools:. It WRITES, so it needs the TriggerStore +
+    # the owning agent's name/version (baked here — ToolContext carries neither).
+    declared_manage_task = any(
+        isinstance(e, BuiltinToolSpec) and e.name == "manage_task" for e in spec.spec.tools
+    )
+    if declared_manage_task:
+        if trigger_store is None:
+            raise AgentFactoryError(
+                "manifest declares the manage_task builtin but no TriggerStore is "
+                "configured (build_agent trigger_store)"
+            )
+        registry.register(
+            ManageTaskTool(
+                store=trigger_store,
+                agent_name=spec.metadata.name,
+                agent_version=spec.metadata.version,
+            )
+        )
 
     # Dynamic-context — inject today's date (day granularity, agent timezone)
     # when the manifest opts in (default on). Computed at build time and frozen

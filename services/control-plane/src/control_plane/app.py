@@ -1497,6 +1497,10 @@ def create_app(
                     audit_logger=resolved_audit,
                     # skill-asset-store — dual-read for externalized skill files.
                     skill_asset_store=skill_asset_store,
+                    # Spec 1 PR2 — backs the manage_task builtin (conversational
+                    # scheduled tasks). Only the main builder — sub-agents/workers
+                    # don't schedule tasks (intentional constraint).
+                    trigger_store=resolved_trigger_store,
                 )
                 # Stream MCP-OAUTH (OA-3b) — let get_agent decide per-user builds.
                 resolved_agent_runtime.user_oauth_pool_provider = _user_mcp_oauth_pool_provider

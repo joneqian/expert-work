@@ -31,6 +31,8 @@ dependencies = [
     # search in expert-work-persistence).
     "rank-bm25>=0.2,<1",
     "jieba>=0.42,<1",
+    # Task scheduling: convert structured fields to RFC 5545 RRULE strings.
+    "python-dateutil>=2.9,<3",
     # 2.2 — runtime validation of tool_call args against ToolSpec.parameters
     # (the JSON Schema bound to the LLM) before dispatch.
     "jsonschema>=4.20,<5",
