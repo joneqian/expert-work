@@ -21,8 +21,14 @@ is safe to run on more than one instance: ``_fire_due_cron`` claims the due
 slot via ``TriggerStore.claim_cron_fire`` (CAS on ``last_fired_at``) and
 ``_retry_due`` claims a retrying firing via ``TriggerRunStore.claim_retry``
 (CAS ``retrying`` → ``fired``) — exactly one instance wins each, so blue+green
-never double-spawn. The reconcile pass is idempotent (both instances derive the
-same terminal status from the same run outcome). (Deployment still single-
+never double-spawn. The reconcile pass's status transition is idempotent (both
+instances derive the same terminal status from the same run outcome), but its
+result-delivery side effect (Spec 1 PR3 — appending a fired run's result into
+the originating conversation) is NOT: two instances reconciling the same
+``fired`` row would both append, duplicating the user's message. Harmless
+single-replica (below); before going multi-replica, delivery must be made
+idempotent — dedup by ``expert_work_source_run_id`` in ``inject_delivery``, or a
+CAS claim gating the ``fired`` → ``succeeded`` transition. (Deployment still single-
 replicas the scheduler today because the co-located ``SkillCurator`` shares the
 ``enable_scheduler`` gate and is not yet CAS-hardened; the guards here remove the
 scheduler's own double-fire hazard and are the prerequisite for going wider.)
@@ -46,8 +52,11 @@ from croniter import croniter
 from dateutil.rrule import rrulestr
 
 from control_plane.agent_disable_status import AgentDisableService
+from control_plane.audit import emit
 from control_plane.runtime import AgentRuntime
 from control_plane.tenant_status import TenantStatusService
+from control_plane.transcript import read_turns
+from control_plane.trigger_delivery import inject_delivery
 from control_plane.trigger_firing import fire_trigger
 from expert_work.common.observability import expert_work_counter
 from expert_work.persistence import (
@@ -63,9 +72,10 @@ from expert_work.persistence.rls import (
     current_user_id_var,
 )
 from expert_work.persistence.tenant_config import TenantConfigStore
-from expert_work.protocol import TriggerRecord, TriggerRunRecord, TriggerRunStatus
+from expert_work.protocol import AuditAction, TriggerRecord, TriggerRunRecord, TriggerRunStatus
+from expert_work.protocol.agent_spec import AgentSpecStatus
 from expert_work.runtime.audit.logger import AuditLogger
-from expert_work.runtime.runs import RunStatus, RunStore
+from expert_work.runtime.runs import RunInfo, RunStatus, RunStore
 
 logger = logging.getLogger("expert_work.control_plane.scheduler")
 
@@ -339,11 +349,24 @@ class TriggerScheduler:
             if run is None:
                 return
             if run.status is RunStatus.SUCCESS:
+                delivery = await self._deliver(row, run)
                 await self._trigger_runs.update(
                     row.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
                 )
+                await self._emit_lifecycle(
+                    row,
+                    action=AuditAction.TRIGGER_COMPLETED,
+                    details={"run_id": str(row.run_id), "delivery": delivery},
+                )
             elif run.status in _FAILED_RUN_STATUSES:
-                await self._trigger_runs.update(self._after_failure(row, now=now, error=run.error))
+                new = self._after_failure(row, now=now, error=run.error)
+                await self._trigger_runs.update(new)
+                if new.status is TriggerRunStatus.DEAD_LETTER:
+                    await self._emit_lifecycle(
+                        row,
+                        action=AuditAction.TRIGGER_FAILED,
+                        details={"run_id": str(row.run_id), "error": run.error},
+                    )
             elif run.status is RunStatus.INTERRUPTED:
                 # A deliberately-cancelled run is a terminal failure — no retry.
                 await self._trigger_runs.update(
@@ -354,7 +377,79 @@ class TriggerScheduler:
                         }
                     )
                 )
+                await self._emit_lifecycle(
+                    row,
+                    action=AuditAction.TRIGGER_FAILED,
+                    details={"run_id": str(row.run_id), "error": "run interrupted"},
+                )
             # PAUSED / RUNNING / PENDING — not terminal; reconcile next sweep.
+
+    async def _emit_lifecycle(
+        self, row: TriggerRunRecord, *, action: AuditAction, details: dict[str, object]
+    ) -> None:
+        """Best-effort trigger lifecycle audit — never let audit failure break
+        reconcile."""
+        try:
+            await emit(
+                self._audit,
+                tenant_id=row.tenant_id,
+                actor_id=f"trigger:{row.trigger_id}",
+                action=action,
+                resource_type="trigger",
+                resource_id=str(row.trigger_id),
+                details=details,
+            )
+        except Exception:
+            logger.exception("scheduler.audit_emit_failed", extra={"trigger_run_id": str(row.id)})
+
+    async def _deliver(self, row: TriggerRunRecord, run: RunInfo) -> str:
+        """Deliver a successful run's result into its originating conversation.
+
+        Best-effort: returns a short status for the TRIGGER_COMPLETED audit and
+        never raises (a delivery failure must not block the SUCCEEDED
+        transition). Only conversation-created tasks (context_mode=reuse_thread
+        with an originating_thread_id) deliver; background tasks skip.
+        """
+        try:
+            trigger = await self._triggers.get(trigger_id=row.trigger_id, tenant_id=row.tenant_id)
+            if (
+                trigger is None
+                or trigger.context_mode != "reuse_thread"
+                or trigger.originating_thread_id is None
+            ):
+                return "skipped"
+            checkpointer = self._runtime.durable_checkpointer
+            if checkpointer is None:
+                return "no_checkpointer"
+            turns = await read_turns(checkpointer, run.thread_id, include_hidden=False)
+            result = next((t.content for t in reversed(turns) if t.role == "assistant"), None)
+            if not result:
+                return "no_output"
+            spec_record = await self._agents.get(
+                tenant_id=trigger.tenant_id,
+                name=trigger.agent_name,
+                version=trigger.agent_version,
+            )
+            if spec_record is None or spec_record.status is not AgentSpecStatus.ACTIVE:
+                return "agent_unavailable"
+            built = await self._runtime.get_agent(
+                tenant_id=trigger.tenant_id,
+                name=trigger.agent_name,
+                version=trigger.agent_version,
+                spec=spec_record.spec,
+            )
+            await inject_delivery(
+                built.graph,
+                thread_id=trigger.originating_thread_id,
+                tenant_id=trigger.tenant_id,
+                result_text=result,
+                source_run_id=run.run_id,
+                trigger_id=trigger.id,
+            )
+            return "delivered"
+        except Exception:
+            logger.exception("scheduler.delivery_failed", extra={"trigger_run_id": str(row.id)})
+            return "error"
 
     def _after_failure(
         self, row: TriggerRunRecord, *, now: datetime, error: str | None
