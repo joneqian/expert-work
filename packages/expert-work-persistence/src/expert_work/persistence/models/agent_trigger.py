@@ -28,6 +28,7 @@ from expert_work.persistence.base import Base
 
 _KIND_VALUES = "('cron', 'webhook')"
 _SOURCE_VALUES = "('manifest', 'api')"
+_CONTEXT_MODE_VALUES = "('reuse_thread', 'fresh_thread_per_run')"
 _RUN_STATUS_VALUES = "('fired', 'succeeded', 'failed', 'retrying', 'dead_letter')"
 
 
@@ -61,7 +62,7 @@ class AgentTriggerRow(Base):
         CheckConstraint(f"kind IN {_KIND_VALUES}", name="agent_trigger_kind_valid"),
         CheckConstraint(f"source IN {_SOURCE_VALUES}", name="agent_trigger_source_valid"),
         CheckConstraint(
-            "context_mode IN ('reuse_thread', 'fresh_thread_per_run')",
+            f"context_mode IN {_CONTEXT_MODE_VALUES}",
             name="agent_trigger_context_mode_valid",
         ),
         Index(
