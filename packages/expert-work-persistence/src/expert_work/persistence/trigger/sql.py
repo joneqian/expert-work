@@ -37,9 +37,7 @@ def _row_to_dto(row: AgentTriggerRow) -> TriggerRecord:
         source=cast(TriggerSource, row.source),
         webhook_secret_hash=row.webhook_secret_hash,
         originating_thread_id=row.originating_thread_id,
-        context_mode=cast(
-            Literal["reuse_thread", "fresh_thread_per_run"], row.context_mode
-        ),
+        context_mode=cast(Literal["reuse_thread", "fresh_thread_per_run"], row.context_mode),
         last_fired_at=row.last_fired_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
