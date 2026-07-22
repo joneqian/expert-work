@@ -374,3 +374,89 @@ async def test_claim_retry_concurrent_wins_exactly_one(
     assert row is not None
     assert row.status is TriggerRunStatus.FIRED
     assert row.next_retry_at is None
+
+
+@pytest.mark.asyncio
+async def test_create_roundtrips_delivery_routing(trigger_store: SqlTriggerStore) -> None:
+    tid, tenant, thread = uuid4(), uuid4(), uuid4()
+    rec = _record(trigger_id=tid, tenant_id=tenant).model_copy(
+        update={"originating_thread_id": thread, "context_mode": "reuse_thread"}
+    )
+    await trigger_store.create(rec)
+    got = await trigger_store.get(trigger_id=tid, tenant_id=tenant)
+    assert got is not None
+    assert got.originating_thread_id == thread
+    assert got.context_mode == "reuse_thread"
+
+
+@pytest.mark.asyncio
+async def test_create_defaults_context_mode(trigger_store: SqlTriggerStore) -> None:
+    tid, tenant = uuid4(), uuid4()
+    await trigger_store.create(_record(trigger_id=tid, tenant_id=tenant))
+    got = await trigger_store.get(trigger_id=tid, tenant_id=tenant)
+    assert got is not None
+    assert got.originating_thread_id is None
+    assert got.context_mode == "fresh_thread_per_run"
+
+
+# --- Task 3 — user-scoped uniqueness (Task 1's partial unique indexes) ----
+
+
+@pytest.mark.asyncio
+async def test_two_users_same_name_allowed(trigger_store: SqlTriggerStore) -> None:
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    r1 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u1, "name": "daily"}
+    )
+    r2 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u2, "name": "daily"}
+    )
+    await trigger_store.create(r1)
+    await trigger_store.create(r2)  # 不同 user 同名 —— 放行
+    assert (await trigger_store.get(trigger_id=r2.id, tenant_id=tenant)) is not None
+
+
+@pytest.mark.asyncio
+async def test_same_user_same_name_conflicts(trigger_store: SqlTriggerStore) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    tenant, u1 = uuid4(), uuid4()
+    r1 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u1, "name": "daily"}
+    )
+    r2 = _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+        update={"user_id": u1, "name": "daily"}
+    )
+    await trigger_store.create(r1)
+    with pytest.raises(IntegrityError):
+        await trigger_store.create(r2)
+
+
+# --- Task 4 — list_by_user (per-user list, PR2 conversational tool + Spec 3) --
+
+
+@pytest.mark.asyncio
+async def test_list_by_user_scopes_ordered_and_filters_agent(
+    trigger_store: SqlTriggerStore,
+) -> None:
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    r1 = _record(trigger_id=uuid4(), tenant_id=tenant, agent_name="reporter", name="a").model_copy(
+        update={"user_id": u1, "created_at": _BASE}
+    )
+    r2 = _record(trigger_id=uuid4(), tenant_id=tenant, agent_name="auditor", name="b").model_copy(
+        update={"user_id": u1, "created_at": _BASE.replace(hour=13)}
+    )
+    r3 = _record(trigger_id=uuid4(), tenant_id=tenant, agent_name="reporter", name="c").model_copy(
+        update={"user_id": u2}
+    )
+    # r2(created_at 更晚)先插、r1 后插 —— 与 created_at 顺序相反地插入,
+    # 这样若 list_by_user 缺 ORDER BY(只靠插入/物理顺序凑巧对上)断言会失败。
+    await trigger_store.create(r2)
+    await trigger_store.create(r1)
+    await trigger_store.create(r3)
+
+    got = await trigger_store.list_by_user(tenant_id=tenant, user_id=u1)
+    assert [t.name for t in got] == ["a", "b"]  # tenant+user scoped, created_at ascending
+
+    filtered = await trigger_store.list_by_user(tenant_id=tenant, user_id=u1, agent_name="reporter")
+    assert [t.name for t in filtered] == ["a"]

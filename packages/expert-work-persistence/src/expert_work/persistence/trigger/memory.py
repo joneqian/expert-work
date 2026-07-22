@@ -18,12 +18,17 @@ class InMemoryTriggerStore(TriggerStore):
 
     async def create(self, record: TriggerRecord) -> TriggerRecord:
         for existing in self._rows.values():
-            if (
+            same_scope = (
                 existing.tenant_id == record.tenant_id
                 and existing.agent_name == record.agent_name
                 and existing.name == record.name
-            ):
-                msg = f"trigger {record.name!r} already exists for agent {record.agent_name!r}"
+                and existing.user_id == record.user_id
+            )
+            if same_scope:
+                msg = (
+                    f"trigger {record.name!r} already exists for agent "
+                    f"{record.agent_name!r} (user {record.user_id})"
+                )
                 raise ValueError(msg)
         self._rows[record.id] = record
         return record
@@ -55,6 +60,18 @@ class InMemoryTriggerStore(TriggerStore):
             and (agent_name is None or r.agent_name == agent_name)
             and (agent_version is None or r.agent_version == agent_version)
         ]
+
+    async def list_by_user(
+        self, *, tenant_id: UUID, user_id: UUID, agent_name: str | None = None
+    ) -> list[TriggerRecord]:
+        rows = [
+            r
+            for r in self._rows.values()
+            if r.tenant_id == tenant_id
+            and r.user_id == user_id
+            and (agent_name is None or r.agent_name == agent_name)
+        ]
+        return sorted(rows, key=lambda r: r.created_at)
 
     async def list_all_tenants(
         self,

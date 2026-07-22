@@ -20,6 +20,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
+    "ContextMode",
     "TriggerKind",
     "TriggerRecord",
     "TriggerRunRecord",
@@ -37,6 +38,11 @@ TriggerKind = Literal["cron", "webhook"]
 #: (``AgentSpecBody.triggers``, reconciled into the table on deploy) or
 #: created directly through the triggers CRUD API.
 TriggerSource = Literal["manifest", "api"]
+
+#: Delivery routing for a fired trigger's run (PR3 D1) — ``reuse_thread``
+#: replies into ``originating_thread_id``; ``fresh_thread_per_run`` (the
+#: default / current behaviour) always starts a new thread.
+ContextMode = Literal["reuse_thread", "fresh_thread_per_run"]
 
 
 class TriggerSpec(BaseModel):
@@ -115,6 +121,8 @@ class TriggerRecord(BaseModel):
     enabled: bool = True
     source: TriggerSource = "api"
     webhook_secret_hash: str | None = None
+    originating_thread_id: UUID | None = None
+    context_mode: ContextMode = "fresh_thread_per_run"
     last_fired_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

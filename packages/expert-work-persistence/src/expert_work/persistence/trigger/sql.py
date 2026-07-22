@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from expert_work.persistence.models import AgentTriggerRow, TriggerRunRow
 from expert_work.persistence.trigger.base import TriggerRunStore, TriggerStore
 from expert_work.protocol import (
+    ContextMode,
     TriggerKind,
     TriggerRecord,
     TriggerRunRecord,
@@ -36,6 +37,8 @@ def _row_to_dto(row: AgentTriggerRow) -> TriggerRecord:
         enabled=row.enabled,
         source=cast(TriggerSource, row.source),
         webhook_secret_hash=row.webhook_secret_hash,
+        originating_thread_id=row.originating_thread_id,
+        context_mode=cast(ContextMode, row.context_mode),
         last_fired_at=row.last_fired_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -63,6 +66,8 @@ class SqlTriggerStore(TriggerStore):
                     enabled=record.enabled,
                     source=record.source,
                     webhook_secret_hash=record.webhook_secret_hash,
+                    originating_thread_id=record.originating_thread_id,
+                    context_mode=record.context_mode,
                     last_fired_at=record.last_fired_at,
                     created_at=record.created_at,
                     updated_at=record.updated_at,
@@ -121,6 +126,20 @@ class SqlTriggerStore(TriggerStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
 
+    async def list_by_user(
+        self, *, tenant_id: UUID, user_id: UUID, agent_name: str | None = None
+    ) -> list[TriggerRecord]:
+        async with self._sf() as session:
+            stmt = select(AgentTriggerRow).where(
+                AgentTriggerRow.tenant_id == tenant_id,
+                AgentTriggerRow.user_id == user_id,
+            )
+            if agent_name is not None:
+                stmt = stmt.where(AgentTriggerRow.agent_name == agent_name)
+            stmt = stmt.order_by(AgentTriggerRow.created_at.asc())
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
     async def list_all_tenants(
         self,
         *,
@@ -172,6 +191,8 @@ class SqlTriggerStore(TriggerStore):
                     enabled=record.enabled,
                     source=record.source,
                     webhook_secret_hash=record.webhook_secret_hash,
+                    originating_thread_id=record.originating_thread_id,
+                    context_mode=record.context_mode,
                     last_fired_at=record.last_fired_at,
                     updated_at=record.updated_at,
                 )

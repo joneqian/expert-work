@@ -171,6 +171,10 @@ module = "croniter.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = "dateutil.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["pymupdf4llm.*", "pymupdf.*", "fitz.*", "markitdown.*"]
 ignore_missing_imports = true
 # These ship incomplete inline types; skip following them so their

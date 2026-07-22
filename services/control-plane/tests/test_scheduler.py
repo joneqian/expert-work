@@ -11,7 +11,7 @@ import pytest
 
 from control_plane.audit import build_default_audit_logger
 from control_plane.runtime import AgentRuntime
-from control_plane.scheduler import TriggerScheduler, _is_cron_due, _next_fire
+from control_plane.scheduler import TriggerScheduler, _is_cron_due, _next_fire, _next_occurrence
 from expert_work.persistence import (
     InMemoryApprovalStore,
     InMemoryThreadMetaStore,
@@ -437,3 +437,97 @@ async def test_two_instances_retry_exactly_once() -> None:
     assert row.status is TriggerRunStatus.FIRED
     assert row.attempt == 2  # advanced once, not twice
     await _drain(row.run_id, blue_rt, green_rt)
+
+
+# --- PR1 地基(scheduled-tasks-conversational) — RRULE dual-path -----------
+#
+# ``_next_occurrence`` is the new source of truth (rrule-first, cron-
+# fallback); ``_next_fire`` / ``_is_cron_due`` above stay in place
+# unmodified — ``tools/eval/trigger.py`` (the J.10 eval harness) and the
+# cron-math tests above import them directly, so deleting them would break
+# a consumer outside this task's file list. A config-keyed trigger factory
+# (distinct from ``_trigger`` above, which only builds the legacy
+# ``{"expr": ...}`` shape) covers both the rrule and legacy-cron branches.
+
+
+def _config_trigger(
+    config: dict[str, object], *, created: datetime, last_fired: datetime | None = None
+) -> TriggerRecord:
+    return TriggerRecord(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        agent_name="a",
+        agent_version="1.0.0",
+        name="t",
+        kind="cron",
+        config=config,
+        created_at=created,
+        updated_at=created,
+        last_fired_at=last_fired,
+    )
+
+
+def test_rrule_daily_next_occurrence() -> None:
+    created = datetime(2026, 5, 1, 14, 0, tzinfo=UTC)
+    trig = _config_trigger(
+        {"rrule": "FREQ=DAILY;BYHOUR=3;BYMINUTE=0", "timezone": "UTC"}, created=created
+    )
+    nxt = _next_occurrence(trig, after=created)
+    assert nxt == datetime(2026, 5, 2, 3, 0, tzinfo=UTC)
+
+
+def test_rrule_timezone_shifts_utc_instant() -> None:
+    created = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    # Shanghai 03:00 local = UTC 19:00 the previous day.
+    trig = _config_trigger(
+        {"rrule": "FREQ=DAILY;BYHOUR=3;BYMINUTE=0", "timezone": "Asia/Shanghai"},
+        created=created,
+    )
+    nxt = _next_occurrence(trig, after=created)
+    assert nxt is not None
+    assert nxt.astimezone(UTC).hour == 19
+
+
+def test_rrule_bounded_count_exhausts_to_none() -> None:
+    created = datetime(2026, 5, 1, 2, 0, tzinfo=UTC)
+    trig = _config_trigger(
+        {"rrule": "FREQ=DAILY;BYHOUR=3;BYMINUTE=0;COUNT=1", "timezone": "UTC"},
+        created=created,
+        last_fired=datetime(2026, 5, 1, 3, 0, tzinfo=UTC),  # the one occurrence already fired
+    )
+    assert _next_occurrence(trig, after=datetime(2026, 5, 1, 3, 0, tzinfo=UTC)) is None
+
+
+def test_legacy_cron_still_works() -> None:
+    created = datetime(2026, 5, 1, 14, 0, tzinfo=UTC)
+    trig = _config_trigger({"expr": "0 3 * * *"}, created=created)
+    nxt = _next_occurrence(trig, after=created)
+    assert nxt == datetime(2026, 5, 2, 3, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_fire_due_cron_disables_exhausted_rrule() -> None:
+    """A bounded RRULE (``COUNT=1``) whose one occurrence already fired is
+    exhausted — the next sweep disables the trigger instead of scanning it
+    forever. Reuses this file's existing ``_build_scheduler`` harness
+    (in-memory stores + stub runtime) per the brief's fallback: no
+    ``scheduler_harness`` fixture exists in this file to reuse instead, and
+    the exhausted trigger never reaches ``_fire_cron`` so no agent needs
+    seeding."""
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    trig = await triggers.create(
+        _config_trigger(
+            {"rrule": "FREQ=DAILY;BYHOUR=3;BYMINUTE=0;COUNT=1", "timezone": "UTC"},
+            created=datetime(2026, 5, 1, 2, 0, tzinfo=UTC),
+            last_fired=datetime(2026, 5, 1, 3, 0, tzinfo=UTC),
+        )
+    )
+    scheduler, _ = await _build_scheduler(trigger_store=triggers, trigger_run_store=trigger_runs)
+
+    fired = await scheduler._fire_due_cron(datetime(2026, 5, 2, 3, 0, tzinfo=UTC))
+
+    assert fired == 0
+    got = await triggers.get(trigger_id=trig.id, tenant_id=trig.tenant_id)
+    assert got is not None
+    assert got.enabled is False

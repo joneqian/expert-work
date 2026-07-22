@@ -61,6 +61,16 @@ class TriggerStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def list_by_user(
+        self, *, tenant_id: UUID, user_id: UUID, agent_name: str | None = None
+    ) -> list[TriggerRecord]:
+        """List a single user's triggers within a tenant (Spec 1 PR1).
+
+        Ordered by ``created_at`` ascending. Optional ``agent_name`` filter.
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
     async def list_all_tenants(
         self,
         *,

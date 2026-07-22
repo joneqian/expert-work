@@ -58,6 +58,11 @@ dependencies = [
     # scheduler. Lightweight pure-Python; the scheduler polls the
     # agent_trigger table rather than running APScheduler.
     "croniter>=2.0,<7",
+    # PR1 地基(scheduled-tasks-conversational) — RRULE (RFC 5545) scheduling
+    # with per-task IANA timezone. Was only a transitive dep (via croniter's
+    # own tree) until now; the scheduler imports it directly so it must be
+    # declared.
+    "python-dateutil>=2.9,<3",
 ]
 
 [build-system]

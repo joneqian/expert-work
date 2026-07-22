@@ -407,3 +407,82 @@ async def test_claim_retry_false_when_not_retrying_or_cross_tenant() -> None:
     # Not in retrying → no claim; right row wrong tenant → no claim.
     assert await store.claim_retry(trigger_run_id=rid, tenant_id=tenant) is False
     assert await store.claim_retry(trigger_run_id=rid, tenant_id=uuid4()) is False
+
+
+@pytest.mark.asyncio
+async def test_memory_roundtrips_delivery_routing() -> None:
+    store = InMemoryTriggerStore()
+    tid, tenant, thread = uuid4(), uuid4(), uuid4()
+    rec = _record(trigger_id=tid, tenant_id=tenant).model_copy(
+        update={"originating_thread_id": thread, "context_mode": "reuse_thread"}
+    )
+    await store.create(rec)
+    got = await store.get(trigger_id=tid, tenant_id=tenant)
+    assert got is not None
+    assert got.originating_thread_id == thread
+    assert got.context_mode == "reuse_thread"
+
+
+# --- Task 3 — user-scoped uniqueness (matches Task 1's partial unique indexes) --
+
+
+@pytest.mark.asyncio
+async def test_memory_two_users_same_name_allowed() -> None:
+    store = InMemoryTriggerStore()
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "daily"}
+        )
+    )
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u2, "name": "daily"}
+        )
+    )  # 不放异常即通过
+
+
+@pytest.mark.asyncio
+async def test_memory_same_user_same_name_conflicts() -> None:
+    store = InMemoryTriggerStore()
+    tenant, u1 = uuid4(), uuid4()
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "daily"}
+        )
+    )
+    with pytest.raises(ValueError):
+        await store.create(
+            _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+                update={"user_id": u1, "name": "daily"}
+            )
+        )
+
+
+# --- Task 4 — list_by_user (per-user list, PR2 conversational tool + Spec 3) --
+
+
+@pytest.mark.asyncio
+async def test_memory_list_by_user_scopes() -> None:
+    store = InMemoryTriggerStore()
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    # b 的 created_at 比 a 晚,但先插入(与 created_at 顺序相反)—— 若
+    # list_by_user 少排序、只按插入/字典顺序返回,下面按 created_at 升序的
+    # 断言会失败。
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "b", "created_at": _BASE + timedelta(hours=1)}
+        )
+    )
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "a", "created_at": _BASE}
+        )
+    )
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u2, "name": "c"}
+        )
+    )
+    got = await store.list_by_user(tenant_id=tenant, user_id=u1)
+    assert [t.name for t in got] == ["a", "b"]  # created_at ascending, not insertion order
