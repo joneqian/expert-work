@@ -3,8 +3,9 @@
 A single-replica background worker inside the control-plane. Each
 ``run_once`` sweep does three passes:
 
-1. **fire** — poll ``agent_trigger`` for enabled ``cron`` triggers
-   whose ``croniter`` schedule has come due, and start a run for each.
+1. **fire** — poll ``agent_trigger`` for enabled ``cron`` triggers whose
+   next occurrence (RRULE, or the legacy ``croniter`` expr — see
+   ``_next_occurrence``) has come due, and start a run for each.
 2. **reconcile** — for every ``fired`` ``trigger_run``, read the linked
    ``agent_run`` outcome: success → ``succeeded``; failure → ``retrying``
    (with a backoff) or ``dead_letter`` once the attempt budget is spent.
@@ -39,8 +40,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from croniter import croniter
+from dateutil.rrule import rrulestr
 
 from control_plane.agent_disable_status import AgentDisableService
 from control_plane.runtime import AgentRuntime
@@ -105,6 +108,30 @@ def _is_cron_due(trigger: TriggerRecord, *, now: datetime) -> bool:
         raise ValueError(msg)
     base = trigger.last_fired_at or trigger.created_at
     return _next_fire(expr, base) <= now
+
+
+def _next_occurrence(trigger: TriggerRecord, *, after: datetime) -> datetime | None:
+    """Next scheduled fire strictly after ``after``, in UTC, or ``None`` if the
+    schedule is exhausted (RRULE ``UNTIL``/``COUNT`` past their end).
+
+    Dual-path: an RRULE (``config['rrule']``, evaluated in ``config['timezone']``
+    for DST-safe local wall-clock) takes precedence; otherwise the legacy cron
+    ``config['expr']`` path (backward compatible, delegates to :func:`_next_fire`).
+    A row with neither raises — the caller catches it per-trigger so one bad
+    row never aborts the sweep.
+    """
+    rrule_str = trigger.config.get("rrule")
+    if isinstance(rrule_str, str) and rrule_str:
+        tz_name = trigger.config.get("timezone")
+        tz = ZoneInfo(tz_name) if isinstance(tz_name, str) and tz_name else UTC
+        dtstart = trigger.created_at.astimezone(tz)
+        occurrence = rrulestr(rrule_str, dtstart=dtstart).after(after.astimezone(tz))
+        return occurrence.astimezone(UTC) if occurrence is not None else None
+    expr = trigger.config.get("expr")
+    if isinstance(expr, str) and expr:
+        return _next_fire(expr, after)
+    msg = f"trigger {trigger.id} has neither 'rrule' nor 'expr' in config"
+    raise ValueError(msg)
 
 
 def _backoff_for(attempt: int) -> int:
@@ -220,13 +247,26 @@ class TriggerScheduler:
         fired = 0
         for trigger in triggers[: self._batch_size]:
             try:
-                if not _is_cron_due(trigger, now=now):
+                base = trigger.last_fired_at or trigger.created_at
+                nxt = _next_occurrence(trigger, after=base)
+                if nxt is None:
+                    # RRULE bounded window exhausted — disable, don't scan again.
+                    await self._disable_exhausted(trigger)
+                    continue
+                if nxt > now:
                     continue
                 if await self._fire_cron(trigger, now=now):
                     fired += 1
             except Exception:
                 logger.exception("scheduler.trigger_failed", extra={"trigger_id": str(trigger.id)})
         return fired
+
+    async def _disable_exhausted(self, trigger: TriggerRecord) -> None:
+        """RRULE exhausted → ``enabled=False`` (idempotent: already-False is harmless)."""
+        with _tenant_scope(trigger.tenant_id, trigger.user_id):
+            await self._triggers.update(
+                trigger.model_copy(update={"enabled": False, "updated_at": datetime.now(UTC)})
+            )
 
     async def _fire_cron(self, trigger: TriggerRecord, *, now: datetime) -> bool:
         with _tenant_scope(trigger.tenant_id, trigger.user_id):
