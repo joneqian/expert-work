@@ -233,6 +233,10 @@ class AuditAction(StrEnum):
     TRIGGER_UPDATE = "trigger:update"
     TRIGGER_DELETE = "trigger:delete"
     TRIGGER_FIRE = "trigger:fire"
+    # triggers — Spec 1 PR3 (conversational scheduled tasks): reconcile-time
+    # lifecycle outcomes emitted when a fired run reaches a terminal status.
+    TRIGGER_COMPLETED = "trigger:completed"
+    TRIGGER_FAILED = "trigger:failed"
     # triggers — Capability Uplift Sprint #1 (Mini-ADR U-2)
     TRIGGER_PROMPT_INJECTION_BLOCKED = "trigger:prompt_injection_blocked"
     TRIGGER_PROMPT_INJECTION_WARN = "trigger:prompt_injection_warn"
