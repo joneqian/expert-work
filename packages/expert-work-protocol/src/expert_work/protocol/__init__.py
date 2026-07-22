@@ -244,6 +244,7 @@ from expert_work.protocol.tenant_skill_subscription import (
 from expert_work.protocol.tenant_user import TenantUser
 from expert_work.protocol.thread_meta import ThreadMeta, ThreadStatus
 from expert_work.protocol.trigger import (
+    ContextMode,
     TriggerKind,
     TriggerRecord,
     TriggerRunRecord,
@@ -315,6 +316,7 @@ __all__ = [
     "CodePackageSpec",
     "CommitRequest",
     "ComponentType",
+    "ContextMode",
     "CredentialsMode",
     "CurationCandidateRecord",
     "CurationSignal",

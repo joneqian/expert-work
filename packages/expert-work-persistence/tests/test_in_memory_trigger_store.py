@@ -466,14 +466,17 @@ async def test_memory_same_user_same_name_conflicts() -> None:
 async def test_memory_list_by_user_scopes() -> None:
     store = InMemoryTriggerStore()
     tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    # b 的 created_at 比 a 晚,但先插入(与 created_at 顺序相反)—— 若
+    # list_by_user 少排序、只按插入/字典顺序返回,下面按 created_at 升序的
+    # 断言会失败。
     await store.create(
         _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
-            update={"user_id": u1, "name": "a"}
+            update={"user_id": u1, "name": "b", "created_at": _BASE + timedelta(hours=1)}
         )
     )
     await store.create(
         _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
-            update={"user_id": u1, "name": "b"}
+            update={"user_id": u1, "name": "a", "created_at": _BASE}
         )
     )
     await store.create(
@@ -482,4 +485,4 @@ async def test_memory_list_by_user_scopes() -> None:
         )
     )
     got = await store.list_by_user(tenant_id=tenant, user_id=u1)
-    assert {t.name for t in got} == {"a", "b"}
+    assert [t.name for t in got] == ["a", "b"]  # created_at ascending, not insertion order

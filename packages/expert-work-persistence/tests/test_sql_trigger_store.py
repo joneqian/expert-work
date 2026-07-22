@@ -449,8 +449,10 @@ async def test_list_by_user_scopes_ordered_and_filters_agent(
     r3 = _record(trigger_id=uuid4(), tenant_id=tenant, agent_name="reporter", name="c").model_copy(
         update={"user_id": u2}
     )
-    await trigger_store.create(r1)
+    # r2(created_at 更晚)先插、r1 后插 —— 与 created_at 顺序相反地插入,
+    # 这样若 list_by_user 缺 ORDER BY(只靠插入/物理顺序凑巧对上)断言会失败。
     await trigger_store.create(r2)
+    await trigger_store.create(r1)
     await trigger_store.create(r3)
 
     got = await trigger_store.list_by_user(tenant_id=tenant, user_id=u1)

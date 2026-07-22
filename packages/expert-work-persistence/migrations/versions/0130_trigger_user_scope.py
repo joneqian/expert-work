@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import UUID
 
 revision: str = "0130_trigger_user_scope"
 down_revision: str | Sequence[str] | None = "0129_tenant_cfg_predictive"
@@ -33,7 +34,7 @@ def upgrade() -> None:
         "agent_trigger",
         sa.Column(
             "originating_thread_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
+            UUID(as_uuid=True),
             nullable=True,
         ),
     )
