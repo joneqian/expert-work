@@ -8,10 +8,12 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from control_plane.audit import build_default_audit_logger
 from control_plane.runtime import AgentRuntime
 from control_plane.scheduler import TriggerScheduler, _is_cron_due, _next_fire, _next_occurrence
+from control_plane.transcript import read_turns
 from expert_work.persistence import (
     InMemoryApprovalStore,
     InMemoryThreadMetaStore,
@@ -22,11 +24,16 @@ from expert_work.persistence.agent_spec import InMemoryAgentSpecStore
 from expert_work.persistence.audit_log import InMemoryAuditLogStore
 from expert_work.protocol import (
     AgentSpec,
+    AuditAction,
+    AuditQuery,
     TriggerRecord,
     TriggerRunRecord,
     TriggerRunStatus,
 )
+from expert_work.runtime.checkpointer import make_checkpointer
 from expert_work.runtime.runs import DisconnectMode, InMemoryRunStore, RunInfo, RunStatus
+from expert_work.runtime.secret_store import LocalDevSecretStore
+from orchestrator.agent_factory import build_agent
 from tests.agent_fixtures import stub_agent_runtime
 
 _BASE = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
@@ -47,6 +54,39 @@ _MANIFEST: dict[str, Any] = {
         },
     },
 }
+
+# PR3 D1 — delivery tests build a real graph (``build_agent``) instead of the
+# stub runtime, so ``inject_delivery`` has an actual checkpoint to write into.
+# Copied from ``test_agent_factory.py``'s ``_secret_store`` / ``_platform_resolver``
+# (Stream Y-2: agent builds resolve every model's key through the platform
+# resolver — the manifest-pinned ``api_key_ref`` is ignored).
+_ANTHROPIC_KEY_NAME = "expert-work/dev/llm/anthropic"
+_OPENAI_KEY_NAME = "expert-work/dev/llm/openai"
+_KIMI_KEY_NAME = "expert-work/dev/llm/kimi"
+
+
+def _secret_store() -> LocalDevSecretStore:
+    return LocalDevSecretStore.from_mapping(
+        {
+            _ANTHROPIC_KEY_NAME: "sk-ant-test",
+            _OPENAI_KEY_NAME: "sk-openai-test",
+            _KIMI_KEY_NAME: "sk-kimi-test",
+        }
+    )
+
+
+_PROVIDER_KEY_NAMES = {
+    "anthropic": _ANTHROPIC_KEY_NAME,
+    "openai": _OPENAI_KEY_NAME,
+    "kimi": _KIMI_KEY_NAME,
+    "self-hosted": _OPENAI_KEY_NAME,
+    "azure": _OPENAI_KEY_NAME,
+    "qwen": _OPENAI_KEY_NAME,
+}
+
+
+async def _platform_resolver(provider: str) -> list[str]:
+    return [f"secret://{_PROVIDER_KEY_NAMES[provider]}"]
 
 
 def _trigger(
@@ -78,6 +118,7 @@ async def _build_scheduler(
     trigger_run_store: InMemoryTriggerRunStore,
     run_store: InMemoryRunStore | None = None,
     seed_agent: bool = True,
+    audit_store: InMemoryAuditLogStore | None = None,
 ) -> tuple[TriggerScheduler, AgentRuntime]:
     agents = InMemoryAgentSpecStore()
     if seed_agent:
@@ -88,6 +129,7 @@ async def _build_scheduler(
             created_by="test",
         )
     runtime = stub_agent_runtime()
+    store = audit_store or InMemoryAuditLogStore()
     scheduler = TriggerScheduler(
         trigger_store=trigger_store,
         trigger_run_store=trigger_run_store,
@@ -95,18 +137,24 @@ async def _build_scheduler(
         agent_spec_store=agents,
         thread_store=InMemoryThreadMetaStore(),
         runtime=runtime,
-        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        audit_logger=build_default_audit_logger(store),
         approval_store=InMemoryApprovalStore(),
         interval_s=60,
     )
     return scheduler, runtime
 
 
-def _run_info(run_id: UUID, *, status: RunStatus, error: str | None = None) -> RunInfo:
+def _run_info(
+    run_id: UUID,
+    *,
+    status: RunStatus,
+    error: str | None = None,
+    thread_id: UUID | None = None,
+) -> RunInfo:
     return RunInfo(
         run_id=run_id,
         tenant_id=_TENANT,
-        thread_id=uuid4(),
+        thread_id=thread_id or uuid4(),
         user_id=None,
         status=status,
         on_disconnect=DisconnectMode.CANCEL,
@@ -307,6 +355,145 @@ async def test_reconcile_exhausted_budget_dead_letters() -> None:
     row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
     assert row is not None
     assert row.status is TriggerRunStatus.DEAD_LETTER
+
+
+# --- PR3 D1 — reconcile delivers result + trigger lifecycle audit ---------
+
+
+def _reuse_thread_trigger(*, originating_thread_id: UUID) -> TriggerRecord:
+    return TriggerRecord(
+        id=uuid4(),
+        tenant_id=_TENANT,
+        agent_name="reporter",
+        agent_version="1.0.0",
+        name="nightly",
+        kind="cron",
+        config={
+            "rrule": "FREQ=DAILY;BYHOUR=3;BYMINUTE=0;BYSECOND=0",
+            "timezone": "UTC",
+            "seed_input": "go",
+        },
+        enabled=True,
+        source="api",
+        originating_thread_id=originating_thread_id,
+        context_mode="reuse_thread",
+        created_at=_BASE,
+        updated_at=_BASE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_delivers_result_to_originating_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reuse_thread trigger + SUCCESS run → the run's final assistant reply is
+    appended to the originating conversation + TRIGGER_COMPLETED audited."""
+    orig_thread, scratch_thread, run_id = uuid4(), uuid4(), uuid4()
+    audit = InMemoryAuditLogStore()
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(
+            AgentSpec.model_validate(_MANIFEST),
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            provider_key_resolver=_platform_resolver,  # required (Stream Y-2)
+        )
+        # seed originating conversation (has history) + the run's scratch thread (its result)
+        await built.graph.aupdate_state(
+            {"configurable": {"thread_id": str(orig_thread), "tenant_id": str(_TENANT)}},
+            {"messages": [HumanMessage(content="make me a task"), AIMessage(content="scheduled")]},
+            as_node="agent",
+        )
+        await built.graph.aupdate_state(
+            {"configurable": {"thread_id": str(scratch_thread), "tenant_id": str(_TENANT)}},
+            {"messages": [HumanMessage(content="go"), AIMessage(content="Today's AI news: X")]},
+            as_node="agent",
+        )
+        triggers, trigger_runs, run_store = (
+            InMemoryTriggerStore(),
+            InMemoryTriggerRunStore(),
+            InMemoryRunStore(),
+        )
+        trig = _reuse_thread_trigger(originating_thread_id=orig_thread)
+        await triggers.create(trig)
+        fired = await trigger_runs.create(_fired_run(trigger_id=trig.id, run_id=run_id))
+        await run_store.create(
+            _run_info(run_id, status=RunStatus.SUCCESS, thread_id=scratch_thread)
+        )
+        scheduler, runtime = await _build_scheduler(
+            trigger_store=triggers,
+            trigger_run_store=trigger_runs,
+            run_store=run_store,
+            audit_store=audit,  # new optional param — hold the handle for assertions
+        )
+        runtime.durable_checkpointer = cp
+
+        async def _get_agent(**_kwargs: Any) -> Any:
+            return built
+
+        monkeypatch.setattr(runtime, "get_agent", _get_agent)
+
+        await scheduler._reconcile_fired()
+
+        turns = await read_turns(cp, orig_thread, include_hidden=False)
+        assert turns[-1].role == "assistant" and turns[-1].content == "Today's AI news: X"
+        row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+        assert row is not None and row.status is TriggerRunStatus.SUCCEEDED
+        page = await audit.query(
+            AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_COMPLETED)
+        )
+        assert page.entries and page.entries[0].details.get("delivery") == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_fresh_thread_does_not_deliver() -> None:
+    """Default context_mode (fresh_thread_per_run) → no delivery; still SUCCEEDED
+    + TRIGGER_COMPLETED with delivery='skipped'. No graph/checkpointer needed —
+    _deliver short-circuits on the context_mode check before touching either."""
+    run_id = uuid4()
+    audit = InMemoryAuditLogStore()
+    triggers, trigger_runs, run_store = (
+        InMemoryTriggerStore(),
+        InMemoryTriggerRunStore(),
+        InMemoryRunStore(),
+    )
+    trig = _trigger()  # default context_mode=fresh_thread_per_run, no originating_thread_id
+    await triggers.create(trig)
+    await trigger_runs.create(_fired_run(trigger_id=trig.id, run_id=run_id))
+    await run_store.create(_run_info(run_id, status=RunStatus.SUCCESS))
+    scheduler, _runtime = await _build_scheduler(
+        trigger_store=triggers,
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+        audit_store=audit,
+    )
+    await scheduler._reconcile_fired()
+    page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_COMPLETED))
+    assert page.entries and page.entries[0].details.get("delivery") == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_interrupted_emits_trigger_failed() -> None:
+    """A terminal (INTERRUPTED→FAILED) firing emits TRIGGER_FAILED."""
+    run_id = uuid4()
+    audit = InMemoryAuditLogStore()
+    triggers, trigger_runs, run_store = (
+        InMemoryTriggerStore(),
+        InMemoryTriggerRunStore(),
+        InMemoryRunStore(),
+    )
+    trig = _trigger()
+    await triggers.create(trig)
+    await trigger_runs.create(_fired_run(trigger_id=trig.id, run_id=run_id))
+    await run_store.create(_run_info(run_id, status=RunStatus.INTERRUPTED))
+    scheduler, _runtime = await _build_scheduler(
+        trigger_store=triggers,
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+        audit_store=audit,
+    )
+    await scheduler._reconcile_fired()
+    page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_FAILED))
+    assert page.entries
 
 
 @pytest.mark.asyncio
