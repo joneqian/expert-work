@@ -53,12 +53,12 @@ from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import emit
 from control_plane.runtime import AgentRuntime
 from control_plane.tenant_status import TenantStatusService
-from control_plane.transcript import read_turns
-from control_plane.trigger_delivery import inject_delivery
+from control_plane.trigger_delivery import deliver_run_result
 from control_plane.trigger_firing import fire_trigger
 from expert_work.common.observability import expert_work_counter
 from expert_work.persistence import (
     ApprovalStore,
+    ThreadMessageStore,
     ThreadMetaStore,
     TriggerRunStore,
     TriggerStore,
@@ -71,7 +71,6 @@ from expert_work.persistence.rls import (
 )
 from expert_work.persistence.tenant_config import TenantConfigStore
 from expert_work.protocol import AuditAction, TriggerRecord, TriggerRunRecord, TriggerRunStatus
-from expert_work.protocol.agent_spec import AgentSpecStatus
 from expert_work.runtime.audit.logger import AuditLogger
 from expert_work.runtime.runs import RunInfo, RunStatus, RunStore
 
@@ -195,6 +194,10 @@ class TriggerScheduler:
         # Stream RT-4 (RT-ADR-16) — kill-switch gate for scheduled fires.
         agent_disable_service: AgentDisableService | None = None,
         tenant_status_service: TenantStatusService | None = None,
+        # Spec 1 PR4 Task 2 — FU2: mirror-sync the originating thread into
+        # content search after a successful delivery. ``None`` (e.g. tests
+        # that don't pass it) just skips the mirror-sync branch.
+        thread_message_store: ThreadMessageStore | None = None,
     ) -> None:
         if interval_s <= 0:
             msg = "interval_s must be positive"
@@ -212,6 +215,7 @@ class TriggerScheduler:
         self._tenant_config_store = tenant_config_store
         self._agent_disable_service = agent_disable_service
         self._tenant_status_service = tenant_status_service
+        self._thread_messages = thread_message_store
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -403,51 +407,25 @@ class TriggerScheduler:
     async def _deliver(self, row: TriggerRunRecord, run: RunInfo) -> str:
         """Deliver a successful run's result into its originating conversation.
 
-        Best-effort: returns a short status for the TRIGGER_COMPLETED audit and
-        never raises (a delivery failure must not block the SUCCEEDED
-        transition). Only conversation-created tasks (context_mode=reuse_thread
-        with an originating_thread_id) deliver; background tasks skip.
+        Thin delegator (Spec 1 PR4 Task 2) — the actual delivery + FU2
+        mirror-sync logic lives in :func:`control_plane.trigger_delivery.
+        deliver_run_result`, shared with the manual fire-now endpoint (PR4
+        Task 3). Only resolves ``row.trigger_id`` to a :class:`TriggerRecord`
+        here; the tenant RLS scope is already active (``_reconcile_one``'s
+        ``_tenant_scope``), satisfying ``deliver_run_result``'s precondition.
         """
-        try:
-            trigger = await self._triggers.get(trigger_id=row.trigger_id, tenant_id=row.tenant_id)
-            if (
-                trigger is None
-                or trigger.context_mode != "reuse_thread"
-                or trigger.originating_thread_id is None
-            ):
-                return "skipped"
-            checkpointer = self._runtime.durable_checkpointer
-            if checkpointer is None:
-                return "no_checkpointer"
-            turns = await read_turns(checkpointer, run.thread_id, include_hidden=False)
-            result = next((t.content for t in reversed(turns) if t.role == "assistant"), None)
-            if not result:
-                return "no_output"
-            spec_record = await self._agents.get(
-                tenant_id=trigger.tenant_id,
-                name=trigger.agent_name,
-                version=trigger.agent_version,
-            )
-            if spec_record is None or spec_record.status is not AgentSpecStatus.ACTIVE:
-                return "agent_unavailable"
-            built = await self._runtime.get_agent(
-                tenant_id=trigger.tenant_id,
-                name=trigger.agent_name,
-                version=trigger.agent_version,
-                spec=spec_record.spec,
-            )
-            await inject_delivery(
-                built.graph,
-                thread_id=trigger.originating_thread_id,
-                tenant_id=trigger.tenant_id,
-                result_text=result,
-                source_run_id=run.run_id,
-                trigger_id=trigger.id,
-            )
-            return "delivered"
-        except Exception:
-            logger.exception("scheduler.delivery_failed", extra={"trigger_run_id": str(row.id)})
-            return "error"
+        trigger = await self._triggers.get(trigger_id=row.trigger_id, tenant_id=row.tenant_id)
+        if trigger is None:
+            return "skipped"
+        outcome = await deliver_run_result(
+            trigger=trigger,
+            run=run,
+            runtime=self._runtime,
+            agent_spec_store=self._agents,
+            thread_message_store=self._thread_messages,
+            now=datetime.now(UTC),
+        )
+        return outcome.status
 
     def _after_failure(
         self, row: TriggerRunRecord, *, now: datetime, error: str | None

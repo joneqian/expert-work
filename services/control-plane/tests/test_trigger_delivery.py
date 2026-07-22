@@ -1,20 +1,27 @@
-"""Tests for :func:`control_plane.trigger_delivery.inject_delivery`."""
+"""Tests for :func:`control_plane.trigger_delivery.inject_delivery` and
+:func:`control_plane.trigger_delivery.deliver_run_result`."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from control_plane.transcript import read_turns
-from control_plane.trigger_delivery import inject_delivery
-from expert_work.protocol import AgentSpec
+from control_plane.trigger_delivery import DeliveryOutcome, deliver_run_result, inject_delivery
+from expert_work.persistence import InMemoryThreadMessageStore, MessageTurn
+from expert_work.persistence.agent_spec import InMemoryAgentSpecStore
+from expert_work.protocol import AgentSpec, TriggerRecord
 from expert_work.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 from expert_work.runtime.secret_store import LocalDevSecretStore
 from orchestrator.agent_factory import build_agent
+from tests.agent_fixtures import stub_agent_runtime
 
 # ---------------------------------------------------------------------------
 # Minimal graph build — replicated from
@@ -205,3 +212,208 @@ async def test_inject_delivery_is_idempotent_by_source_run_id() -> None:
         turns = await read_turns(cp, thread, include_hidden=True)
         delivered = [t for t in turns if t.content == "今日 AI 新闻:..."]
         assert len(delivered) == 1  # 两次调用,只贴一条
+
+
+# ---------------------------------------------------------------------------
+# deliver_run_result (Spec 1 PR4 Task 2) — extracted from the scheduler's
+# former ``_deliver``. Reuses this file's real-graph fixtures above plus the
+# stub-runtime / monkeypatch-get_agent pattern PR3's
+# ``test_reconcile_delivers_result_to_originating_thread`` (test_scheduler.py)
+# established for delivery tests.
+# ---------------------------------------------------------------------------
+
+_NOW = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_deliver_run_result_delivers_and_mirrors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """reuse_thread 触发器 + SUCCESS run → 结果落原对话 checkpoint,且原对话被
+    sync_thread 进搜索镜像(FU2)。"""
+    tenant, orig, scratch, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    async with make_checkpointer("memory") as cp:
+        spec = _spec()
+        built = await build_agent(
+            spec,
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            provider_key_resolver=_platform_resolver,  # required (Stream Y-2)
+        )
+        # seed: originating conversation has prior history; the run's scratch
+        # thread ends with the assistant result to deliver.
+        await built.graph.aupdate_state(
+            {"configurable": {"thread_id": str(orig), "tenant_id": str(tenant)}},
+            {"messages": [HumanMessage(content="make me a task"), AIMessage(content="scheduled")]},
+            as_node="agent",
+        )
+        await built.graph.aupdate_state(
+            {"configurable": {"thread_id": str(scratch), "tenant_id": str(tenant)}},
+            {"messages": [HumanMessage(content="go"), AIMessage(content="Today's AI news: X")]},
+            as_node="agent",
+        )
+
+        agents = InMemoryAgentSpecStore()
+        await agents.create(tenant_id=tenant, spec=spec, spec_sha256="a" * 64, created_by="test")
+        runtime = stub_agent_runtime()
+        runtime.durable_checkpointer = cp
+
+        async def _get_agent(**_kwargs: Any) -> Any:
+            return built
+
+        monkeypatch.setattr(runtime, "get_agent", _get_agent)
+
+        trigger = TriggerRecord(
+            id=uuid4(),
+            tenant_id=tenant,
+            agent_name="test-agent",
+            agent_version="1.0.0",
+            name="nightly",
+            kind="cron",
+            config={"expr": "0 9 * * *"},
+            enabled=True,
+            source="api",
+            originating_thread_id=orig,
+            context_mode="reuse_thread",
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+        run = RunInfo(
+            run_id=run_id,
+            tenant_id=tenant,
+            thread_id=scratch,
+            user_id=None,
+            status=RunStatus.SUCCESS,
+            on_disconnect=DisconnectMode.CANCEL,
+            is_resume=False,
+            error=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+            finished_at=_NOW,
+        )
+        mirror = InMemoryThreadMessageStore()
+
+        outcome = await deliver_run_result(
+            trigger=trigger,
+            run=run,
+            runtime=runtime,
+            agent_spec_store=agents,
+            thread_message_store=mirror,
+            now=_NOW,
+        )
+
+        assert outcome == DeliveryOutcome("delivered", text="Today's AI news: X")
+
+        # 原对话 checkpoint 落了结果
+        turns = await read_turns(cp, orig, include_hidden=False)
+        assert any(t.role == "assistant" and t.content == outcome.text for t in turns)
+
+        # FU2 — the mirror now carries the originating thread's full turn set
+        # (including history unique to its pre-existing conversation, not just
+        # the newly delivered message) — proof sync_thread(orig, ...) ran.
+        assert await mirror.search_thread_ids(tenant_id=tenant, q="make me a task") == {orig}
+
+
+class _FailingMirrorStore(InMemoryThreadMessageStore):
+    """``sync_thread`` always raises — simulates a content-search mirror outage.
+
+    F1 regression fixture: a mirror-sync failure must not downgrade an
+    already-succeeded delivery (the message is durably in the originating
+    thread's checkpoint by the time FU2 runs).
+    """
+
+    async def sync_thread(
+        self,
+        *,
+        thread_id: UUID,
+        tenant_id: UUID,
+        turns: Sequence[MessageTurn],
+        synced_at: datetime,
+    ) -> None:
+        raise RuntimeError("mirror down")
+
+
+@pytest.mark.asyncio
+async def test_deliver_run_result_survives_mirror_sync_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FU2 的镜像同步(sync_thread)失败不得把已成功的投递降级成 error(F1)——
+    inject_delivery 此时已把结果落进原对话 checkpoint,search 镜像只是
+    best-effort 的副作用,它的故障不该反噬已经成功的投递结果。"""
+    tenant, orig, scratch, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    async with make_checkpointer("memory") as cp:
+        spec = _spec()
+        built = await build_agent(
+            spec,
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            provider_key_resolver=_platform_resolver,  # required (Stream Y-2)
+        )
+        # seed: originating conversation has prior history; the run's scratch
+        # thread ends with the assistant result to deliver.
+        await built.graph.aupdate_state(
+            {"configurable": {"thread_id": str(orig), "tenant_id": str(tenant)}},
+            {"messages": [HumanMessage(content="make me a task"), AIMessage(content="scheduled")]},
+            as_node="agent",
+        )
+        await built.graph.aupdate_state(
+            {"configurable": {"thread_id": str(scratch), "tenant_id": str(tenant)}},
+            {"messages": [HumanMessage(content="go"), AIMessage(content="Today's AI news: X")]},
+            as_node="agent",
+        )
+
+        agents = InMemoryAgentSpecStore()
+        await agents.create(tenant_id=tenant, spec=spec, spec_sha256="a" * 64, created_by="test")
+        runtime = stub_agent_runtime()
+        runtime.durable_checkpointer = cp
+
+        async def _get_agent(**_kwargs: Any) -> Any:
+            return built
+
+        monkeypatch.setattr(runtime, "get_agent", _get_agent)
+
+        trigger = TriggerRecord(
+            id=uuid4(),
+            tenant_id=tenant,
+            agent_name="test-agent",
+            agent_version="1.0.0",
+            name="nightly",
+            kind="cron",
+            config={"expr": "0 9 * * *"},
+            enabled=True,
+            source="api",
+            originating_thread_id=orig,
+            context_mode="reuse_thread",
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+        run = RunInfo(
+            run_id=run_id,
+            tenant_id=tenant,
+            thread_id=scratch,
+            user_id=None,
+            status=RunStatus.SUCCESS,
+            on_disconnect=DisconnectMode.CANCEL,
+            is_resume=False,
+            error=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+            finished_at=_NOW,
+        )
+        mirror = _FailingMirrorStore()
+
+        outcome = await deliver_run_result(
+            trigger=trigger,
+            run=run,
+            runtime=runtime,
+            agent_spec_store=agents,
+            thread_message_store=mirror,
+            now=_NOW,
+        )
+
+        # delivery must still report success — the mirror is best-effort
+        assert outcome.status == "delivered"
+        assert outcome.text == "Today's AI news: X"
+
+        # and inject_delivery's write really landed: the originating thread's
+        # checkpoint carries the result regardless of the mirror-sync outcome
+        turns = await read_turns(cp, orig, include_hidden=False)
+        assert any(t.role == "assistant" and t.content == outcome.text for t in turns)
