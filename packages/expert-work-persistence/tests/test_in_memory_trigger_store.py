@@ -457,3 +457,29 @@ async def test_memory_same_user_same_name_conflicts() -> None:
                 update={"user_id": u1, "name": "daily"}
             )
         )
+
+
+# --- Task 4 — list_by_user (per-user list, PR2 conversational tool + Spec 3) --
+
+
+@pytest.mark.asyncio
+async def test_memory_list_by_user_scopes() -> None:
+    store = InMemoryTriggerStore()
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "a"}
+        )
+    )
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u1, "name": "b"}
+        )
+    )
+    await store.create(
+        _record(trigger_id=uuid4(), tenant_id=tenant).model_copy(
+            update={"user_id": u2, "name": "c"}
+        )
+    )
+    got = await store.list_by_user(tenant_id=tenant, user_id=u1)
+    assert {t.name for t in got} == {"a", "b"}

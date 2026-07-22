@@ -127,6 +127,20 @@ class SqlTriggerStore(TriggerStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
 
+    async def list_by_user(
+        self, *, tenant_id: UUID, user_id: UUID, agent_name: str | None = None
+    ) -> list[TriggerRecord]:
+        async with self._sf() as session:
+            stmt = select(AgentTriggerRow).where(
+                AgentTriggerRow.tenant_id == tenant_id,
+                AgentTriggerRow.user_id == user_id,
+            )
+            if agent_name is not None:
+                stmt = stmt.where(AgentTriggerRow.agent_name == agent_name)
+            stmt = stmt.order_by(AgentTriggerRow.created_at.asc())
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
     async def list_all_tenants(
         self,
         *,

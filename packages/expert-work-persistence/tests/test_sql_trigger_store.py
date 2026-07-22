@@ -430,3 +430,31 @@ async def test_same_user_same_name_conflicts(trigger_store: SqlTriggerStore) -> 
     await trigger_store.create(r1)
     with pytest.raises(IntegrityError):
         await trigger_store.create(r2)
+
+
+# --- Task 4 — list_by_user (per-user list, PR2 conversational tool + Spec 3) --
+
+
+@pytest.mark.asyncio
+async def test_list_by_user_scopes_ordered_and_filters_agent(
+    trigger_store: SqlTriggerStore,
+) -> None:
+    tenant, u1, u2 = uuid4(), uuid4(), uuid4()
+    r1 = _record(trigger_id=uuid4(), tenant_id=tenant, agent_name="reporter", name="a").model_copy(
+        update={"user_id": u1, "created_at": _BASE}
+    )
+    r2 = _record(trigger_id=uuid4(), tenant_id=tenant, agent_name="auditor", name="b").model_copy(
+        update={"user_id": u1, "created_at": _BASE.replace(hour=13)}
+    )
+    r3 = _record(trigger_id=uuid4(), tenant_id=tenant, agent_name="reporter", name="c").model_copy(
+        update={"user_id": u2}
+    )
+    await trigger_store.create(r1)
+    await trigger_store.create(r2)
+    await trigger_store.create(r3)
+
+    got = await trigger_store.list_by_user(tenant_id=tenant, user_id=u1)
+    assert [t.name for t in got] == ["a", "b"]  # tenant+user scoped, created_at ascending
+
+    filtered = await trigger_store.list_by_user(tenant_id=tenant, user_id=u1, agent_name="reporter")
+    assert [t.name for t in filtered] == ["a"]
