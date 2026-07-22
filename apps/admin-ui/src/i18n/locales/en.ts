@@ -1175,6 +1175,11 @@ export interface TranslationKeys {
     tl_worker_task: string;
     tl_worker_summary: string; // "{{steps}} steps · {{calls}} LLM calls · {{duration}}"
     tl_worker_children: string;
+    task_result: string;
+    lifecycle_created: string;
+    lifecycle_fired: string;
+    lifecycle_completed: string;
+    fire_pending: string;
   };
   session_history: {
     title: string;
@@ -4076,6 +4081,12 @@ const en: TranslationKeys = {
     tl_worker_task: "Task",
     tl_worker_summary: "{{steps}} steps · {{calls}} LLM calls · {{duration}}",
     tl_worker_children: "child workers",
+    task_result: "Task result",
+    lifecycle_created: "Created",
+    lifecycle_fired: "Fired",
+    lifecycle_completed: "Completed",
+    fire_pending:
+      "The result hasn't landed yet — the run is still going. Reopen this conversation later to see it.",
   },
   session_history: {
     title: "Session history",

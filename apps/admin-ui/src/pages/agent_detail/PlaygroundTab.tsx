@@ -46,6 +46,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -82,6 +83,7 @@ import {
   parseRetryEvents,
   toolStatusSummary,
 } from "../../api/tool_timeline";
+import type { FireNowResult } from "../../api/triggers";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import { parseAgentState } from "../../api/agent_state";
@@ -245,6 +247,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   // that turn's TurnCard receives the live props — history turns never do).
   const tokenStream = useTokenStream();
   const [streamTurnId, setStreamTurnId] = useState<string | null>(null);
+  // Spec 1 PR4 Task 5 — every fire-now result the「立即触发」button reports,
+  // rendered inline as a 「任务结果」 card in the transcript (below the turns).
+  const [taskResults, setTaskResults] = useState<FireNowResult[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -300,6 +305,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     runIdByEl.current.clear();
     startedHistoryRunsRef.current.clear();
     setTurns([]);
+    setTaskResults([]);
     setAttachments([]);
     setUploadError(null);
     setThread(null);
@@ -342,6 +348,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     (picked: ThreadMeta) => {
       abortRef.current?.abort();
       setTurns([]);
+      setTaskResults([]);
       setAttachments([]);
       setThreadError(null);
       setResumed(true);
@@ -882,6 +889,14 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
+  }, []);
+
+  // Spec 1 PR4 Task 5 — the manage_task card's 「立即触发」 button reports its
+  // result here (threaded through TurnCard → StepTimeline → AgentStepCard →
+  // ToolCallCard); appended (never replacing) so every fire this session
+  // stays visible in the transcript.
+  const handleFireResult = useCallback((result: FireNowResult) => {
+    setTaskResults((prev) => [...prev, result]);
   }, []);
 
   return (
@@ -1473,6 +1488,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                       readOnly
                       loadState={load.state}
                       fallbackAnswer={h.fallbackAnswer}
+                      onFireResult={handleFireResult}
                     />
                   </div>
                 );
@@ -1544,9 +1560,106 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               finalized={
                 turn.id === streamTurnId ? tokenStream.finalized : false
               }
+              onFireResult={handleFireResult}
             />
           ))}
+          {taskResults.map((result) => (
+            <TaskResultCard key={result.run_id} result={result} />
+          ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Spec 1 PR4 Task 5 — one fire-now result rendered inline in the transcript.
+ *  ``taskResults`` accumulates every ``FireNowResult`` the manage_task card's
+ *  「立即触发」 button reports (via ``onFireResult``, threaded down through
+ *  TurnCard → StepTimeline → AgentStepCard → ToolCallCard); this renders the
+ *  delivered answer (or a pending hint) plus created/fired/completed
+ *  lifecycle chips derived purely from the result — no extra audit fetch.
+ *  「查看运行」 opens the fired run's own conversation, where the full
+ *  step/tool/trace view already lives (reused, not re-embedded here). */
+function TaskResultCard({ result }: { result: FireNowResult }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const succeeded = result.trigger_run_status === "succeeded";
+  const failed = result.trigger_run_status === "failed";
+  const completedColor = succeeded ? "success" : failed ? "error" : "default";
+  // Terminal outcomes both read as "completed" (color carries success/failure);
+  // still in-flight reuses the tool card's own 「已触发,运行中」 wording.
+  const completedLabel =
+    succeeded || failed
+      ? t("playground.lifecycle_completed")
+      : t("tool_timeline.fire_pending");
+
+  return (
+    <div
+      data-testid="playground-task-result"
+      style={{
+        border: "1px solid var(--ew-border-subtle)",
+        borderRadius: 6,
+        overflow: "hidden",
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          padding: "8px 12px",
+          background: "var(--ew-surface-raised)",
+          borderBottom: "1px solid var(--ew-border-subtle)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <Text strong style={{ fontSize: 13 }}>
+          {t("playground.task_result")}
+        </Text>
+        <Tag bordered={false} color="default" style={{ margin: 0 }}>
+          {t("playground.lifecycle_created")}
+        </Tag>
+        <Tag bordered={false} color="processing" style={{ margin: 0 }}>
+          {t("playground.lifecycle_fired")}
+        </Tag>
+        <Tag
+          bordered={false}
+          color={completedColor}
+          style={{ margin: 0 }}
+          data-testid="playground-task-result-completed"
+        >
+          {completedLabel}
+        </Tag>
+        <Button
+          size="small"
+          type="link"
+          icon={<ExternalLink size={12} strokeWidth={1.75} />}
+          onClick={() =>
+            navigate(`/conversations/${encodeURIComponent(result.thread_id)}`)
+          }
+          style={{ marginLeft: "auto" }}
+          data-testid="playground-task-result-view-run"
+        >
+          {t("playground.view_run")}
+        </Button>
+      </div>
+      <div style={{ padding: "8px 12px" }}>
+        {result.delivery === "delivered" && result.delivered_text ? (
+          <MarkdownView>{result.delivered_text}</MarkdownView>
+        ) : result.delivery === "pending" ? (
+          <Text
+            type="secondary"
+            style={{ fontSize: 12 }}
+            data-testid="playground-task-result-pending"
+          >
+            {t("playground.fire_pending")}
+          </Text>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("tool_timeline.fire_failed")}
+          </Text>
+        )}
       </div>
     </div>
   );
@@ -1858,6 +1971,7 @@ function TurnCard({
   liveByStep,
   ttftMs = null,
   finalized = false,
+  onFireResult,
 }: {
   turn: Turn;
   /** The turn's index in the transcript — sent as feedback ``turn_seq``. */
@@ -1896,6 +2010,12 @@ function TurnCard({
   liveByStep?: ReadonlyMap<number, LiveStep>;
   ttftMs?: number | null;
   finalized?: boolean;
+  /** Spec 1 PR4 Task 5 — see ``StepTimelineProps.onFireResult``; PlaygroundTab
+   *  passes its real ``handleFireResult`` here for both the live and history
+   *  TurnCard render sites, so a manage_task card's 「立即触发」 button (live
+   *  or replayed) reports its result back up into the transcript's task
+   *  result cards. */
+  onFireResult?: (result: FireNowResult) => void;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
@@ -2433,6 +2553,7 @@ function TurnCard({
                     liveByStep={liveByStep}
                     ttftMs={ttftMs}
                     finalized={finalized}
+                    onFireResult={onFireResult}
                   />
                 </>
               ) : eventView === "exact" ? (

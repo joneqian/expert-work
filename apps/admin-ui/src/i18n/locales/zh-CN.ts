@@ -1252,6 +1252,11 @@ const zhCN: TranslationKeys = {
     tl_worker_task: "任务",
     tl_worker_summary: "{{steps}} 步 · {{calls}} 次 LLM · {{duration}}",
     tl_worker_children: "子 worker",
+    task_result: "任务结果",
+    lifecycle_created: "已创建",
+    lifecycle_fired: "已触发",
+    lifecycle_completed: "已完成",
+    fire_pending: "结果还没送达 —— 运行仍在进行中,稍后重新打开该对话即可看到结果。",
   },
   session_history: {
     title: "会话历史",

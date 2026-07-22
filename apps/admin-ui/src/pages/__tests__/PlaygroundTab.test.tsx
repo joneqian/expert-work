@@ -20,6 +20,7 @@ import * as sessionsSdk from "../../api/sessions";
 import * as workspaceSdk from "../../api/workspace";
 import * as artifactsSdk from "../../api/artifacts";
 import * as traceFacadeSdk from "../../api/trace_facade";
+import * as triggersSdk from "../../api/triggers";
 import * as uploadsSdk from "../../api/uploads";
 import { PlaygroundTab } from "../agent_detail/PlaygroundTab";
 import { AuthProvider } from "../../auth/AuthContext";
@@ -27,6 +28,7 @@ import type { AgentDetailResponse } from "../../api/agents";
 import type { ApprovalItem } from "../../api/approvals";
 import type { SseEvent, ThreadMeta } from "../../api/sessions";
 import type { RunTrace } from "../../api/trace_facade";
+import type { FireNowResult } from "../../api/triggers";
 
 const sampleDetail: AgentDetailResponse = {
   record: {
@@ -73,6 +75,7 @@ const streamRunEventsMock = vi.spyOn(runsSdk, "streamRunEvents");
 const getRunMock = vi.spyOn(runsSdk, "getRun");
 const getRunTraceMock = vi.spyOn(traceFacadeSdk, "getRunTrace");
 const listThreadRunsMock = vi.spyOn(runsSdk, "listThreadRuns");
+const fireTriggerNowMock = vi.spyOn(triggersSdk, "fireTriggerNow");
 
 // jsdom has no IntersectionObserver — stub one that treats every observed
 // element as immediately visible (fires its callback synchronously from
@@ -140,6 +143,7 @@ beforeEach(() => {
   // pre-existing flat-text degradation path unless a test opts into runs.
   listThreadRunsMock.mockReset();
   listThreadRunsMock.mockResolvedValue([]);
+  fireTriggerNowMock.mockReset();
   vi.stubGlobal("IntersectionObserver", IOStub);
 });
 
@@ -1950,6 +1954,199 @@ describe("PlaygroundTab", () => {
         "rA",
         expect.anything(),
       );
+    });
+  });
+
+  // Task 5 — fire-now result card: onFireResult wired from PlaygroundTab into
+  // StepTimeline → AgentStepCard → ToolCallCard's 「立即触发」 button, and the
+  // delivered/pending result rendered inline as a 「任务结果」 card with
+  // created/fired/completed lifecycle chips (Spec 1 PR4).
+  describe("fire-now result card", () => {
+    function manageTaskEvents(): SseEvent[] {
+      return [
+        {
+          id: "m",
+          event: "metadata",
+          data: { run_id: "run-mt-1" },
+          rawData: "",
+          receivedAt: "t1",
+        },
+        {
+          id: "u1",
+          event: "updates",
+          data: {
+            agent: {
+              messages: [
+                {
+                  type: "ai",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "c1",
+                      name: "manage_task",
+                      args: { action: "create", name: "每天早上3点搜AI新闻" },
+                      type: "tool_call",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+          rawData: "",
+          receivedAt: "t2",
+        },
+        {
+          id: "u2",
+          event: "updates",
+          data: {
+            tools: {
+              messages: [
+                {
+                  type: "tool",
+                  tool_call_id: "c1",
+                  name: "manage_task",
+                  content: "Created trigger trig-1",
+                  status: "success",
+                  artifact: { trigger_id: "trig-1" },
+                },
+              ],
+            },
+          },
+          rawData: "",
+          receivedAt: "t3",
+        },
+        { id: "e", event: "end", data: "ok", rawData: "ok", receivedAt: "t4" },
+      ];
+    }
+
+    async function fireFromManageTaskCard(
+      user: ReturnType<typeof userEvent.setup>,
+    ) {
+      createSessionMock.mockResolvedValue(sampleThread);
+      streamRunMock.mockReturnValue(makeStream(manageTaskEvents()));
+      renderPg();
+      await screen.findByTestId("playground-input");
+      await user.type(
+        screen.getByTestId("playground-input"),
+        "每天早上3点搜AI新闻",
+      );
+      await user.click(screen.getByTestId("playground-run"));
+      // The manage_task step-card starts collapsed (no error) — expand it to
+      // reach the nested ToolCallCard's 「立即触发」 button.
+      await user.click(await screen.findByTestId("step-head"));
+      await user.click(await screen.findByTestId("tool-fire-now"));
+    }
+
+    it("renders the delivered text and a green completed chip", async () => {
+      const user = userEvent.setup();
+      const result: FireNowResult = {
+        run_id: "run-fired-1",
+        thread_id: "44444444-4444-4444-4444-444444444444",
+        run_status: "completed",
+        trigger_run_status: "succeeded",
+        delivery: "delivered",
+        delivered_text: "今日 AI 新闻:GPT-6 发布。",
+      };
+      fireTriggerNowMock.mockResolvedValue(result);
+
+      await fireFromManageTaskCard(user);
+
+      await waitFor(() =>
+        expect(fireTriggerNowMock).toHaveBeenCalledWith("trig-1"),
+      );
+      const card = await screen.findByTestId("playground-task-result");
+      expect(card).toHaveTextContent("今日 AI 新闻:GPT-6 发布。");
+      expect(
+        within(card).getByTestId("playground-task-result-completed"),
+      ).toHaveClass("ant-tag-success");
+    });
+
+    it("renders the pending hint when the result hasn't landed yet", async () => {
+      const user = userEvent.setup();
+      const result: FireNowResult = {
+        run_id: "run-fired-2",
+        thread_id: "55555555-5555-5555-5555-555555555555",
+        run_status: "running",
+        trigger_run_status: "fired",
+        delivery: "pending",
+        delivered_text: null,
+      };
+      fireTriggerNowMock.mockResolvedValue(result);
+
+      await fireFromManageTaskCard(user);
+
+      await waitFor(() =>
+        expect(fireTriggerNowMock).toHaveBeenCalledWith("trig-1"),
+      );
+      const card = await screen.findByTestId("playground-task-result");
+      expect(card).toHaveTextContent(i18n.t("playground.fire_pending"));
+      expect(
+        within(card).getByTestId("playground-task-result-completed"),
+      ).not.toHaveClass("ant-tag-success");
+    });
+
+    // Bug fix — ``taskResults`` used to survive a conversation switch: firing a
+    // task in thread A left its 「任务结果」 card rendered underneath thread B's
+    // (empty) transcript after "New session" / resuming a different thread,
+    // making A's result look like it belonged to B.
+    it("clears the task-result card when starting a new session", async () => {
+      const user = userEvent.setup();
+      const result: FireNowResult = {
+        run_id: "run-fired-3",
+        thread_id: "66666666-6666-6666-6666-666666666666",
+        run_status: "completed",
+        trigger_run_status: "succeeded",
+        delivery: "delivered",
+        delivered_text: "今日 AI 新闻:GPT-6 发布。",
+      };
+      fireTriggerNowMock.mockResolvedValue(result);
+
+      await fireFromManageTaskCard(user);
+
+      await waitFor(() =>
+        expect(fireTriggerNowMock).toHaveBeenCalledWith("trig-1"),
+      );
+      await screen.findByTestId("playground-task-result");
+
+      await user.click(screen.getByTestId("playground-new-session"));
+
+      expect(
+        screen.queryByTestId("playground-task-result"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clears the task-result card when resuming a different thread", async () => {
+      const user = userEvent.setup();
+      const result: FireNowResult = {
+        run_id: "run-fired-4",
+        thread_id: "77777777-7777-7777-7777-777777777777",
+        run_status: "completed",
+        trigger_run_status: "succeeded",
+        delivery: "delivered",
+        delivered_text: "今日 AI 新闻:GPT-6 发布。",
+      };
+      fireTriggerNowMock.mockResolvedValue(result);
+      const past: ThreadMeta = {
+        ...sampleThread,
+        thread_id: "aaaaaaaa-0000-0000-0000-000000000009",
+      };
+      listSessionsMock.mockResolvedValue([past]);
+
+      await fireFromManageTaskCard(user);
+
+      await waitFor(() =>
+        expect(fireTriggerNowMock).toHaveBeenCalledWith("trig-1"),
+      );
+      await screen.findByTestId("playground-task-result");
+
+      await user.click(screen.getByTestId("playground-history-open"));
+      await user.click(
+        await screen.findByTestId(`session-history-item-${past.thread_id}`),
+      );
+
+      expect(
+        screen.queryByTestId("playground-task-result"),
+      ).not.toBeInTheDocument();
     });
   });
 });
