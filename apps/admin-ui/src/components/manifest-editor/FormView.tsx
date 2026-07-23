@@ -1,12 +1,17 @@
 /**
  * Curated agent form — a hand-built view over the canonical fields of an agent
  * manifest. The fields are grouped into named sections (basic / model / prompt /
- * tools / capabilities / memory / governance); the parent ``ManifestEditor``
- * renders one section per tab, so the form reads as a short focused panel
- * instead of one long scroll. Every control emits the FULL merged manifest via
- * the form_model writers, so non-curated fields a user hand-added in raw YAML
+ * tools / capabilities / governance); the parent ``ManifestEditor`` renders
+ * one section per tab, so the form reads as a short focused panel instead of
+ * one long scroll. Every control emits the FULL merged manifest via the
+ * form_model writers, so non-curated fields a user hand-added in raw YAML
  * are preserved across a Form round-trip. The model catalog is loaded once and
  * handed to ModelSelect.
+ *
+ * "memory" is no longer one of these sections — config-page redesign v2 Task
+ * 2 moved every memory field into ``MemorySection`` (its own three-sub-tab
+ * curated pane), so ``ManifestEditor``'s "memory" ``CONFIG_GROUPS`` entry now
+ * has a statically-empty ``sections: []`` like "budget"/"context"/etc.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import {
@@ -41,7 +46,6 @@ import {
   readFallback,
   readInjectCurrentDate,
   readMainSupportsVision,
-  readMemoryOn,
   readModel,
   readName,
   readOutputDlp,
@@ -53,21 +57,13 @@ import {
   readPromptJinja,
   readPromptVariables,
   readApprovalTimeout,
-  readReconcileWrites,
   readReflectionEvaluator,
   readReflectionEvaluatorOn,
-  readRecallMode,
-  readRewriteReads,
-  readAbstainThreshold,
   readSystemPrompt,
   readTools,
-  readTopK,
   readTrajectoryRecording,
-  readVerifyReads,
   readVisionModel,
   readVisionOn,
-  readWriteBack,
-  readWriteMinImportance,
   setActionScreen,
   setActionScreenOnError,
   setApprovalTimeout,
@@ -78,7 +74,6 @@ import {
   setFallback,
   setInjectCurrentDate,
   setMcp,
-  setMemoryOn,
   setModel,
   setName,
   setOutputDlp,
@@ -86,19 +81,11 @@ import {
   setOutputJudgeOnError,
   setOutputScreen,
   setPromptInjection,
-  setReconcileWrites,
-  setRecallMode,
-  setRewriteReads,
-  setAbstainThreshold,
   setReflectionEvaluator,
   setSystemPrompt,
   setTool,
-  setTopK,
   setTrajectoryRecording,
-  setVerifyReads,
   setVisionModel,
-  setWriteBack,
-  setWriteMinImportance,
 } from "./form_model";
 import { FallbackChainEditor } from "./widgets/FallbackChainEditor";
 import { McpToolPicker, type McpPickerSource } from "./widgets/McpToolPicker";
@@ -116,7 +103,6 @@ export type FormSection =
   | "knowledge"
   | "skills"
   | "subagents"
-  | "memory"
   | "governance"
   | "defenses";
 
@@ -205,7 +191,6 @@ export function FormView({
   }, []);
 
   const tools = readTools(formData);
-  const memoryOn = readMemoryOn(formData);
   const approvalTools = readApprovalTools(formData);
   const dynamicWorkersOn = readDynamicWorkersOn(formData);
   const outputSchemaName = readOutputSchemaName(formData);
@@ -562,231 +547,6 @@ export function FormView({
     knowledge: <KnowledgePicker formData={formData} onChange={onChange} />,
     skills: <SkillPicker formData={formData} onChange={onChange} />,
     subagents: <SubagentPicker formData={formData} onChange={onChange} />,
-
-    memory: (
-      <section data-testid="af-memory" style={SECTION}>
-        <Heading>
-          {t("agent_form.section_memory")}
-          <FieldHelp
-            text={t("agent_form.section_memory_help")}
-            testId="af-memory"
-          />
-        </Heading>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 8,
-          }}
-        >
-          <Switch
-            checked={memoryOn}
-            data-testid="af-memory-toggle"
-            aria-label={t("agent_form.section_memory")}
-            onChange={(on) => onChange(setMemoryOn(formData, on))}
-          />
-          <Text type="secondary">{t("agent_form.memory_hint")}</Text>
-        </label>
-        {memoryOn && (
-          <>
-            <div style={FIELD} data-testid="af-topk">
-              <label style={LABEL}>
-                {t("agent_form.memory_topk")}
-                <FieldHelp
-                  text={t("agent_form.memory_topk_help")}
-                  testId="af-topk"
-                />
-              </label>
-              <InputNumber
-                min={1}
-                value={readTopK(formData) ?? 5}
-                aria-label={t("agent_form.memory_topk")}
-                onChange={(v) => onChange(setTopK(formData, v ?? 5))}
-              />
-            </div>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 8,
-              }}
-            >
-              <Switch
-                checked={readWriteBack(formData)}
-                data-testid="af-memory-writeback"
-                aria-label={t("agent_form.memory_write_back")}
-                onChange={(on) => onChange(setWriteBack(formData, on))}
-              />
-              <Text type="secondary">
-                {t("agent_form.memory_write_back")}
-                <FieldHelp
-                  text={t("agent_form.memory_write_back_help")}
-                  testId="af-memory-writeback"
-                />
-              </Text>
-            </label>
-            <Collapse
-              data-testid="af-memory-advanced"
-              defaultActiveKey={[]}
-              items={[
-                {
-                  key: "advanced",
-                  label: t("agent_form.section_advanced"),
-                  children: (
-                    <>
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 12,
-                        }}
-                      >
-                        <Switch
-                          checked={readVerifyReads(formData)}
-                          data-testid="af-memory-verify-reads"
-                          aria-label={t("agent_form.memory_verify_reads")}
-                          onChange={(on) =>
-                            onChange(setVerifyReads(formData, on))
-                          }
-                        />
-                        <Text type="secondary">
-                          {t("agent_form.memory_verify_reads")}
-                          <FieldHelp
-                            text={t("agent_form.memory_verify_reads_help")}
-                            testId="af-memory-verify-reads"
-                          />
-                        </Text>
-                      </label>
-                      <div style={FIELD} data-testid="af-memory-min-importance">
-                        <label style={LABEL}>
-                          {t("agent_form.memory_write_min_importance")}
-                          <FieldHelp
-                            text={t(
-                              "agent_form.memory_write_min_importance_help",
-                            )}
-                            testId="af-memory-min-importance"
-                          />
-                        </label>
-                        <InputNumber
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={readWriteMinImportance(formData)}
-                          aria-label={t(
-                            "agent_form.memory_write_min_importance",
-                          )}
-                          onChange={(v) =>
-                            onChange(setWriteMinImportance(formData, v ?? 0))
-                          }
-                        />
-                      </div>
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 12,
-                        }}
-                      >
-                        <Switch
-                          checked={readReconcileWrites(formData)}
-                          data-testid="af-memory-reconcile"
-                          aria-label={t("agent_form.memory_reconcile_writes")}
-                          onChange={(on) =>
-                            onChange(setReconcileWrites(formData, on))
-                          }
-                        />
-                        <Text type="secondary">
-                          {t("agent_form.memory_reconcile_writes")}
-                          <FieldHelp
-                            text={t("agent_form.memory_reconcile_writes_help")}
-                            testId="af-memory-reconcile"
-                          />
-                        </Text>
-                      </label>
-                      <div style={FIELD} data-testid="af-memory-recall-mode">
-                        <label style={LABEL}>
-                          {t("agent_form.memory_recall_mode")}
-                          <FieldHelp
-                            text={t("agent_form.memory_recall_mode_help")}
-                            testId="af-memory-recall-mode"
-                          />
-                        </label>
-                        <Select
-                          style={{ width: "100%" }}
-                          value={readRecallMode(formData)}
-                          aria-label={t("agent_form.memory_recall_mode")}
-                          onChange={(v) => onChange(setRecallMode(formData, v))}
-                          options={[
-                            {
-                              value: "per_session",
-                              label: t("agent_form.memory_recall_per_session"),
-                            },
-                            {
-                              value: "per_turn",
-                              label: t("agent_form.memory_recall_per_turn"),
-                            },
-                          ]}
-                        />
-                      </div>
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 12,
-                        }}
-                      >
-                        <Switch
-                          checked={readRewriteReads(formData)}
-                          data-testid="af-memory-rewrite-reads"
-                          aria-label={t("agent_form.memory_rewrite_reads")}
-                          onChange={(on) =>
-                            onChange(setRewriteReads(formData, on))
-                          }
-                        />
-                        <Text type="secondary">
-                          {t("agent_form.memory_rewrite_reads")}
-                          <FieldHelp
-                            text={t("agent_form.memory_rewrite_reads_help")}
-                            testId="af-memory-rewrite-reads"
-                          />
-                        </Text>
-                      </label>
-                      <div
-                        style={FIELD}
-                        data-testid="af-memory-abstain-threshold"
-                      >
-                        <label style={LABEL}>
-                          {t("agent_form.memory_abstain_threshold")}
-                          <FieldHelp
-                            text={t("agent_form.memory_abstain_threshold_help")}
-                            testId="af-memory-abstain-threshold"
-                          />
-                        </label>
-                        <InputNumber
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={readAbstainThreshold(formData)}
-                          aria-label={t("agent_form.memory_abstain_threshold")}
-                          onChange={(v) =>
-                            onChange(setAbstainThreshold(formData, v ?? 0))
-                          }
-                        />
-                      </div>
-                    </>
-                  ),
-                },
-              ]}
-            />
-          </>
-        )}
-      </section>
-    ),
 
     // The run-deadline control that used to live here moved to the "budget"
     // group's RunBudgetSection (Task 6 pilot) — policies.run_deadline_s is

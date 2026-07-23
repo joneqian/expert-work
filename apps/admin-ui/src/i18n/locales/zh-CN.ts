@@ -808,6 +808,47 @@ const zhCN: TranslationKeys = {
       "配置清单里的 runtime / image / image_build / resources / readonly_root / writable / mounts 这几个字段,还有 code 这一整块,目前都只是摆设(专业说法叫「声明性字段」):写了不会报错,但系统运行时根本不会去读它们,留着也没坏处。真要调整实际的资源上限,请去改平台部署那边的配置(sandbox-supervisor 的环境变量)。",
   },
   memory_group: {
+    tab_basic: "基本",
+    tab_retrieval: "检索细节",
+    tab_budget: "预算与整理",
+    on_label: "长期记忆",
+    on_brief: "跨会话记住用户信息,需平台已配 Embedding",
+    on_impact:
+      "开启后,Agent 跨会话记住用户信息和过往交互,下次自动想起来;\n关掉则每次对话都从零开始。\n示例:开启,召回 5 条",
+    topk_label: "每轮召回条数",
+    topk_brief: "每轮最多召回几条记忆",
+    topk_impact:
+      "每次对话最多调取几条最相关的记忆。\n太多会挤占上下文,太少会漏信息。\n示例:5",
+    write_back_label: "学习(记住新信息)",
+    write_back_brief: "自动记住新信息",
+    write_back_impact:
+      "开启后,每次对话结束会把新了解到的信息记下来,下次自动想起。\n关掉则只用已有记忆,不再新增。\n示例:开启",
+    verify_reads_label: "回答前核对记忆",
+    verify_reads_brief: "回答前核对记忆,更准更慢",
+    verify_reads_impact:
+      "调取记忆后、用进回答前,先让模型筛一遍,丢掉跟当前问题无关、过期或矛盾的,避免旧记忆带偏回答。\n会多花一次模型调用;万一出错则不拦截、全部放行。\n默认开启。\n示例:开启",
+    write_min_importance_label: "重要性过滤",
+    write_min_importance_brief: "低于此重要度不存记忆",
+    write_min_importance_impact:
+      "给每条要记的信息打一个重要性分(0–1),低于这个值就不记,避免把闲聊也存进去。\n0.3:丢掉明显琐碎的;0:全部都记。\n示例:0.3",
+    reconcile_writes_label: "去重整理",
+    reconcile_writes_brief: "存新记忆前自动去重合并",
+    reconcile_writes_impact:
+      "记新信息前,先和相似的旧记忆比对,自动合并、更新或删除,避免重复堆积、自相矛盾。\n关掉则直接追加。\n默认开启。\n示例:开启",
+    recall_mode_label: "记忆插入位置",
+    recall_mode_brief: "控制记忆多久插入一次",
+    recall_mode_impact:
+      "记忆插入对话的位置。\n每会话:整段对话固定插一次,更省更快(默认)。\n每轮:每轮都重新插,适合对话中会自己改记忆的 Agent。\n示例:每会话",
+    recall_mode_per_session: "每会话(更省更快)",
+    recall_mode_per_turn: "每轮",
+    rewrite_reads_label: "改写问题用于检索",
+    rewrite_reads_brief: "检索前把问题改写得更准",
+    rewrite_reads_impact:
+      "检索记忆前,先把用户最新的消息改写成一句独立的检索词——剥掉指令、精简过长内容,避免带偏召回的记忆。\n会多花一次模型调用;万一出错则用原消息。\n默认关闭(按需开启)。\n示例:关闭",
+    abstain_threshold_label: "跳过弱匹配(阈值)",
+    abstain_threshold_brief: "匹配太弱时干脆不给记忆",
+    abstain_threshold_impact:
+      "检索后,若最相关记忆与问题的相似度低于此值,则不注入任何记忆,而非塞一个勉强的匹配——避免把关系不大的记忆拉进回答。\n0 = 从不跳过(默认);约 0.2–0.3 = 跳过明显偏弱的匹配。\n示例:0",
     panel_injection: "①注入预算",
     panel_consolidation: "②后台记忆整理",
     inj_budget_label: "记忆注入 token 预算",
@@ -829,8 +870,6 @@ const zhCN: TranslationKeys = {
       "关掉以后,这个 Agent 的长期记忆就不会再自动去重、沉淀、清理噪音了,临时记忆会越堆越多。整理这个活交给辅助模型做,会按「记忆整理」这个用途单独计费;判断哪些记忆算「相似」的具体标准是租户级别的配置,不在这份配置清单里。",
     aux_model_note:
       "做整理用的辅助模型,默认用平台统一配置的那个(claude-sonnet-4-6);如果想单独给这个 Agent 指定别的模型,请去 YAML 视图编辑 policies.memory_consolidation.aux_model(需要填一个完整的模型配置块)。",
-    reserved_note:
-      "memory.short_term 和 dynamic_context.inject_memory 这两个字段目前只是占位(专业说法叫保留字段):写了不会报错,但系统不会真的去读。记忆功能是否开启,只看有没有声明 memory.long_term(就是上面这个开关)。",
   },
   model_group: {
     panel_reflection: "反思自评",
@@ -900,9 +939,6 @@ const zhCN: TranslationKeys = {
     section_model: "模型",
     section_prompt: "系统提示词",
     field_prompt_placeholder: "你是一个有帮助的助手。",
-    section_memory: "长期记忆",
-    memory_hint: "跨会话记忆，需要平台已配 Embedding。",
-    memory_topk: "每轮召回条数",
     section_tools: "工具",
     tool_web_search: "联网搜索",
     tool_http: "HTTP 工具",
@@ -959,10 +995,6 @@ const zhCN: TranslationKeys = {
       "Agent 主对话用的大模型。\n先选厂商,再选具体模型;温度越高回答越发散。\n示例:anthropic / claude-sonnet-4-5,温度 0.2",
     section_prompt_help:
       "系统提示词,定义 Agent 的角色、语气和行为规则,是塑造性格的核心。\n示例:你是资深 Python 工程师,回答简洁、给可运行代码",
-    section_memory_help:
-      "开启后,Agent 跨会话记住用户信息和过往交互,下次自动想起来;\n关掉则每次对话都从零开始。\n示例:开启,召回 5 条",
-    memory_topk_help:
-      "每次对话最多调取几条最相关的记忆。\n太多会挤占上下文,太少会漏信息。\n示例:5",
     section_reflection_evaluator_help:
       "指定反思自评所用的评判模型(routing 规则)。仅在上方「反思自评」开启后生效;未指定时反思复用主模型。",
     section_defenses: "防御守卫",
@@ -1050,29 +1082,6 @@ const zhCN: TranslationKeys = {
       "开启(默认)时,Agent 干活中可以临时拉几个小助手分头处理子任务。\n需要严格单线、只用一个执行体时关掉。\n示例:研究型 Agent 开,简单问答 Bot 关",
     dynamic_workers_hint: "允许 Agent 运行中临时创建小助手分担任务(默认开启)。",
     section_advanced: "高级",
-    memory_write_back: "学习(记住新信息)",
-    memory_write_back_help:
-      "开启后,每次对话结束会把新了解到的信息记下来,下次自动想起。\n关掉则只用已有记忆,不再新增。\n示例:开启",
-    memory_verify_reads: "回答前核对记忆",
-    memory_verify_reads_help:
-      "调取记忆后、用进回答前,先让模型筛一遍,丢掉跟当前问题无关、过期或矛盾的,避免旧记忆带偏回答。\n会多花一次模型调用;万一出错则不拦截、全部放行。\n默认开启。\n示例:开启",
-    memory_write_min_importance: "重要性过滤",
-    memory_write_min_importance_help:
-      "给每条要记的信息打一个重要性分(0–1),低于这个值就不记,避免把闲聊也存进去。\n0.3:丢掉明显琐碎的;0:全部都记。\n示例:0.3",
-    memory_reconcile_writes: "去重整理",
-    memory_reconcile_writes_help:
-      "记新信息前,先和相似的旧记忆比对,自动合并、更新或删除,避免重复堆积、自相矛盾。\n关掉则直接追加。\n默认开启。\n示例:开启",
-    memory_recall_mode: "记忆插入位置",
-    memory_recall_mode_help:
-      "记忆插入对话的位置。\n每会话:整段对话固定插一次,更省更快(默认)。\n每轮:每轮都重新插,适合对话中会自己改记忆的 Agent。\n示例:每会话",
-    memory_recall_per_session: "每会话(更省更快)",
-    memory_recall_per_turn: "每轮",
-    memory_rewrite_reads: "改写问题用于检索",
-    memory_rewrite_reads_help:
-      "检索记忆前,先把用户最新的消息改写成一句独立的检索词——剥掉指令、精简过长内容,避免带偏召回的记忆。\n会多花一次模型调用;万一出错则用原消息。\n默认关闭(按需开启)。\n示例:关闭",
-    memory_abstain_threshold: "跳过弱匹配(阈值)",
-    memory_abstain_threshold_help:
-      "检索后,若最相关记忆与问题的相似度低于此值,则不注入任何记忆,而非塞一个勉强的匹配——避免把关系不大的记忆拉进回答。\n0 = 从不跳过(默认);约 0.2–0.3 = 跳过明显偏弱的匹配。\n示例:0",
     approval_timeout: "审批等待上限(秒)",
     approval_timeout_help:
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",

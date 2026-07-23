@@ -22,7 +22,6 @@ import "../../i18n";
 import type { AgentManifest } from "./form_model";
 import {
   setApprovalTools,
-  setMemoryOn,
   setPromptJinja,
   setPromptVariables,
   setReflectionEvaluator,
@@ -201,11 +200,6 @@ const JINJA_PROMPT_MANIFEST: AgentManifest = (() => {
   return { ...m, metadata: { name: "jinja-agent" } };
 })();
 
-const MEMORY_ON_MANIFEST: AgentManifest = (() => {
-  const m = setMemoryOn(BLANK_MANIFEST, true) as AgentManifest;
-  return { ...m, metadata: { name: "memory-agent" } };
-})();
-
 const GOVERNANCE_MANIFEST: AgentManifest = (() => {
   const m = setApprovalTools(BLANK_MANIFEST, ["exec_python"]) as AgentManifest;
   return { ...m, metadata: { name: "governed-agent" } };
@@ -283,20 +277,6 @@ export const SkillsRich: Story = {
     formData: { ...BLANK_MANIFEST, metadata: { name: "skilled-agent" } },
     onChange: () => {},
     section: "skills",
-  },
-};
-
-/**
- * The Memory tab with long-term memory on — top_k + the write-back master
- * toggle up front, and an Advanced panel holding verify-on-read, the
- * importance write-filter, reconcile and recall-mode.
- */
-export const MemoryDepth: Story = {
-  decorators: [withMcpFixture],
-  args: {
-    formData: MEMORY_ON_MANIFEST,
-    onChange: () => {},
-    section: "memory",
   },
 };
 

@@ -19,7 +19,7 @@ export const CONFIG_GROUPS: readonly ConfigGroup[] = [
   { id: "model", labelKey: "manifest_editor.group_model", sections: ["model"], keywords: ["模型", "回退", "路由", "思考", "model", "fallback", "thinking", "vision"] },
   { id: "prompt", labelKey: "manifest_editor.group_prompt", sections: ["prompt"], keywords: ["提示词", "输出", "jinja", "prompt", "schema", "日期", "date", "提醒"] },
   { id: "capabilities", labelKey: "manifest_editor.group_capabilities", sections: ["tools", "mcp", "knowledge", "skills", "subagents"], keywords: ["工具", "技能", "知识库", "子agent", "worker", "tools", "mcp", "skills"] },
-  { id: "memory", labelKey: "manifest_editor.group_memory", sections: ["memory"], keywords: ["记忆", "memory", "recall"] },
+  { id: "memory", labelKey: "manifest_editor.group_memory", sections: [], keywords: ["记忆", "memory", "recall"] },
   { id: "budget", labelKey: "manifest_editor.group_budget", sections: [], keywords: ["步数", "超时", "预算", "max_iterations", "deadline", "idle", "no_progress", "工作流", "workflow", "plan_execute", "规划"] },
   { id: "context", labelKey: "manifest_editor.group_context", sections: [], keywords: ["压缩", "上下文", "compression", "working memory", "prune"] },
   { id: "security", labelKey: "manifest_editor.group_security", sections: ["defenses", "governance"], keywords: ["防护", "审批", "安全", "defense", "approval", "egress"] },

@@ -99,12 +99,6 @@ describe("FormView", () => {
     renderSection("subagents");
     expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
 
-    renderSection("memory");
-    expect(screen.getByTestId("af-memory")).toBeInTheDocument();
-    // Memory-on seed surfaces the write-back master toggle + the advanced panel.
-    expect(screen.getByTestId("af-memory-writeback")).toBeInTheDocument();
-    expect(screen.getByTestId("af-memory-advanced")).toBeInTheDocument();
-
     renderSection("governance");
     expect(screen.getByTestId("af-approval")).toBeInTheDocument();
     expect(screen.getByTestId("af-dynamic-workers")).toBeInTheDocument();
@@ -186,15 +180,6 @@ describe("FormView", () => {
     await user.click(screen.getByTestId("af-fallback-remove-0"));
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
     expect(last.spec?.model?.fallback).toBeUndefined();
-  });
-
-  it("toggling write-back off sets memory.long_term.write_back false", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("memory", SEED, onChange);
-    await user.click(screen.getByTestId("af-memory-writeback"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.memory?.long_term?.write_back).toBe(false);
   });
 
   it("checking an approval tool adds it to policies.approval_required_tools", async () => {
@@ -279,15 +264,6 @@ describe("FormView", () => {
     expect(last.metadata?.name).toBe("botX");
     expect(last.apiVersion).toBe("expert_work/v1");
     expect(last.spec?.sandbox).toEqual({ kind: "none" });
-  });
-
-  it("toggling memory off sets spec.memory.long_term to null", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("memory", SEED, onChange);
-    await user.click(screen.getByTestId("af-memory-toggle"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.memory?.long_term).toBeNull();
   });
 
   it("checking web search adds a builtin web_search tool entry", async () => {

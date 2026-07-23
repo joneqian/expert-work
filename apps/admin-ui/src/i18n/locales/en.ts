@@ -768,17 +768,53 @@ export interface TranslationKeys {
     platform_note_body: string;
     declarative_note: string;
   };
-  // Task 2 (PR5) — "Memory" group (MemorySection), embedded after the
-  // existing "memory" FormView section (the on/off toggle + retrieve_top_k
-  // + write-back/advanced knobs). Two default-collapsed panels: ① injection
-  // budgets (spec.memory.long_term.injection_token_budget /
+  // "Memory" group (MemorySection) — config-page redesign v2 Task 2 moved
+  // every memory field here as three sub-tabs (basic/retrieval/budget); the
+  // "memory" FormView section it used to embed is gone. ``on_*`` is the
+  // long-term-memory on/off switch (presence-semantic — see form_model.ts's
+  // readMemoryOn/setMemoryOn); the other 8 fields (top_k/write_back on
+  // "basic", the 6 read/write tuning knobs on "retrieval") each get the
+  // usual ``_label``/``_brief``/``_impact`` triple. The "budget" tab keeps
+  // its two pre-existing panels: ① injection budgets
+  // (spec.memory.long_term.injection_token_budget /
   // correction_token_budget — only rendered while memory is on, since a
   // budget is meaningless with no long_term block to inject from) and ②
   // background consolidation (policies.memory_consolidation.enabled — a
   // control-plane job, not on the run path, so it stays available even with
-  // memory off). A closing note flags memory.short_term / dynamic_context
-  // .inject_memory as reserved (schema-valid, runtime no-op) fields.
+  // memory off).
   memory_group: {
+    tab_basic: string;
+    tab_retrieval: string;
+    tab_budget: string;
+    on_label: string;
+    on_brief: string;
+    on_impact: string;
+    topk_label: string;
+    topk_brief: string;
+    topk_impact: string;
+    write_back_label: string;
+    write_back_brief: string;
+    write_back_impact: string;
+    verify_reads_label: string;
+    verify_reads_brief: string;
+    verify_reads_impact: string;
+    write_min_importance_label: string;
+    write_min_importance_brief: string;
+    write_min_importance_impact: string;
+    reconcile_writes_label: string;
+    reconcile_writes_brief: string;
+    reconcile_writes_impact: string;
+    recall_mode_label: string;
+    recall_mode_brief: string;
+    recall_mode_impact: string;
+    recall_mode_per_session: string;
+    recall_mode_per_turn: string;
+    rewrite_reads_label: string;
+    rewrite_reads_brief: string;
+    rewrite_reads_impact: string;
+    abstain_threshold_label: string;
+    abstain_threshold_brief: string;
+    abstain_threshold_impact: string;
     panel_injection: string;
     panel_consolidation: string;
     inj_budget_label: string;
@@ -793,7 +829,6 @@ export interface TranslationKeys {
     consolidation_brief: string;
     consolidation_impact: string;
     aux_model_note: string;
-    reserved_note: string;
   };
   // Task 3 (PR6) — "Model & Routing" group (ModelRoutingSection), embedded
   // after the existing "model" FormView section (provider/model picker,
@@ -866,9 +901,6 @@ export interface TranslationKeys {
     section_model: string;
     section_prompt: string;
     field_prompt_placeholder: string;
-    section_memory: string;
-    memory_hint: string;
-    memory_topk: string;
     section_tools: string;
     tool_web_search: string;
     tool_http: string;
@@ -915,8 +947,6 @@ export interface TranslationKeys {
     field_description_help: string;
     section_model_help: string;
     section_prompt_help: string;
-    section_memory_help: string;
-    memory_topk_help: string;
     section_reflection_evaluator_help: string;
     section_defenses: string;
     section_defenses_help: string;
@@ -978,22 +1008,6 @@ export interface TranslationKeys {
     section_dynamic_workers_help: string;
     dynamic_workers_hint: string;
     section_advanced: string;
-    memory_write_back: string;
-    memory_write_back_help: string;
-    memory_verify_reads: string;
-    memory_verify_reads_help: string;
-    memory_write_min_importance: string;
-    memory_write_min_importance_help: string;
-    memory_reconcile_writes: string;
-    memory_reconcile_writes_help: string;
-    memory_recall_mode: string;
-    memory_recall_mode_help: string;
-    memory_recall_per_session: string;
-    memory_recall_per_turn: string;
-    memory_rewrite_reads: string;
-    memory_rewrite_reads_help: string;
-    memory_abstain_threshold: string;
-    memory_abstain_threshold_help: string;
     approval_timeout: string;
     approval_timeout_help: string;
     trajectory_recording: string;
@@ -3632,6 +3646,47 @@ const en: TranslationKeys = {
       "The manifest's runtime / image / image_build / resources / readonly_root / writable / mounts fields, and the whole code block, are currently just for show (the technical term is 'declarative'): writing them doesn't error, but the system never actually reads them at run time — harmless to leave them in the YAML. To actually change the resource limits, edit the platform deployment config instead (the sandbox-supervisor environment variables).",
   },
   memory_group: {
+    tab_basic: "Basic",
+    tab_retrieval: "Retrieval details",
+    tab_budget: "Budget & housekeeping",
+    on_label: "Long-term memory",
+    on_brief: "Remembers you across chats — needs a platform embedding model.",
+    on_impact:
+      "When on, the agent remembers user info and past interactions across sessions and recalls them automatically;\noff = every chat starts from scratch.\nExample: on, recall 5",
+    topk_label: "Memories recalled per run",
+    topk_brief: "How many memories it recalls each turn",
+    topk_impact:
+      "How many of the most relevant memories to pull in per chat.\nToo many crowd the context; too few miss info.\nExample: 5",
+    write_back_label: "Learn (remember new info)",
+    write_back_brief: "Automatically remembers new info from the chat",
+    write_back_impact:
+      "When on, each conversation ends by saving what it learned, recalled automatically next time.\nOff = only use existing memories, never add.\nExample: on",
+    verify_reads_label: "Check memories before answering",
+    verify_reads_brief: "Double-checks memories first — slower but more accurate",
+    verify_reads_impact:
+      "After pulling memories and before using them, the model screens them and drops anything irrelevant, stale, or contradictory, so old memories don't skew the answer.\nCosts one extra model call; if it errors, nothing is blocked.\nOn by default.\nExample: on",
+    write_min_importance_label: "Importance filter",
+    write_min_importance_brief: "Skips memories below this importance score",
+    write_min_importance_impact:
+      "Each thing worth remembering gets an importance score (0–1); anything below this isn't saved, so small talk doesn't get stored.\n0.3: drop the clearly trivial; 0: keep everything.\nExample: 0.3",
+    reconcile_writes_label: "Tidy up (dedup/merge)",
+    reconcile_writes_brief: "Auto-merges duplicate memories before saving",
+    reconcile_writes_impact:
+      "Before saving new info, compare it with similar existing memories and merge, update, or delete as needed, avoiding pile-ups and contradictions.\nOff = just append.\nOn by default.\nExample: on",
+    recall_mode_label: "Where memories are inserted",
+    recall_mode_brief: "Controls how often memories get re-inserted",
+    recall_mode_impact:
+      "Where memories go in the conversation.\nPer session: inserted once for the whole session — cheaper and faster (default).\nPer turn: re-inserted every turn — for agents that edit their own memory mid-conversation.\nExample: per session",
+    recall_mode_per_session: "Per session (cheaper, faster)",
+    recall_mode_per_turn: "Per turn",
+    rewrite_reads_label: "Rewrite question for recall",
+    rewrite_reads_brief: "Rewrites your question before searching memories",
+    rewrite_reads_impact:
+      "Before searching memories, rewrite the user's latest message into a short standalone search query — stripping instructions and trimming long messages so they don't skew what's recalled.\nCosts one extra model call; if it errors, the original message is used.\nOff by default (opt-in).\nExample: off",
+    abstain_threshold_label: "Skip weak matches (threshold)",
+    abstain_threshold_brief: "Skips memories that don't match well enough",
+    abstain_threshold_impact:
+      "After searching, if the best memory's similarity to the question is below this, inject nothing instead of a weak match — avoids dragging loosely-related memories into the answer.\n0 = never skip (default); ~0.2–0.3 = skip clearly weak matches.\nExample: 0",
     panel_injection: "① Injection budget",
     panel_consolidation: "② Background memory consolidation",
     inj_budget_label: "Memory injection token budget",
@@ -3653,8 +3708,6 @@ const en: TranslationKeys = {
       "Turn it off and this agent's long-term memory stops auto-deduplicating, distilling, and cleaning itself up — short-term memories just keep piling up. The cleanup runs on the auxiliary model and is billed separately under 'memory consolidation'; what counts as 'similar enough to merge' is a tenant-level setting, not something this manifest controls.",
     aux_model_note:
       "The model that does the cleanup defaults to the platform-wide setting (claude-sonnet-4-6); to pick a different one just for this agent, edit policies.memory_consolidation.aux_model in the YAML view (it needs a full model config block).",
-    reserved_note:
-      "memory.short_term and dynamic_context.inject_memory are currently reserved fields — placeholders that don't error when set, but that the system never actually reads. Whether memory is on comes down to one thing only: whether memory.long_term is declared (the toggle above).",
   },
   model_group: {
     panel_reflection: "Reflection self-assessment",
@@ -3729,9 +3782,6 @@ const en: TranslationKeys = {
     section_model: "Model",
     section_prompt: "System prompt",
     field_prompt_placeholder: "You are a helpful assistant.",
-    section_memory: "Long-term memory",
-    memory_hint: "Remembers across sessions; needs a platform embedding.",
-    memory_topk: "Memories recalled per run",
     section_tools: "Tools",
     tool_web_search: "Web search",
     tool_http: "HTTP tool",
@@ -3790,10 +3840,6 @@ const en: TranslationKeys = {
       "The LLM powering the agent's main conversation.\nPick the provider, then the model; higher temperature = more varied.\nExample: anthropic / claude-sonnet-4-5, temperature 0.2",
     section_prompt_help:
       "System prompt — defines the agent's role, tone, and rules. The core of its persona.\nExample: You are a senior Python engineer; answer concisely with runnable code",
-    section_memory_help:
-      "When on, the agent remembers user info and past interactions across sessions and recalls them automatically;\noff = every chat starts from scratch.\nExample: on, recall 5",
-    memory_topk_help:
-      "How many of the most relevant memories to pull in per chat.\nToo many crowd the context; too few miss info.\nExample: 5",
     section_reflection_evaluator_help:
       "Specifies which model judges reflection self-assessment (a routing rule). Only takes effect once \"Reflection self-assessment\" above is turned on; when unset, reflection reuses the main model.",
     section_defenses: "Defenses",
@@ -3885,29 +3931,6 @@ const en: TranslationKeys = {
     dynamic_workers_hint:
       "Let the agent create temporary helpers at run time to share the load (on by default).",
     section_advanced: "Advanced",
-    memory_write_back: "Learn (remember new info)",
-    memory_write_back_help:
-      "When on, each conversation ends by saving what it learned, recalled automatically next time.\nOff = only use existing memories, never add.\nExample: on",
-    memory_verify_reads: "Check memories before answering",
-    memory_verify_reads_help:
-      "After pulling memories and before using them, the model screens them and drops anything irrelevant, stale, or contradictory, so old memories don't skew the answer.\nCosts one extra model call; if it errors, nothing is blocked.\nOn by default.\nExample: on",
-    memory_write_min_importance: "Importance filter",
-    memory_write_min_importance_help:
-      "Each thing worth remembering gets an importance score (0–1); anything below this isn't saved, so small talk doesn't get stored.\n0.3: drop the clearly trivial; 0: keep everything.\nExample: 0.3",
-    memory_reconcile_writes: "Tidy up (dedup/merge)",
-    memory_reconcile_writes_help:
-      "Before saving new info, compare it with similar existing memories and merge, update, or delete as needed, avoiding pile-ups and contradictions.\nOff = just append.\nOn by default.\nExample: on",
-    memory_recall_mode: "Where memories are inserted",
-    memory_recall_mode_help:
-      "Where memories go in the conversation.\nPer session: inserted once for the whole session — cheaper and faster (default).\nPer turn: re-inserted every turn — for agents that edit their own memory mid-conversation.\nExample: per session",
-    memory_recall_per_session: "Per session (cheaper, faster)",
-    memory_recall_per_turn: "Per turn",
-    memory_rewrite_reads: "Rewrite question for recall",
-    memory_rewrite_reads_help:
-      "Before searching memories, rewrite the user's latest message into a short standalone search query — stripping instructions and trimming long messages so they don't skew what's recalled.\nCosts one extra model call; if it errors, the original message is used.\nOff by default (opt-in).\nExample: off",
-    memory_abstain_threshold: "Skip weak matches (threshold)",
-    memory_abstain_threshold_help:
-      "After searching, if the best memory's similarity to the question is below this, inject nothing instead of a weak match — avoids dragging loosely-related memories into the answer.\n0 = never skip (default); ~0.2–0.3 = skip clearly weak matches.\nExample: 0",
     approval_timeout: "Approval wait limit (seconds)",
     approval_timeout_help:
       "How long a pending approval may wait (seconds) before it is auto-rejected, so it doesn't tie up resources.\nDefault 24h (86400).\nExample: 86400",

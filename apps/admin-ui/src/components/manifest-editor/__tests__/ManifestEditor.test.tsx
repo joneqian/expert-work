@@ -138,22 +138,16 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("af-approval")).toBeInTheDocument();
   });
 
-  it("the 'memory' group renders MemorySection instead of a plain stacked FormView", async () => {
+  it("the 'memory' group renders MemorySection instead of the pending hint", async () => {
     const user = userEvent.setup();
     render(
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-memory"));
-    // "memory" still lists a real ``sections`` entry in CONFIG_GROUPS (like
-    // "security"), so the distinguishing signal is the curated pane's own
-    // wrapper + its reserved-fields note, which a plain stacked FormView
-    // never renders.
     expect(screen.getByTestId("memory-section")).toBeInTheDocument();
-    expect(screen.getByTestId("memory-reserved-note")).toBeInTheDocument();
-    // The embedded "memory" FormView section still renders underneath.
-    expect(screen.getByTestId("af-memory")).toBeInTheDocument();
-    expect(screen.getByTestId("af-memory-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("memory-tab-basic")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
   it("the 'model' group renders ModelRoutingSection instead of a plain stacked FormView", async () => {
@@ -164,9 +158,9 @@ describe("ManifestEditor", () => {
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-model"));
     // "model" still lists a real ``sections`` entry in CONFIG_GROUPS (like
-    // "security"/"memory"), so the distinguishing signal is the curated
-    // pane's own wrapper + its YAML-guidance note, which a plain stacked
-    // FormView never renders.
+    // "security"), so the distinguishing signal is the curated pane's own
+    // wrapper + its YAML-guidance note, which a plain stacked FormView never
+    // renders.
     expect(screen.getByTestId("model-routing-section")).toBeInTheDocument();
     expect(screen.getByTestId("model-yaml-note")).toBeInTheDocument();
     // The embedded "model" FormView section (af-model controls) still
@@ -323,7 +317,7 @@ describe("ManifestEditor", () => {
     // Switching to a manifest group hides — but does not unmount — the
     // leading pane, so any embedded antd Form keeps its state.
     await user.click(screen.getByTestId("cfg-nav-memory"));
-    await screen.findByTestId("af-memory");
+    await screen.findByTestId("memory-tab-basic");
     const leadingPane = screen.getByTestId("manifest-leading-meta");
     expect(leadingPane).toHaveStyle({ display: "none" });
     expect(screen.getByTestId("meta-form")).toBeInTheDocument();
@@ -333,7 +327,7 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("manifest-leading-meta")).toHaveStyle({
       display: "block",
     });
-    expect(screen.queryByTestId("af-memory")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("memory-tab-basic")).not.toBeInTheDocument();
   });
 
   it("a leading tab with mergeSection folds that manifest section in and de-dupes it from its mapped group", async () => {
