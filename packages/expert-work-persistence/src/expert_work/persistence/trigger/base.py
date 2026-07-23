@@ -182,6 +182,25 @@ class TriggerRunStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def claim_reconcile(self, record: TriggerRunRecord) -> bool:
+        """Atomically finalize a ``fired`` firing; ``True`` iff this call won.
+
+        Spec 1 PR4 加固 — CAS ``status == 'fired'`` → ``record.status`` (setting
+        ``run_id/attempt/next_retry_at/error`` from ``record``). The scheduler's
+        reconcile sweep and the manual fire-now endpoint can both observe the
+        same ``fired`` firing after its run reaches a terminal state; routing
+        the finalize through this CAS means exactly one of them performs the
+        transition (and emits the lifecycle audit), the loser is a no-op. Fixes
+        duplicate ``TRIGGER_COMPLETED`` audits and the failure-path split where
+        the endpoint wrote ``failed`` while the scheduler wrote ``retrying``.
+
+        Callers MUST deliver the result BEFORE calling this (deliver-first): a
+        crash between deliver and the CAS leaves the row ``fired`` for the next
+        sweep to redeliver idempotently; flipping status first would re-open the
+        silent-delivery-loss window PR4 closed.
+        """
+
+    @abc.abstractmethod
     async def list_by_trigger(self, *, trigger_id: UUID, tenant_id: UUID) -> list[TriggerRunRecord]:
         """Return every firing of ``trigger_id`` under the tenant, newest first."""
 

@@ -177,6 +177,16 @@ class InMemoryTriggerRunStore(TriggerRunStore):
         )
         return True
 
+    async def claim_reconcile(self, record: TriggerRunRecord) -> bool:
+        existing = self._rows.get(record.id)
+        if existing is None or existing.tenant_id != record.tenant_id:
+            return False
+        if existing.status is not TriggerRunStatus.FIRED:
+            # A peer already finalized this firing — loser, no-op (no overwrite).
+            return False
+        self._rows[record.id] = record
+        return True
+
     async def list_by_trigger(self, *, trigger_id: UUID, tenant_id: UUID) -> list[TriggerRunRecord]:
         rows = [
             r
