@@ -3423,7 +3423,7 @@ const en: TranslationKeys = {
     wf_type_brief:
       "react = the classic think-then-act loop; plan_execute = a planning model writes a full plan up front, then execution follows it step by step",
     wf_type_impact:
-      "react (recommended): the agent thinks as it goes — simple requests get answered directly, and only complex ones get a step-by-step plan first. This covers most cases. plan_execute: every task gets a full plan up front no matter how simple, then runs it step by step; this is more reliable for long, sequential jobs like writing a report, but even trivial requests pay the planning cost — slower and pricier, since it's one extra model call. Which model does the planning is set by a rule in the Model & Routing group; if none is set, the main model handles it. custom is deprecated — picking it behaves exactly like react.",
+      "react (recommended): the agent thinks as it goes — simple requests get answered directly, and only complex ones get a step-by-step plan first. This covers most cases. plan_execute: every task gets a full plan up front no matter how simple, then runs it step by step; this is more reliable for long, sequential jobs like writing a report, but even trivial requests pay the planning cost — slower and pricier, since it's one extra model call. The model that does the planning is set by a rule in the Model & Routing group; if none is set, the main model handles it. custom is deprecated — picking it behaves exactly like react.",
     wf_type_default: "react",
     wf_type_opt_react: "react (think, then act)",
     wf_type_opt_plan_execute: "plan_execute (plan, then execute)",
