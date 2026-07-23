@@ -760,6 +760,9 @@ const zhCN: TranslationKeys = {
   security_gates: {
     group_intro:
       "控制沙箱里的代码和工具能不能连外网,按顺序判断三层:先看出网模式这个总开关,然后看黑名单(优先级最高),最后看白名单。",
+    tab_defenses: "防护开关",
+    tab_approval: "人工审批",
+    tab_network: "子任务与网络",
     panel_network: "①网络出网",
     panel_enforce: "②工具强制",
     egress_label: "出网模式",
@@ -792,7 +795,7 @@ const zhCN: TranslationKeys = {
     enforce_opt_on: "强制开启",
     enforce_opt_off: "强制关闭",
     dict_note:
-      "限流规则、隐私信息(PII)处理、安全策略这三项,现在还是自由格式的字典,没有专门的表单——因为后端的字段结构还没最终定下来,请先到 YAML 视图里编辑。",
+      "限流、隐私脱敏、安全策略等高级项请在 YAML 视图配置。",
   },
   sandbox_group: {
     pw_label: "计划投影到工作区",
@@ -1005,27 +1008,32 @@ const zhCN: TranslationKeys = {
     defenses_group_output: "输出防护",
     defenses_group_action: "工具行为防护",
     defenses_prompt_injection: "注入 spotlighting",
+    defenses_prompt_injection_brief: "给外部内容打标记,防止误导",
     defenses_prompt_injection_help:
       "对不可信来源内容(检索结果、工具输出等)加标记,降低 prompt 注入劫持风险。默认开。",
     defenses_prompt_injection_off_warn:
       "关闭后不再标记不可信内容,降低注入防护。",
     defenses_output_screen: "输出规则筛查",
+    defenses_output_screen_brief: "拦截疑似泄密的回复内容",
     defenses_output_screen_help:
       "用规则拦截疑似凭据/外泄形的回复。默认开,建议保持。",
     defenses_output_screen_off_warn:
       "关闭后不再拦截凭据/外泄形回复(默认开,不建议关)。",
     defenses_output_judge: "模型型输出 judge",
+    defenses_output_judge_brief: "让模型再检查一遍回复是否安全",
     defenses_output_judge_help:
       "用一个模型逐条判定回复是否对齐/泄漏,是规则筛查之上的兜底。",
     defenses_output_judge_on_warn:
       "每条回复额外一次 LLM 调用(增加延迟与成本);并禁用该 agent 的逐-token 流式响应(回复整条一次性返回)。judge 使用的模型在「平台设置」中配置。",
     defenses_output_judge_on_error: "judge 失败时",
     defenses_output_dlp: "输出 PII 脱敏",
+    defenses_output_dlp_brief: "自动隐藏回复里的隐私信息",
     defenses_output_dlp_help:
       "把回复中的 PII(邮箱/手机/身份证/银行卡)替换为 [redacted]。",
     defenses_output_dlp_on_note:
       "会改写含 PII 的合法回复,例如「你的邮箱是 a@b.com」→「你的邮箱是[redacted]」。",
     defenses_action_screen: "工具调用审查",
+    defenses_action_screen_brief: "调用工具前先检查是否可疑",
     defenses_action_screen_help:
       "在每个工具调用执行前判定其是否对齐:关闭 / 拦截 / 转人工审批。",
     defenses_action_screen_off: "关闭",
@@ -1080,13 +1088,10 @@ const zhCN: TranslationKeys = {
     section_dynamic_workers_help:
       "开启(默认)时,Agent 干活中可以临时拉几个小助手分头处理子任务。\n需要严格单线、只用一个执行体时关掉。\n示例:研究型 Agent 开,简单问答 Bot 关",
     dynamic_workers_hint: "允许 Agent 运行中临时创建小助手分担任务(默认开启)。",
-    section_advanced: "高级",
     approval_timeout: "审批等待上限(秒)",
+    approval_timeout_brief: "审批超时没人处理就自动拒绝",
     approval_timeout_help:
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",
-    trajectory_recording: "记录对话留档",
-    trajectory_recording_help:
-      "关闭后本 Agent 的运行不再录制轨迹(ShareGPT 格式,供策展与评测)。平台未配置对象存储时整体不录制,与本开关无关。",
     section_knowledge: "知识库(RAG)",
     section_knowledge_help:
       "Agent 可以检索的知识库,用来给回答找依据。\n选已有的库,或输入名称。\n示例:hr-policies、eng-handbook",

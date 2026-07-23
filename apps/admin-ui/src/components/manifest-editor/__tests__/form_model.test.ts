@@ -57,9 +57,7 @@ import {
   setAbstainThreshold,
   setRecallMode,
   readApprovalTimeout,
-  readTrajectoryRecording,
   setApprovalTimeout,
-  setTrajectoryRecording,
   readFallback,
   setFallback,
   normalizeForSubmit,
@@ -315,12 +313,8 @@ describe("form_model writers preserve siblings", () => {
 
   it("policy knob readers default; setters share the policies block with approval", () => {
     expect(readApprovalTimeout(seed)).toBe(86400);
-    expect(readTrajectoryRecording(seed)).toBe(true);
 
     const withGate = setApprovalTools(seed, ["exec_python"]);
-
-    const noTrace = setTrajectoryRecording(seed, false);
-    expect(noTrace.spec?.policies?.trajectory_recording).toBe(false);
 
     const withTimeout = setApprovalTimeout(withGate, 3600);
     expect(withTimeout.spec?.policies?.approval_timeout_s).toBe(3600);

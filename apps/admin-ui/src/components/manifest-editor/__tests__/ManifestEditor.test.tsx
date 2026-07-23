@@ -120,22 +120,18 @@ describe("ManifestEditor", () => {
     expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
-  it("the 'security' group renders SecuritySection instead of a plain stacked FormView", async () => {
+  it("the 'security' group renders SecuritySection instead of the pending hint", async () => {
     const user = userEvent.setup();
     render(
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-security"));
-    // "security" still lists real ``sections`` in CONFIG_GROUPS (unlike
-    // budget/context's statically-empty entries), so the distinguishing
-    // signal isn't "not pending" — it's the curated pane's own wrapper +
-    // its dict-note, which a plain stacked FormView never renders.
     expect(screen.getByTestId("security-section")).toBeInTheDocument();
     expect(screen.getByTestId("security-gates-dict-note")).toBeInTheDocument();
-    // The embedded defenses/governance sections still render underneath.
-    expect(screen.getByTestId("af-defenses-output-screen")).toBeInTheDocument();
-    expect(screen.getByTestId("af-approval")).toBeInTheDocument();
+    // The defenses tab (its default-active sub-tab) renders underneath.
+    expect(screen.getByTestId("security-tab-defenses")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
   it("the 'memory' group renders MemorySection instead of the pending hint", async () => {
@@ -157,10 +153,9 @@ describe("ManifestEditor", () => {
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-model"));
-    // "model" still lists a real ``sections`` entry in CONFIG_GROUPS (like
-    // "security"), so the distinguishing signal is the curated pane's own
-    // wrapper + its YAML-guidance note, which a plain stacked FormView never
-    // renders.
+    // "model" still lists a real ``sections`` entry in CONFIG_GROUPS, so the
+    // distinguishing signal is the curated pane's own wrapper + its
+    // YAML-guidance note, which a plain stacked FormView never renders.
     expect(screen.getByTestId("model-routing-section")).toBeInTheDocument();
     expect(screen.getByTestId("model-yaml-note")).toBeInTheDocument();
     // The embedded "model" FormView section (af-model controls) still

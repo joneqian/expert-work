@@ -728,6 +728,9 @@ export interface TranslationKeys {
   // enforce ~ toolUseEnforcement).
   security_gates: {
     group_intro: string;
+    tab_defenses: string;
+    tab_approval: string;
+    tab_network: string;
     panel_network: string;
     panel_enforce: string;
     egress_label: string;
@@ -858,9 +861,9 @@ export interface TranslationKeys {
   // One live field (spec.cache.enabled, the per-agent LLM response cache
   // opt-out) plus two note blocks: manifest ``triggers`` declared but not
   // wired up (the trigger-management API is the real path), and
-  // trace/log_level/redact_fields (plus trajectory_recording, whose hint
-  // copy is corrected in ``agent_form`` below) declarative-only — validated
-  // but not read at runtime.
+  // trace/log_level/redact_fields (plus policies.trajectory_recording, whose
+  // curated toggle config-page redesign v2 Task 4 removed — it's now a
+  // YAML-only field) declarative-only — validated but not read at runtime.
   observability_group: {
     resp_cache_label: string;
     resp_cache_brief: string;
@@ -954,19 +957,24 @@ export interface TranslationKeys {
     defenses_group_output: string;
     defenses_group_action: string;
     defenses_prompt_injection: string;
+    defenses_prompt_injection_brief: string;
     defenses_prompt_injection_help: string;
     defenses_prompt_injection_off_warn: string;
     defenses_output_screen: string;
+    defenses_output_screen_brief: string;
     defenses_output_screen_help: string;
     defenses_output_screen_off_warn: string;
     defenses_output_judge: string;
+    defenses_output_judge_brief: string;
     defenses_output_judge_help: string;
     defenses_output_judge_on_warn: string;
     defenses_output_judge_on_error: string;
     defenses_output_dlp: string;
+    defenses_output_dlp_brief: string;
     defenses_output_dlp_help: string;
     defenses_output_dlp_on_note: string;
     defenses_action_screen: string;
+    defenses_action_screen_brief: string;
     defenses_action_screen_help: string;
     defenses_action_screen_off: string;
     defenses_action_screen_block: string;
@@ -1006,11 +1014,9 @@ export interface TranslationKeys {
     section_dynamic_workers: string;
     section_dynamic_workers_help: string;
     dynamic_workers_hint: string;
-    section_advanced: string;
     approval_timeout: string;
+    approval_timeout_brief: string;
     approval_timeout_help: string;
-    trajectory_recording: string;
-    trajectory_recording_help: string;
     section_knowledge: string;
     section_knowledge_help: string;
     knowledge_hint: string;
@@ -3596,6 +3602,9 @@ const en: TranslationKeys = {
   security_gates: {
     group_intro:
       "The sandbox's outbound network policy for code and tools running inside it — checked in order: egress mode (the master switch) → denylist (checked first) → allowlist.",
+    tab_defenses: "Defenses",
+    tab_approval: "Human approval",
+    tab_network: "Subtasks & network",
     panel_network: "① Network egress",
     panel_enforce: "② Tool-use enforcement",
     egress_label: "Egress mode",
@@ -3629,7 +3638,7 @@ const en: TranslationKeys = {
     enforce_opt_on: "Always on",
     enforce_opt_off: "Always off",
     dict_note:
-      "Rate limiting / PII / security policy are still a free-form dict (the backend schema isn't finalized yet) — edit them in the YAML view.",
+      "Rate limiting, PII redaction, and security policy are advanced items — configure them in the YAML view.",
   },
   sandbox_group: {
     pw_label: "Project plan to workspace",
@@ -3849,27 +3858,33 @@ const en: TranslationKeys = {
     defenses_group_output: "Output defense",
     defenses_group_action: "Tool-action defense",
     defenses_prompt_injection: "Injection spotlighting",
+    defenses_prompt_injection_brief:
+      "Flags outside content so it can't fool the model",
     defenses_prompt_injection_help:
       "Marks content from untrusted sources (retrieved data, tool output) to reduce prompt-injection hijack risk. On by default.",
     defenses_prompt_injection_off_warn:
       "Off: untrusted content is no longer marked, weakening injection defense.",
     defenses_output_screen: "Output rule screen",
+    defenses_output_screen_brief: "Blocks replies that look like a leak",
     defenses_output_screen_help:
       "Rule-based blocking of replies that look like credential leaks / exfiltration. On by default; recommended.",
     defenses_output_screen_off_warn:
       "Off: credential-leak / exfil-shaped replies are no longer blocked (on by default; not recommended).",
     defenses_output_judge: "Model-backed output judge",
+    defenses_output_judge_brief: "Has a model double-check each reply",
     defenses_output_judge_help:
       "Uses a model to judge each reply for alignment / leakage — a backstop above the rule screen.",
     defenses_output_judge_on_warn:
       "Adds one extra LLM call per reply (higher latency and cost); and disables token-by-token streaming for this agent (the reply is returned all at once). The judge model is configured in Platform Settings.",
     defenses_output_judge_on_error: "When the judge fails",
     defenses_output_dlp: "Output PII redaction",
+    defenses_output_dlp_brief: "Hides personal info in replies",
     defenses_output_dlp_help:
       "Replaces PII (email / phone / national ID / card number) in replies with [redacted].",
     defenses_output_dlp_on_note:
       "Rewrites legitimate replies containing PII, e.g. \"your email is a@b.com\" → \"your email is [redacted]\".",
     defenses_action_screen: "Tool-call review",
+    defenses_action_screen_brief: "Checks each tool call before it runs",
     defenses_action_screen_help:
       "Judges each tool call for alignment before it runs: off / block / route to human approval.",
     defenses_action_screen_off: "Off",
@@ -3928,13 +3943,10 @@ const en: TranslationKeys = {
       "When on (the default), the agent can pull in a few temporary helpers mid-task to handle subtasks in parallel.\nTurn off when you need strictly one worker.\nExample: on for a research agent, off for a simple FAQ bot",
     dynamic_workers_hint:
       "Let the agent create temporary helpers at run time to share the load (on by default).",
-    section_advanced: "Advanced",
     approval_timeout: "Approval wait limit (seconds)",
+    approval_timeout_brief: "Auto-rejects if no one responds in time",
     approval_timeout_help:
       "How long a pending approval may wait (seconds) before it is auto-rejected, so it doesn't tie up resources.\nDefault 24h (86400).\nExample: 86400",
-    trajectory_recording: "Keep a record of conversations",
-    trajectory_recording_help:
-      "When off, this agent's runs are no longer recorded as trajectories (ShareGPT format, used for curation and evals). If the platform has no object store configured, nothing is recorded regardless of this switch.",
     section_knowledge: "Knowledge bases (RAG)",
     section_knowledge_help:
       "Knowledge bases the agent can search to back up its answers.\nPick existing bases, or type a name.\nExample: hr-policies, eng-handbook",

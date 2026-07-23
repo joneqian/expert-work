@@ -98,17 +98,6 @@ describe("FormView", () => {
 
     renderSection("subagents");
     expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
-
-    renderSection("governance");
-    expect(screen.getByTestId("af-approval")).toBeInTheDocument();
-    expect(screen.getByTestId("af-dynamic-workers")).toBeInTheDocument();
-    expect(screen.getByTestId("af-governance-advanced")).toBeInTheDocument();
-    // Run-deadline moved to the "budget" group's RunBudgetSection (Task 6) —
-    // governance no longer renders its own control for it.
-    expect(screen.queryByTestId("af-run-deadline")).not.toBeInTheDocument();
-
-    renderSection("defenses");
-    expect(screen.getByTestId("af-defenses")).toBeInTheDocument();
   });
 
   it("keeps the section's own heading on the singular section= path", () => {
@@ -180,26 +169,6 @@ describe("FormView", () => {
     await user.click(screen.getByTestId("af-fallback-remove-0"));
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
     expect(last.spec?.model?.fallback).toBeUndefined();
-  });
-
-  it("checking an approval tool adds it to policies.approval_required_tools", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("governance", SEED, onChange);
-    await user.click(screen.getByTestId("af-approval-exec_python"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.policies?.approval_required_tools).toEqual([
-      "exec_python",
-    ]);
-  });
-
-  it("turning dynamic workers off writes dynamic_workers.enabled=false", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("governance", SEED, onChange);
-    await user.click(screen.getByTestId("af-dynamic-workers-toggle"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.dynamic_workers?.enabled).toBe(false);
   });
 
   it("shows the vision (VL fallback) section when the main model is text-only", () => {
@@ -391,113 +360,5 @@ describe("FormView", () => {
   it("renders the tools-section note about per-tool YAML config", () => {
     renderSection("tools");
     expect(screen.getByTestId("af-tools-config-note")).toBeInTheDocument();
-  });
-
-  it("renders the defenses section with every switch/select", () => {
-    renderSection("defenses");
-    expect(screen.getByTestId("af-defenses")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("af-defenses-prompt-injection"),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-output-screen")).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-output-judge")).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-output-dlp")).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-action-screen")).toBeInTheDocument();
-  });
-
-  it("output_screen is on by default; toggling it off writes defenses.output_screen", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-output-screen"),
-    ).getByRole("switch");
-    expect(sw).toBeChecked();
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.output_screen).toBe("off");
-  });
-
-  it("enabling the judge writes defenses.output_judge=block", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-output-judge"),
-    ).getByRole("switch");
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.output_judge).toBe("block");
-  });
-
-  it("hides the judge on-error select until the judge is enabled", () => {
-    renderSection("defenses"); // SEED: judge off
-    expect(
-      screen.queryByTestId("af-defenses-output-judge-on-error"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows the judge on-error select when the judge is enabled", () => {
-    const judged: AgentManifest = {
-      ...SEED,
-      spec: { ...SEED.spec, defenses: { output_judge: "block" } },
-    };
-    renderSection("defenses", judged);
-    expect(
-      screen.getByTestId("af-defenses-output-judge-on-error"),
-    ).toBeInTheDocument();
-  });
-
-  it("enabling DLP writes defenses.output_dlp=redact", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-output-dlp"),
-    ).getByRole("switch");
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.output_dlp).toBe("redact");
-  });
-
-  it("turning prompt_injection off writes defenses.prompt_injection=off", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-prompt-injection"),
-    ).getByRole("switch");
-    expect(sw).toBeChecked(); // spotlight default = on
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.prompt_injection).toBe("off");
-  });
-
-  it("shows the action_screen on-error select only when action_screen != off", () => {
-    renderSection("defenses"); // SEED: action_screen off
-    expect(
-      screen.queryByTestId("af-defenses-action-screen-on-error"),
-    ).not.toBeInTheDocument();
-    const withAction: AgentManifest = {
-      ...SEED,
-      spec: { ...SEED.spec, defenses: { action_screen: "block" } },
-    };
-    renderSection("defenses", withAction);
-    expect(
-      screen.getByTestId("af-defenses-action-screen-on-error"),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the extends note only when spec.extends is set", () => {
-    renderSection("defenses");
-    expect(
-      screen.queryByTestId("af-defenses-extends-note"),
-    ).not.toBeInTheDocument();
-    const withExtends: AgentManifest = {
-      ...SEED,
-      spec: { ...SEED.spec, extends: "secure-template" },
-    };
-    renderSection("defenses", withExtends);
-    expect(screen.getByTestId("af-defenses-extends-note")).toBeInTheDocument();
   });
 });

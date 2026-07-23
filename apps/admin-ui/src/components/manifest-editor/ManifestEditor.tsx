@@ -37,17 +37,18 @@ import type { McpPickerSource } from "./widgets/McpToolPicker";
 /** Curated group panes — a hand-written component that replaces FormView's
  * registered-sections pathway for that group entirely, checked BEFORE the
  * plain ``FormView`` stacked-sections fallback below — so it wins even for
- * "security"/"model", whose ``CONFIG_GROUPS`` entries still list real
- * sections — ``SecuritySection``/``ModelRoutingSection`` embed those
- * themselves. "budget"/"context"/"memory"/"sandbox"/"observability" instead
+ * "model", whose ``CONFIG_GROUPS`` entry still lists real sections —
+ * ``ModelRoutingSection`` embeds those itself.
+ * "budget"/"context"/"memory"/"security"/"sandbox"/"observability" instead
  * have a statically-empty entry (``sections: []``) and render ONLY their
- * curated pane — "memory" used to embed a real "memory" FormView section
- * too, but config-page redesign v2 Task 2 moved every memory field into
- * ``MemorySection`` itself, so it no longer needs one. Every
- * ``CONFIG_GROUPS`` entry now has either real sections or a curated pane
- * here, so there's no longer a group that can fall through to a generic
- * "pending" hint (that branch — and its ``cfg-pane-pending`` testid — has
- * been removed). */
+ * curated pane — "memory" and "security" used to embed real FormView
+ * sections too ("memory" / "defenses"+"governance"), but config-page
+ * redesign v2 Tasks 2 and 4 moved every field they held into
+ * ``MemorySection``/``SecuritySection`` themselves, so neither needs one
+ * anymore. Every ``CONFIG_GROUPS`` entry now has either real sections or a
+ * curated pane here, so there's no longer a group that can fall through to a
+ * generic "pending" hint (that branch — and its ``cfg-pane-pending`` testid
+ * — has been removed). */
 interface CuratedPaneProps {
   formData: unknown;
   onChange: (data: unknown) => void;

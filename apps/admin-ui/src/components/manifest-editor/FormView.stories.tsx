@@ -21,7 +21,6 @@ import { apiClient, setStoredToken } from "../../api/client";
 import "../../i18n";
 import type { AgentManifest } from "./form_model";
 import {
-  setApprovalTools,
   setPromptJinja,
   setPromptVariables,
   setReflectionEvaluator,
@@ -200,11 +199,6 @@ const JINJA_PROMPT_MANIFEST: AgentManifest = (() => {
   return { ...m, metadata: { name: "jinja-agent" } };
 })();
 
-const GOVERNANCE_MANIFEST: AgentManifest = (() => {
-  const m = setApprovalTools(BLANK_MANIFEST, ["exec_python"]) as AgentManifest;
-  return { ...m, metadata: { name: "governed-agent" } };
-})();
-
 const EVALUATOR_ON_MANIFEST: AgentManifest = (() => {
   const withEval = setReflectionEvaluator(BLANK_MANIFEST, {
     provider: "openai",
@@ -277,19 +271,6 @@ export const SkillsRich: Story = {
     formData: { ...BLANK_MANIFEST, metadata: { name: "skilled-agent" } },
     onChange: () => {},
     section: "skills",
-  },
-};
-
-/**
- * The Governance tab — approval gate + dynamic-workers + run wall-clock cap up
- * front, with approval-timeout and trajectory-recording in the Advanced panel.
- */
-export const GovernanceDepth: Story = {
-  decorators: [withMcpFixture],
-  args: {
-    formData: GOVERNANCE_MANIFEST,
-    onChange: () => {},
-    section: "governance",
   },
 };
 

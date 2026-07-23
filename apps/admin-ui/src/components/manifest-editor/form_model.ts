@@ -672,10 +672,6 @@ export const readApprovalTimeout = (m: unknown): number =>
   specOf(m).policies?.approval_timeout_s ?? 86400;
 export const setApprovalTimeout = (m: unknown, s: number): AgentManifest =>
   patchPolicies(m, { approval_timeout_s: s });
-export const readTrajectoryRecording = (m: unknown): boolean =>
-  specOf(m).policies?.trajectory_recording ?? true;
-export const setTrajectoryRecording = (m: unknown, on: boolean): AgentManifest =>
-  patchPolicies(m, { trajectory_recording: on });
 
 // ---- run budget (Group 6 试点: workflow.max_iterations + workflow.type
 // + policies.max_no_progress + policies.run_deadline_s + top-level
