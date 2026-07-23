@@ -1,6 +1,8 @@
 import { describe, expect, it, test } from "vitest";
 import { dumpYaml, parseYaml as parse } from "../yaml";
 import {
+  hasBuiltinTool,
+  setBuiltinTool,
   readApprovalTools,
   readDescription,
   readDynamicWorkersOn,
@@ -349,6 +351,63 @@ describe("form_model writers preserve siblings", () => {
     const withMcp = setTool(seed, "mcp", true);
     const allowed = setMcpAllowTools(withMcp, ["a", "b"]);
     expect(readTools(allowed).mcpAllowTools).toEqual(["a", "b"]);
+  });
+});
+
+// ---- builtin tool toggles (spec.tools — hasBuiltinTool / setBuiltinTool) ----
+// Unlike setTool's webSearch branch, setBuiltinTool NEVER rebuilds an
+// already-present entry — so a toggle can never clobber that entry's own
+// ``config`` or the sibling default-on essentials the form doesn't show.
+describe("builtin tool toggles (hasBuiltinTool / setBuiltinTool)", () => {
+  const withBuiltins = (names: string[]): AgentManifest => ({
+    spec: { tools: names.map((name) => ({ type: "builtin", name })) },
+  });
+
+  it("hasBuiltinTool reflects presence", () => {
+    expect(hasBuiltinTool(withBuiltins(["exec_python"]), "exec_python")).toBe(
+      true,
+    );
+    expect(hasBuiltinTool(withBuiltins(["exec_python"]), "bash")).toBe(false);
+  });
+
+  it("setBuiltinTool adds without touching siblings", () => {
+    const m = withBuiltins(["read_file", "exec_python"]);
+    const out = setBuiltinTool(m, "manage_task", true);
+    const names = (out.spec?.tools ?? []).map((t) => t.name);
+    expect(names).toContain("manage_task");
+    expect(names).toContain("read_file"); // sibling preserved
+    expect(names).toContain("exec_python");
+  });
+
+  it("setBuiltinTool off removes only that tool", () => {
+    const m = withBuiltins(["read_file", "bash"]);
+    const out = setBuiltinTool(m, "bash", false);
+    expect((out.spec?.tools ?? []).map((t) => t.name)).toEqual(["read_file"]);
+  });
+
+  it("setBuiltinTool on when already present preserves its config", () => {
+    const m: AgentManifest = {
+      spec: {
+        tools: [{ type: "builtin", name: "manage_task", config: { x: 1 } }],
+      },
+    };
+    const out = setBuiltinTool(m, "manage_task", true);
+    const entry = (out.spec?.tools ?? []).find((t) => t.name === "manage_task");
+    expect(entry?.config).toEqual({ x: 1 }); // NOT clobbered
+  });
+
+  it("preserves sibling spec keys (system_prompt, sandbox)", () => {
+    const out = setBuiltinTool(seed, "exec_python", true);
+    expect(out.spec?.system_prompt).toEqual(seed.spec.system_prompt);
+    expect(out.spec?.sandbox).toEqual(seed.spec.sandbox);
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m = withBuiltins(["read_file"]);
+    const snapshot = JSON.stringify(m);
+    setBuiltinTool(m, "exec_python", true);
+    setBuiltinTool(m, "read_file", false);
+    expect(JSON.stringify(m)).toBe(snapshot);
   });
 });
 

@@ -949,6 +949,24 @@ export interface TranslationKeys {
     tool_web_search_help: string;
     tool_http_help: string;
     tool_mcp_help: string;
+    tool_exec_python: string;
+    tool_exec_python_help: string;
+    tool_bash: string;
+    tool_bash_help: string;
+    tool_manage_task: string;
+    tool_manage_task_help: string;
+    tool_author_skill: string;
+    tool_author_skill_help: string;
+    tool_refine_skill: string;
+    tool_refine_skill_help: string;
+    tool_fork_skill: string;
+    tool_fork_skill_help: string;
+    tool_propose_skill: string;
+    tool_propose_skill_help: string;
+    tool_note_behavior_patch: string;
+    tool_note_behavior_patch_help: string;
+    tool_clarify_tool_usage: string;
+    tool_clarify_tool_usage_help: string;
     tools_config_note: string;
     section_approval: string;
     section_approval_help: string;
@@ -3822,6 +3840,32 @@ const en: TranslationKeys = {
       "Let the agent call external APIs (through the audited egress proxy).\nExample: weather, internal services",
     tool_mcp_help:
       "Let the agent use tools provided by MCP servers (databases, business systems).\nOnce checked, pick the specific servers and tools below.\nExample: connect your company's CRM",
+    tool_exec_python: "Run Python code",
+    tool_exec_python_help:
+      "Let the agent run Python in an isolated sandbox for calculations and data processing. On by default; can be turned off for purely conversational agents.",
+    tool_bash: "Run shell commands",
+    tool_bash_help:
+      "Let the agent run shell commands in an isolated sandbox (e.g. installing dependencies, running scripts). On by default; can be turned off for agents that don't need to touch the system.",
+    tool_manage_task: "Scheduled tasks",
+    tool_manage_task_help:
+      "Let the agent create scheduled tasks for the user from within the conversation (e.g. \"search news every day at 9am\") — it runs automatically at the scheduled time and the result comes back to the conversation.",
+    tool_author_skill: "Create skills",
+    tool_author_skill_help:
+      "Let the agent turn a reusable approach into a saved \"skill\" that it — or other agents — can use directly later.",
+    tool_refine_skill: "Refine skills",
+    tool_refine_skill_help: "Let the agent improve the content of an existing skill.",
+    tool_fork_skill: "Fork skills",
+    tool_fork_skill_help:
+      "Let the agent copy an existing skill and modify the copy, leaving the original untouched.",
+    tool_propose_skill: "Propose skill to team",
+    tool_propose_skill_help:
+      "Let the agent submit its own skill for team-wide sharing (requires approval).",
+    tool_note_behavior_patch: "Record behavior corrections",
+    tool_note_behavior_patch_help:
+      "Let the agent jot down small corrections — \"next time, handle this situation like so\" — to gradually improve its own performance.",
+    tool_clarify_tool_usage: "Clarify tool usage",
+    tool_clarify_tool_usage_help:
+      "Let the agent record the correct way to use a tool after misusing it, so it doesn't repeat the mistake.",
     tools_config_note:
       "Per-tool configuration for built-in tools (tools[].config, e.g. search engine / result count) and built-in tool entries other than web_search are edited in the YAML view.",
     section_approval: "Human approval",

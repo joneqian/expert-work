@@ -1002,6 +1002,29 @@ const zhCN: TranslationKeys = {
       "允许 Agent 调外部 API(经审计代理出网)。\n示例:查天气、调内部服务",
     tool_mcp_help:
       "允许 Agent 用 MCP 服务器提供的工具(数据库、业务系统等)。\n勾选后在下面选具体服务器和工具。\n示例:接公司 CRM",
+    tool_exec_python: "运行 Python 代码",
+    tool_exec_python_help:
+      "让 Agent 在隔离沙箱里跑 Python 做计算、处理数据。默认开;纯聊天类 Agent 可关。",
+    tool_bash: "运行 Shell 命令",
+    tool_bash_help:
+      "让 Agent 在隔离沙箱里跑命令行(如装依赖、跑脚本)。默认开;不需要动系统的 Agent 可关。",
+    tool_manage_task: "定时任务",
+    tool_manage_task_help:
+      "让 Agent 能在对话里帮用户建定时任务(如「每天9点搜新闻」),到点自动跑、结果回到对话。",
+    tool_author_skill: "创作技能",
+    tool_author_skill_help:
+      "让 Agent 能把一段可复用的做法沉淀成「技能」保存起来,以后自己或别的 Agent 直接用。",
+    tool_refine_skill: "优化技能",
+    tool_refine_skill_help: "让 Agent 能改进已有技能的内容。",
+    tool_fork_skill: "复制技能",
+    tool_fork_skill_help: "让 Agent 基于已有技能复制一份再改,不动原技能。",
+    tool_propose_skill: "提交技能到团队",
+    tool_propose_skill_help: "让 Agent 把自己的技能提交给团队共享(需审批)。",
+    tool_note_behavior_patch: "记录行为修正",
+    tool_note_behavior_patch_help:
+      "让 Agent 能记下「以后这类情况该怎么做」的小修正,逐步改进自己的表现。",
+    tool_clarify_tool_usage: "澄清工具用法",
+    tool_clarify_tool_usage_help: "让 Agent 在用错工具时记下正确用法,下次不再犯。",
     tools_config_note:
       "内置工具的 per-tool 配置(tools[].config,如搜索引擎/结果数)与 web_search 之外的内置工具项请在 YAML 视图编辑。",
     section_approval: "人工审批",

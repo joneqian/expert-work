@@ -31,6 +31,7 @@ import { PromptVariablesEditor } from "./PromptVariablesEditor";
 import { loadModelCatalog } from "./catalog";
 import { ModelSelect } from "./widgets/ModelSelect";
 import {
+  hasBuiltinTool,
   readActionScreen,
   readActionScreenOnError,
   readApprovalTools,
@@ -71,6 +72,7 @@ import {
   setActionScreenOnError,
   setApprovalTimeout,
   setApprovalTools,
+  setBuiltinTool,
   setDescription,
   setDynamicWorkersOn,
   setFallback,
@@ -154,6 +156,22 @@ const GATEABLE_TOOLS = [
   "web_search",
   "http",
   "mcp",
+] as const;
+
+// Builtin tools that get a form toggle. exec_python/bash are seeded default-ON
+// (removable); the rest are opt-in default-OFF. The essential file/artifact/
+// read/remember builtins are seeded but intentionally have NO toggle (edit YAML
+// to change) — they are NOT in this list.
+const BUILTIN_TOGGLES = [
+  { name: "exec_python", key: "tool_exec_python" },
+  { name: "bash", key: "tool_bash" },
+  { name: "manage_task", key: "tool_manage_task" },
+  { name: "author_skill", key: "tool_author_skill" },
+  { name: "refine_skill", key: "tool_refine_skill" },
+  { name: "fork_skill", key: "tool_fork_skill" },
+  { name: "propose_skill_to_tenant", key: "tool_propose_skill" },
+  { name: "note_behavior_patch", key: "tool_note_behavior_patch" },
+  { name: "clarify_tool_usage", key: "tool_clarify_tool_usage" },
 ] as const;
 
 function Heading({ children }: { children: React.ReactNode }) {
@@ -494,6 +512,23 @@ export function FormView({
               testId="af-tool-http"
             />
           </span>
+          {BUILTIN_TOGGLES.map((tool) => (
+            <span key={tool.name}>
+              <Checkbox
+                data-testid={`af-tool-${tool.name}`}
+                checked={hasBuiltinTool(formData, tool.name)}
+                onChange={(e) =>
+                  onChange(setBuiltinTool(formData, tool.name, e.target.checked))
+                }
+              >
+                {t(`agent_form.${tool.key}`)}
+              </Checkbox>
+              <FieldHelp
+                text={t(`agent_form.${tool.key}_help`)}
+                testId={`af-tool-${tool.name}`}
+              />
+            </span>
+          ))}
         </div>
         <Text
           type="secondary"

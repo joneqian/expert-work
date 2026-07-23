@@ -579,6 +579,31 @@ export function setTool(
       : without(isMcp),
   });
 }
+
+/** Whether a builtin tool by ``name`` is enabled (present in ``spec.tools``). */
+export const hasBuiltinTool = (m: unknown, name: string): boolean =>
+  (specOf(m).tools ?? []).some((t) => t.type === "builtin" && t.name === name);
+
+/**
+ * Toggle a builtin tool on/off by name. Unlike ``setTool``'s webSearch branch,
+ * this NEVER rebuilds an already-present entry — so an existing entry's
+ * ``config`` (or any of the sibling default-on essentials the form doesn't
+ * show) survives a toggle untouched. ``on`` adds ``{type:"builtin", name}``
+ * only when absent; ``off`` drops just that entry.
+ */
+export function setBuiltinTool(m: unknown, name: string, on: boolean): AgentManifest {
+  const tools = specOf(m).tools ?? [];
+  const has = tools.some((t) => t.type === "builtin" && t.name === name);
+  if (on) {
+    return has
+      ? patchSpec(m, { tools })
+      : patchSpec(m, { tools: [...tools, { type: "builtin", name }] });
+  }
+  return patchSpec(m, {
+    tools: tools.filter((t) => !(t.type === "builtin" && t.name === name)),
+  });
+}
+
 export function setMcpAllowTools(m: unknown, allow: string[]): AgentManifest {
   const tools = (specOf(m).tools ?? []).map((t) =>
     t.type === "mcp" ? { ...t, allow_tools: allow } : t,

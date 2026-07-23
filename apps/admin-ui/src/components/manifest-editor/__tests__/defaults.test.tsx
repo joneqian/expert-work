@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildDefaultManifest } from "../defaults";
+import { buildDefaultManifest, BASE_MANIFEST_YAML } from "../defaults";
+import { parseYaml } from "../yaml";
 
 type Manifest = {
   spec: {
@@ -36,5 +37,42 @@ describe("buildDefaultManifest", () => {
       write_back: true,
       recall_mode: "per_session",
     });
+  });
+});
+
+describe("BASE_MANIFEST_YAML seed tools", () => {
+  it("seeds the base-9 + exec_python/bash (11 total), excluding opt-in tools", () => {
+    const m = parseYaml(BASE_MANIFEST_YAML) as {
+      spec: { tools: { type: string; name: string }[] };
+    };
+    const names = m.spec.tools.map((t) => t.name);
+    expect(names).toEqual([
+      "read_file",
+      "write_file",
+      "edit_file",
+      "list_dir",
+      "read_document",
+      "save_artifact",
+      "list_artifacts",
+      "ask_for_approval",
+      "remember",
+      "exec_python",
+      "bash",
+    ]);
+    expect(m.spec.tools.every((t) => t.type === "builtin")).toBe(true);
+
+    // opt-in tools are NOT seeded — the form defaults them off.
+    const optIn = [
+      "manage_task",
+      "author_skill",
+      "refine_skill",
+      "fork_skill",
+      "propose_skill_to_tenant",
+      "note_behavior_patch",
+      "clarify_tool_usage",
+    ];
+    for (const name of optIn) {
+      expect(names).not.toContain(name);
+    }
   });
 });
