@@ -209,6 +209,73 @@ describe("parseToolCalls artifact.trigger_id (Spec 1 PR4 Task 4)", () => {
   });
 });
 
+describe("parseToolCalls artifact.action (PR4 Task 4)", () => {
+  it("reads action=create from the ToolMessage artifact", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "create", name: "digest" })]),
+      updates("tools", [
+        toolResultWithArtifact("c1", "Created task 'digest': ...", {
+          trigger_id: "trig-abc-123",
+          action: "create",
+        }),
+      ]),
+    ];
+    const [entry] = parseToolCalls(events);
+    expect(entry.action).toBe("create");
+  });
+
+  it("reads action=update from the ToolMessage artifact", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "update", task_id: "t1" })]),
+      updates("tools", [
+        toolResultWithArtifact("c1", "Updated task 'digest'.", {
+          trigger_id: "trig-abc-123",
+          action: "update",
+        }),
+      ]),
+    ];
+    const [entry] = parseToolCalls(events);
+    expect(entry.action).toBe("update");
+  });
+
+  it("leaves action null when the result carries no artifact", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "list" })]),
+      updates("tools", [toolResult("c1", "no tasks")]),
+    ];
+    expect(parseToolCalls(events)[0].action).toBeNull();
+  });
+
+  it("leaves action null when the artifact carries no action key", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "create" })]),
+      updates("tools", [toolResultWithArtifact("c1", "Created.", { trigger_id: "trig-1" })]),
+    ];
+    expect(parseToolCalls(events)[0].action).toBeNull();
+  });
+
+  it("ignores a non-string action", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "create" })]),
+      updates("tools", [toolResultWithArtifact("c1", "Created.", { action: 123 })]),
+    ];
+    expect(parseToolCalls(events)[0].action).toBeNull();
+  });
+
+  it("ignores an empty-string action", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "create" })]),
+      updates("tools", [toolResultWithArtifact("c1", "Created.", { action: "" })]),
+    ];
+    expect(parseToolCalls(events)[0].action).toBeNull();
+  });
+
+  it("defaults action to null for a call with no result yet", () => {
+    const events = [updates("agent", [aiCall("c1", "manage_task", { action: "create" })])];
+    expect(parseToolCalls(events)[0].action).toBeNull();
+  });
+});
+
 describe("artifactsFromTools", () => {
   it("returns a successfully saved artifact with its name + kind", () => {
     const events = [

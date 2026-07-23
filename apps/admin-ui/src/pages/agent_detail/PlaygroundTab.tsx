@@ -1631,18 +1631,20 @@ function TaskResultCard({ result }: { result: FireNowResult }) {
         >
           {completedLabel}
         </Tag>
-        <Button
-          size="small"
-          type="link"
-          icon={<ExternalLink size={12} strokeWidth={1.75} />}
-          onClick={() =>
-            navigate(`/conversations/${encodeURIComponent(result.thread_id)}`)
-          }
-          style={{ marginLeft: "auto" }}
-          data-testid="playground-task-result-view-run"
-        >
-          {t("playground.view_run")}
-        </Button>
+        {result.thread_id !== "" ? (
+          <Button
+            size="small"
+            type="link"
+            icon={<ExternalLink size={12} strokeWidth={1.75} />}
+            onClick={() =>
+              navigate(`/conversations/${encodeURIComponent(result.thread_id)}`)
+            }
+            style={{ marginLeft: "auto" }}
+            data-testid="playground-task-result-view-run"
+          >
+            {t("playground.view_run")}
+          </Button>
+        ) : null}
       </div>
       <div style={{ padding: "8px 12px" }}>
         {result.delivery === "delivered" && result.delivered_text ? (

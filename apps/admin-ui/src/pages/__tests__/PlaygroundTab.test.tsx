@@ -2007,7 +2007,7 @@ describe("PlaygroundTab", () => {
                   name: "manage_task",
                   content: "Created trigger trig-1",
                   status: "success",
-                  artifact: { trigger_id: "trig-1" },
+                  artifact: { trigger_id: "trig-1", action: "create" },
                 },
               ],
             },
@@ -2147,6 +2147,55 @@ describe("PlaygroundTab", () => {
       expect(
         screen.queryByTestId("playground-task-result"),
       ).not.toBeInTheDocument();
+    });
+
+    // PR4 Task 4 (N3) — a fire-now poll timeout returns an empty thread_id
+    // (the run hasn't produced a readable thread yet); the 「查看运行」 link
+    // must not render a dead /conversations/ link for it.
+    it("does not render the view-run link when thread_id is empty (timeout — no run to open yet)", async () => {
+      const user = userEvent.setup();
+      const result: FireNowResult = {
+        run_id: "run-fired-timeout",
+        thread_id: "",
+        run_status: "running",
+        trigger_run_status: "fired",
+        delivery: "pending",
+        delivered_text: null,
+      };
+      fireTriggerNowMock.mockResolvedValue(result);
+
+      await fireFromManageTaskCard(user);
+
+      await waitFor(() =>
+        expect(fireTriggerNowMock).toHaveBeenCalledWith("trig-1"),
+      );
+      const card = await screen.findByTestId("playground-task-result");
+      expect(
+        within(card).queryByTestId("playground-task-result-view-run"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders the view-run link when thread_id is non-empty", async () => {
+      const user = userEvent.setup();
+      const result: FireNowResult = {
+        run_id: "run-fired-viewrun",
+        thread_id: "99999999-9999-9999-9999-999999999999",
+        run_status: "completed",
+        trigger_run_status: "succeeded",
+        delivery: "delivered",
+        delivered_text: "今日 AI 新闻:GPT-6 发布。",
+      };
+      fireTriggerNowMock.mockResolvedValue(result);
+
+      await fireFromManageTaskCard(user);
+
+      await waitFor(() =>
+        expect(fireTriggerNowMock).toHaveBeenCalledWith("trig-1"),
+      );
+      const card = await screen.findByTestId("playground-task-result");
+      expect(
+        within(card).getByTestId("playground-task-result-view-run"),
+      ).toBeInTheDocument();
     });
   });
 });

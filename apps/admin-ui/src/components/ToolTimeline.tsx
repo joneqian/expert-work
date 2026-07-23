@@ -196,7 +196,10 @@ export function ToolCallCard({
         <Tag color={STATUS_COLOR[entry.status]} bordered={false} style={{ margin: 0 }}>
           {statusLabel}
         </Tag>
-        {entry.toolName === "manage_task" && entry.status === "success" && entry.triggerId ? (
+        {entry.toolName === "manage_task" &&
+        entry.status === "success" &&
+        entry.action === "create" &&
+        entry.triggerId ? (
           <FireNowButton triggerId={entry.triggerId} onFireResult={onFireResult} />
         ) : null}
       </div>
@@ -232,6 +235,7 @@ function FireNowButton({
 
   const handleFire = useCallback(async () => {
     setFiring(true);
+    setDelivery(null); // 重触发前清旧投递态,避免上次结果 Tag 残留
     try {
       const result = await fireTriggerNow(triggerId);
       setDelivery(result.delivery);

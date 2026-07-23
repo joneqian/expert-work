@@ -298,7 +298,7 @@ class ManageTaskTool:
                 f"Created task {name!r}: {summary}. Next run "
                 f"{nxt:%Y-%m-%d %H:%M UTC}. Results will appear here when it runs."
             ),
-            meta={"trigger_id": str(record.id)},
+            meta={"trigger_id": str(record.id), "action": "create"},
         )
 
     async def _list(self, ctx: ToolContext) -> ToolResult:
@@ -358,7 +358,10 @@ class ManageTaskTool:
         ok = await self.store.update(rec.model_copy(update=updates))
         if not ok:
             raise ValueError("couldn't update the task")
-        return ToolResult(content=f"Updated task {rec.name!r}.", meta={"trigger_id": str(rec.id)})
+        return ToolResult(
+            content=f"Updated task {rec.name!r}.",
+            meta={"trigger_id": str(rec.id), "action": "update"},
+        )
 
     async def _cancel(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
         rec = await self._get_owned(args, ctx)
