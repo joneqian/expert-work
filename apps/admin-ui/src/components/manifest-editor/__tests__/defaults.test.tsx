@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildDefaultManifest, BASE_MANIFEST_YAML } from "../defaults";
+import { setBuiltinTool, setTool } from "../form_model";
 import { parseYaml } from "../yaml";
 
 type Manifest = {
@@ -91,5 +92,69 @@ describe("BASE_MANIFEST_YAML seed tools", () => {
       spec: { policies: { max_no_progress: number } };
     };
     expect(m.spec.policies.max_no_progress).toBe(4);
+  });
+});
+
+// Linchpin regression (T5 review Important): un-checking ONE tool from the
+// full 20-tool seed must drop exactly that entry and leave every sibling —
+// including the hidden base-9 essentials and their exact shapes — untouched.
+// Guards the setTool/setBuiltinTool name-predicate filters against future
+// edits (e.g. accidentally filtering by index or by type alone).
+describe("20-seed uncheck round-trip", () => {
+  type SeededManifest = {
+    spec: { tools: { type: string; name?: string; config?: unknown }[] };
+  };
+  const seed = (): SeededManifest =>
+    parseYaml(BASE_MANIFEST_YAML) as SeededManifest;
+
+  it("un-checking web_search drops only that entry; the 19 siblings stay byte-identical", () => {
+    const base = seed();
+    const next = setTool(base, "webSearch", false) as SeededManifest;
+    expect(next.spec.tools).toHaveLength(19);
+    const survivors = base.spec.tools.filter(
+      (t) => !(t.type === "builtin" && t.name === "web_search"),
+    );
+    expect(next.spec.tools).toEqual(survivors);
+  });
+
+  it("un-checking manage_task (setBuiltinTool) drops only that entry; base-9 shapes survive", () => {
+    const base = seed();
+    const next = setBuiltinTool(base, "manage_task", false) as SeededManifest;
+    expect(next.spec.tools).toHaveLength(19);
+    const survivors = base.spec.tools.filter(
+      (t) => !(t.type === "builtin" && t.name === "manage_task"),
+    );
+    expect(next.spec.tools).toEqual(survivors);
+    // the hidden essentials are still there in their exact seeded shape
+    expect(next.spec.tools).toContainEqual({ type: "builtin", name: "read_file" });
+    expect(next.spec.tools).toContainEqual({ type: "builtin", name: "remember" });
+  });
+
+  it("un-checking http drops only the http entry", () => {
+    const base = seed();
+    const next = setTool(base, "http", false) as SeededManifest;
+    expect(next.spec.tools).toHaveLength(19);
+    expect(next.spec.tools).not.toContainEqual({ type: "http" });
+    expect(next.spec.tools).toEqual(
+      base.spec.tools.filter((t) => t.type !== "http"),
+    );
+  });
+
+  it("uncheck-then-recheck web_search round-trips back to the full 20-name set", () => {
+    const base = seed();
+    const next = setTool(
+      setTool(base, "webSearch", false),
+      "webSearch",
+      true,
+    ) as SeededManifest;
+    expect(next.spec.tools).toHaveLength(20);
+    expect(next.spec.tools).toContainEqual({
+      type: "builtin",
+      name: "web_search",
+      config: {},
+    });
+    expect(new Set(next.spec.tools.map((t) => t.name ?? t.type))).toEqual(
+      new Set(base.spec.tools.map((t) => t.name ?? t.type)),
+    );
   });
 });
