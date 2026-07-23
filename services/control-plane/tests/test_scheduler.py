@@ -724,6 +724,42 @@ async def test_reconcile_failure_converges_no_double_transition() -> None:
     assert got2.status is TriggerRunStatus.RETRYING  # not overwritten by the second pass
 
 
+@pytest.mark.asyncio
+async def test_reconcile_dead_letter_audits_exactly_once() -> None:
+    """Two reconciles of the same FIRED row whose retry budget is already
+    exhausted (attempt >= max → DEAD_LETTER) must emit exactly one
+    TRIGGER_FAILED audit entry and leave the row DEAD_LETTER — not
+    double-audit. This is the failure-path sibling of
+    ``test_reconcile_success_audits_exactly_once`` above:
+    ``test_reconcile_failure_converges_no_double_transition`` only exercises
+    the RETRYING outcome, which never emits an audit, so it can't catch a
+    regression to unconditional emit in the failed-run branch. DEAD_LETTER
+    (like INTERRUPTED) does emit TRIGGER_FAILED, so it's the case that
+    actually proves the audit-gate on a double-reconcile of a failed run."""
+    audit = InMemoryAuditLogStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    run_store = InMemoryRunStore()
+    run_id, trigger_id = uuid4(), uuid4()
+    await run_store.create(_run_info(run_id, status=RunStatus.ERROR, error="boom"))
+    fired = await trigger_runs.create(_fired_run(trigger_id=trigger_id, run_id=run_id, attempt=5))
+    scheduler, _ = await _build_scheduler(
+        trigger_store=InMemoryTriggerStore(),
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+        audit_store=audit,
+    )
+
+    now = datetime.now(UTC)
+    await scheduler._reconcile_one(fired, now=now)
+    await scheduler._reconcile_one(fired, now=now)  # duplicate sweep / endpoint race
+
+    page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_FAILED))
+    assert len(page.entries) == 1
+    row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+    assert row is not None
+    assert row.status is TriggerRunStatus.DEAD_LETTER
+
+
 # --- PR1 地基(scheduled-tasks-conversational) — RRULE dual-path -----------
 #
 # ``_next_occurrence`` is the new source of truth (rrule-first, cron-
