@@ -89,7 +89,7 @@
 
 - **web_search、http、opt-in 7(manage_task/author_skill/refine_skill/fork_skill/propose_skill_to_tenant/note_behavior_patch/clarify_tool_usage)全部改为:模板种入、默认开、界面开关可关**——与 exec/bash 同档。BASE_MANIFEST_YAML 种子同步,`defaults` 测试同步。
 - 存量 agent 不动(种子只影响新建)。
-- web_search 后端 = 自托管 SearXNG(免费无 key),compose 默认自带、开箱即用;未配 SearXNG 的部署,后端派生时不注册该工具,manifest 开着也无害 → 默认开安全,无需前置提示。
+- web_search 后端 = 自托管 SearXNG(免费无 key),compose 默认自带、开箱即用 → 标准部署默认开安全。**注意**:平台未配 SearXNG 时,manifest 勾着 web_search 会在 Agent 构建期报错(assembly.py `_register_web_search` 显式 raise)——非标准部署删了 SearXNG 就得关此工具;checkbox 帮助文案带一句「平台自带搜索服务;如部署未启用,请关闭此项」。换专门引擎(Tavily 等)走平台 MCP 目录,与内置可并存或替换,默认开不锁死选择。
 - tools_config_note 文案同步改写。
 
 ## ③ 预设档位「运行策略」
