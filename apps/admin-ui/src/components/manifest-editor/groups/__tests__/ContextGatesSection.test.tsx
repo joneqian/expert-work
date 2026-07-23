@@ -52,9 +52,8 @@ function rowFor(fieldId: string): HTMLElement {
 }
 
 describe("ContextGatesSection", () => {
-  it("renders as a single PolicyFieldTable — no Collapse anywhere", () => {
+  it("renders with no Collapse anywhere", () => {
     renderSection();
-    expect(screen.getByTestId("policy-field-table")).toBeInTheDocument();
     expect(document.querySelector(".ant-collapse")).not.toBeInTheDocument();
   });
 
@@ -189,9 +188,36 @@ describe("ContextGatesSection", () => {
     expect(last.spec?.policies?.tool_output_budget?.enabled).toBe(false);
   });
 
-  it("shows the gray 'Default 0.7' badge for tool_result_prune.threshold_pct when unset", () => {
+  it("shows no '已自定义' tag for tool_result_prune.threshold_pct when unset (at default)", () => {
     renderSection({});
-    const row = rowFor("policies.tool_result_prune.threshold_pct");
-    expect(within(row).getByText("Default 0.7")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        "field-customized-policies.tool_result_prune.threshold_pct",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the '已自定义' tag and a reset button for tool_result_prune.threshold_pct once diverged", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const seed: AgentManifest = {
+      spec: { policies: { tool_result_prune: { threshold_pct: 0.4 } } },
+    };
+    renderSection(seed, onChange);
+
+    expect(
+      screen.getByTestId(
+        "field-customized-policies.tool_result_prune.threshold_pct",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByTestId(
+        "field-reset-policies.tool_result_prune.threshold_pct",
+      ),
+    );
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.policies?.tool_result_prune?.threshold_pct).toBeUndefined();
   });
 });

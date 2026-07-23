@@ -2,17 +2,18 @@
  * ContextGatesSection — "上下文与压缩" (Context & Compression) group, Task 3
  * of the agent-config-page redesign (PR2). Visualizes the three sequential
  * context gates (PolicySpec.tool_result_prune → .working_memory →
- * .context_compression) plus the sibling tool-output-budget master switch,
- * as a single table (18 knobs total) — the pending-hint placeholder this
- * group showed since Phase 1/PR1 is now real.
+ * .context_compression) plus the sibling tool-output-budget master switch —
+ * the pending-hint placeholder this group showed since Phase 1/PR1 is now
+ * real.
  *
  * Structure: an intro ``Text`` explaining the three-gate order, then one
- * ``PolicyFieldTable`` (a later redesign PR's table-layout renderer) with
- * one titled group per PolicySpec sub-block. All four groups and all 18
- * fields are always visible, table-row-dense — no per-group expand/collapse
- * step (this component previously rendered a four-panel antd ``Collapse``
- * here, first panel open by default; that's gone, along with the
- * ``forceRender`` plumbing it needed to keep collapsed fields reachable).
+ * titled ``Text strong`` + ``PolicyFieldList`` (config-page redesign v2 Task
+ * 1's one-row-per-field ``FieldRow`` renderer) pair per PolicySpec sub-block.
+ * All four groups and all 18 fields are always visible — no per-group
+ * expand/collapse step (this component previously rendered a four-panel antd
+ * ``Collapse`` here, first panel open by default; that's gone, along with
+ * the ``forceRender`` plumbing it needed to keep collapsed fields reachable).
+ * Tab-izing these four groups is left to a later task in the v2 redesign.
  *
  * Each group's field array is a ``FieldDef`` table (Task 1's declarative
  * pattern, same as ``RunBudgetSection``); this component only wires the
@@ -25,7 +26,7 @@
 import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { PolicyFieldTable, type FieldDef } from "./field_defs";
+import { PolicyFieldList, type FieldDef } from "./field_defs";
 import {
   patchContextGates,
   readContextGates,
@@ -213,13 +214,35 @@ export function ContextGatesSection({
       <Text type="secondary" style={{ display: "block", marginBottom: 16 }}>
         {t("context_gates.group_intro")}
       </Text>
-      <PolicyFieldTable
-        groups={[
-          { titleKey: "context_gates.panel_tool_result_prune", defs: TOOL_RESULT_PRUNE_DEFS },
-          { titleKey: "context_gates.panel_working_memory", defs: WORKING_MEMORY_DEFS },
-          { titleKey: "context_gates.panel_context_compression", defs: CONTEXT_COMPRESSION_DEFS },
-          { titleKey: "context_gates.panel_tool_output_budget", defs: TOOL_OUTPUT_BUDGET_DEFS },
-        ]}
+      <Text strong style={{ display: "block", marginBottom: 8 }}>
+        {t("context_gates.panel_tool_result_prune")}
+      </Text>
+      <PolicyFieldList
+        defs={TOOL_RESULT_PRUNE_DEFS}
+        values={values}
+        onPatch={handlePatch}
+      />
+      <Text strong style={{ display: "block", margin: "16px 0 8px" }}>
+        {t("context_gates.panel_working_memory")}
+      </Text>
+      <PolicyFieldList
+        defs={WORKING_MEMORY_DEFS}
+        values={values}
+        onPatch={handlePatch}
+      />
+      <Text strong style={{ display: "block", margin: "16px 0 8px" }}>
+        {t("context_gates.panel_context_compression")}
+      </Text>
+      <PolicyFieldList
+        defs={CONTEXT_COMPRESSION_DEFS}
+        values={values}
+        onPatch={handlePatch}
+      />
+      <Text strong style={{ display: "block", margin: "16px 0 8px" }}>
+        {t("context_gates.panel_tool_output_budget")}
+      </Text>
+      <PolicyFieldList
+        defs={TOOL_OUTPUT_BUDGET_DEFS}
         values={values}
         onPatch={handlePatch}
       />

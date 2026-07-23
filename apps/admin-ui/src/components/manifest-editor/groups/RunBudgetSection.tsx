@@ -1,16 +1,19 @@
 /**
  * RunBudgetSection — pilot "运行预算与超时" (Run Budget & Timeouts) group,
  * Task 6 of the agent-config-page redesign (PR1). The first ``budget`` group
- * pane that renders real controls instead of the group-pending hint: six
+ * pane that renders real controls instead of the group-pending hint: seven
  * knobs that live in three different manifest locations
- * (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
- * top-level spec.stream_deadline_s+idle_timeout_s) behind one screen.
+ * (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s+
+ * token_budget / top-level spec.stream_deadline_s+idle_timeout_s) behind one
+ * screen.
  *
- * Rendering itself is delegated to ``PolicyFieldTable`` (a later redesign
- * PR's table-layout renderer over Task 1's FieldDef config-array pattern) —
- * ``RUN_BUDGET_DEFS`` below is the data table that used to be five
- * hand-written ``FieldRow`` blocks; this component now only wires the
- * ``readRunBudget``/``patchRunBudget`` pair (form_model.ts) to it.
+ * Rendering itself is delegated to ``PolicyFieldList`` (Task 1 of the
+ * config-page redesign v2's one-row-per-field ``FieldRow`` renderer over the
+ * same FieldDef config-array pattern) — ``RUN_BUDGET_DEFS`` below is the data
+ * table, split into two subheaded groups (``STEP_DEFS`` for the
+ * step/flow-shaped knobs, ``TIME_DEFS`` for everything measured in seconds or
+ * tokens) purely for scanability; this component only wires the
+ * ``readRunBudget``/``patchRunBudget`` pair (form_model.ts) to each list.
  *
  * Clearing an InputNumber (antd emits ``null``) reverts that field to the
  * platform default: the patch carries an explicit ``undefined``, which
@@ -21,14 +24,17 @@
  * see ``workflow.type`` below, PR8 Task 1 (field_defs.tsx's select kind,
  * PR3 Task 1).
  *
- * A closing note (PR8 Task 1) flags ``workflow``'s other two YAML-only keys
- * (``early_stop``/``builder``) that pass schema validation but the runtime
- * never reads — left untouched, so authoring them by hand is harmless.
+ * ``workflow``'s other two YAML-only keys (``early_stop``/``builder``) pass
+ * schema validation but the runtime never reads them; the closing note that
+ * used to flag this here is gone (config-page redesign v2 Task 1 — FieldRow
+ * v2 drops always-visible footnotes in favor of the ⓘ help popover), leaving
+ * them untouched and undocumented on this screen — authoring them by hand
+ * remains harmless.
  */
 import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { PolicyFieldTable, type FieldDef } from "./field_defs";
+import { PolicyFieldList, type FieldDef } from "./field_defs";
 import {
   patchRunBudget,
   readRunBudget,
@@ -109,9 +115,21 @@ const RUN_BUDGET_DEFS: readonly FieldDef[] = [
   },
 ];
 
+// STEP_DEFS = the step/flow-shaped knobs; TIME_DEFS = everything else
+// (seconds/tokens), rendered under their own subhead for scanability.
+const STEP_DEFS: readonly FieldDef[] = RUN_BUDGET_DEFS.filter((d) =>
+  ["workflow.max_iterations", "workflow.type", "policies.max_no_progress"].includes(d.fieldId),
+);
+const TIME_DEFS: readonly FieldDef[] = RUN_BUDGET_DEFS.filter(
+  (d) => !STEP_DEFS.includes(d),
+);
+
 export function RunBudgetSection({ formData, onChange }: RunBudgetSectionProps) {
   const { t } = useTranslation();
-  const budget = readRunBudget(formData);
+  const budget = readRunBudget(formData) as Record<
+    string,
+    number | string | undefined
+  >;
 
   const handlePatch = (patch: Partial<RunBudgetFields>): void => {
     onChange(patchRunBudget(formData, patch));
@@ -119,18 +137,14 @@ export function RunBudgetSection({ formData, onChange }: RunBudgetSectionProps) 
 
   return (
     <div data-testid="run-budget-section" style={{ maxWidth: 760 }}>
-      <PolicyFieldTable
-        groups={[{ defs: RUN_BUDGET_DEFS }]}
-        values={budget as Record<string, number | string | undefined>}
-        onPatch={handlePatch}
-      />
-      <Text
-        type="secondary"
-        data-testid="budget-workflow-note"
-        style={{ display: "block", marginTop: 16 }}
-      >
-        {t("run_budget.workflow_note")}
+      <Text strong style={{ display: "block", marginBottom: 8 }}>
+        {t("run_budget.subhead_steps")}
       </Text>
+      <PolicyFieldList defs={STEP_DEFS} values={budget} onPatch={handlePatch} />
+      <Text strong style={{ display: "block", margin: "16px 0 8px" }}>
+        {t("run_budget.subhead_time")}
+      </Text>
+      <PolicyFieldList defs={TIME_DEFS} values={budget} onPatch={handlePatch} />
     </div>
   );
 }

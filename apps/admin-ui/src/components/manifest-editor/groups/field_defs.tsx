@@ -10,9 +10,13 @@
  * switch, antd ``Select`` for select/tags) to a single ``onPatch`` callback —
  * so a new field group is a data table, not a page of near-duplicate JSX.
  *
- * ``_impact`` and ``_default`` may be omitted per field (no impact note /
- * no default-value badge); presence is checked at render time via
- * ``i18n.exists`` rather than assumed, since not every field needs either.
+ * ``_impact`` feeds ``FieldRow``'s ``help`` (the long, click-to-reveal
+ * explanation); ``_default`` feeds ``resetHint`` (the reset button's
+ * tooltip). Both may be omitted per field — presence is checked at render
+ * time via ``i18n.exists`` rather than assumed, since not every field needs
+ * either. When ``_default`` is absent, ``resetHint`` falls back to
+ * ``String(def.effectiveDefault)`` (or is itself omitted when
+ * ``effectiveDefault`` is ``null`` — an unset-is-the-feature-off field).
  *
  * select/tags (PR3 Task 1) widen the value domain beyond number/boolean to
  * string / string-array; ``PolicyFieldList`` is generic over that domain
@@ -21,15 +25,9 @@
  * ``onPatch`` signatures — TS's contravariant callback-parameter check would
  * otherwise reject a ``(patch: Record<string, number|boolean|undefined>)``
  * handler once the prop type itself included string/array.
- *
- * ``PolicyFieldTable`` (Task 2 of a later redesign PR) is a second renderer
- * over the same ``FieldDef`` data: a dense table layout (配置项|值|默认|说明)
- * for groups where a full FieldRow-per-field stack is too tall, grouped by
- * an optional ``titleKey`` header row. It shares ``FieldControl`` with
- * ``PolicyFieldList`` so both renderers dispatch controls identically.
  */
-import { Fragment, type ReactNode } from "react";
-import { InputNumber, Select, Switch, Tag } from "antd";
+import type { ReactNode } from "react";
+import { InputNumber, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { FieldRow } from "../FieldRow";
@@ -200,126 +198,31 @@ export function PolicyFieldList<V extends FieldValue = FieldValue>({
       {defs.map((def) => {
         const raw = values[def.valueKey];
         const atDefault = isAtDefault(raw, def.effectiveDefault);
-        const defaultKey = `${def.i18nKey}_default`;
-        const impactKey = `${def.i18nKey}_impact`;
         const label = t(`${def.i18nKey}_label`);
 
-        const badgeValue =
-          def.kind === "switch" || def.kind === "tags"
+        const impactKey = `${def.i18nKey}_impact`;
+        const defaultKey = `${def.i18nKey}_default`;
+        const help = i18n.exists(impactKey) ? t(impactKey) : undefined;
+        const resetHint = i18n.exists(defaultKey)
+          ? t(defaultKey)
+          : def.effectiveDefault === null
             ? undefined
-            : atDefault
-              ? i18n.exists(defaultKey)
-                ? t(defaultKey)
-                : undefined
-              : String(raw);
-        const impact = i18n.exists(impactKey) ? t(impactKey) : undefined;
-
+            : String(def.effectiveDefault);
         return (
           <FieldRow
             key={def.fieldId}
             fieldId={def.fieldId}
             label={label}
             brief={t(`${def.i18nKey}_brief`)}
-            impact={impact}
-            defaultValue={badgeValue}
+            help={help}
             isDefault={atDefault}
+            onReset={() => onPatch({ [def.valueKey]: undefined } as Record<string, V | undefined>)}
+            resetHint={resetHint}
           >
             <FieldControl def={def} raw={raw} label={label} onPatch={onPatch} />
           </FieldRow>
         );
       })}
     </>
-  );
-}
-
-export interface FieldGroup {
-  titleKey?: string;
-  defs: readonly FieldDef[];
-}
-export interface PolicyFieldTableProps<V extends FieldValue = FieldValue> {
-  groups: readonly FieldGroup[];
-  values: Record<string, V | undefined>;
-  onPatch: (patch: Record<string, V | undefined>) => void;
-}
-
-/**
- * PolicyFieldTable — a table-layout renderer over the same ``FieldDef``
- * data ``PolicyFieldList`` consumes: one row per field (配置项|值|默认|说明),
- * grouped into optional titled sections. Unlike ``FieldRow``'s stacked
- * layout, the 说明 column always shows both brief and impact — there is no
- * per-field collapse here either, matching ``FieldRow``'s Task 2 change.
- * The outer ``overflowX: auto`` wrapper keeps a narrow panel from being
- * stretched wide by the table rather than scrolling horizontally.
- */
-export function PolicyFieldTable<V extends FieldValue = FieldValue>({
-  groups,
-  values,
-  onPatch,
-}: PolicyFieldTableProps<V>): ReactNode {
-  const { t, i18n } = useTranslation();
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table
-        data-testid="policy-field-table"
-        style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
-      >
-        <colgroup>
-          <col style={{ width: "22%" }} />
-          <col style={{ width: "22%" }} />
-          <col style={{ width: "10%" }} />
-          <col />
-        </colgroup>
-        <tbody>
-          {groups.map((group, gi) => (
-            <Fragment key={group.titleKey ?? gi}>
-              {group.titleKey && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    style={{ fontWeight: 600, padding: "12px 8px 4px", borderTop: gi > 0 ? "1px solid var(--ew-border-subtle)" : undefined }}
-                  >
-                    {t(group.titleKey)}
-                  </td>
-                </tr>
-              )}
-              {group.defs.map((def) => {
-                const raw = values[def.valueKey];
-                const atDefault = isAtDefault(raw, def.effectiveDefault);
-                const label = t(`${def.i18nKey}_label`);
-                const brief = t(`${def.i18nKey}_brief`);
-                const impactKey = `${def.i18nKey}_impact`;
-                const impact = i18n.exists(impactKey) ? t(impactKey) : undefined;
-                const defaultKey = `${def.i18nKey}_default`;
-                const badge =
-                  def.kind === "switch" || def.kind === "tags"
-                    ? undefined
-                    : atDefault
-                      ? (i18n.exists(defaultKey) ? t(defaultKey) : undefined)
-                      : String(raw);
-                return (
-                  <tr key={def.fieldId} data-field-id={def.fieldId} style={{ verticalAlign: "top" }}>
-                    <td style={{ padding: "8px", color: "var(--ew-text-primary)" }}>{label}</td>
-                    <td style={{ padding: "8px" }}>
-                      <FieldControl def={def} raw={raw} label={label} onPatch={onPatch} />
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      {badge !== undefined && (
-                        <Tag color={atDefault ? undefined : "blue"} bordered={false}>
-                          {atDefault ? t("manifest_editor.field_default_badge", { value: badge }) : badge}
-                        </Tag>
-                      )}
-                    </td>
-                    <td style={{ padding: "8px", color: "var(--ew-text-secondary)", fontSize: 12, lineHeight: 1.5 }}>
-                      <div>{brief}</div>
-                      {impact && <div style={{ marginTop: 2 }}>{impact}</div>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }

@@ -607,9 +607,12 @@ const zhCN: TranslationKeys = {
     group_sandbox: "沙箱与资源",
     group_observability: "触发器与可观测",
     field_impact_label: "影响说明",
-    field_default_badge: "默认 {{value}}",
+    field_customized_badge: "已自定义",
+    field_reset: "恢复默认",
+    field_reset_hint: "恢复默认:{{value}}",
   },
   run_budget: {
+    subhead_steps: "步数与流程",
     max_iterations_label: "最大步数",
     max_iterations_brief: "这次运行最多能走多少个「想一步、做一步」的循环",
     max_iterations_impact:
@@ -624,13 +627,12 @@ const zhCN: TranslationKeys = {
     wf_type_opt_react: "react(边想边做)",
     wf_type_opt_plan_execute: "plan_execute(先规划后执行)",
     wf_type_opt_custom: "custom(已弃用,等同 react)",
-    workflow_note:
-      "workflow 里还能写 early_stop 和 builder 这两个字段,但它们已经没用了:写了不会报错,可也不会真的生效,留着不影响其他功能。",
     max_no_progress_label: "无进展停机",
     max_no_progress_brief: "连续好几步都没有实际进展就提前收工,0 = 关闭",
     max_no_progress_impact:
       "防止 Agent 卡在原地反复试同一个思路、白白烧步数(比如反复调同一个工具却拿不到想要的结果)。但设太小容易误伤正常的重试,建议设 3-5。",
     max_no_progress_default: "0(关闭)",
+    subhead_time: "时间与花费",
     run_deadline_label: "运行最长耗时",
     run_deadline_brief:
       "这次运行(含它中途叫起的子 agent)最多能跑多少秒,0 = 用平台默认值(目前 1 小时)",

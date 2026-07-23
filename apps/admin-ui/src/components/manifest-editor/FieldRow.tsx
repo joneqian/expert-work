@@ -1,34 +1,26 @@
 /**
- * FieldRow — the per-field rendering contract for the agent-config-page
- * redesign (PR1, Task 4): label + control + default-value badge on one
- * line, a one-line brief always visible beneath it, and an optional impact
- * note, also always visible beneath the brief (Task 2 of a later redesign
- * PR replaced the collapsed "Impact" expander with a plain always-visible
- * line, so a field's full effect is legible without a click).
- *
- * Purely presentational: per-field copy (label/brief/impact) and the
- * control itself come from the caller, already translated — this component
- * formats none of it, it just lays the pieces out. Task 6 supplies the
- * actual field copy when it wires the pilot "运行预算与超时" group. The
- * component's own chrome (default-value badge prefix) is sourced via
- * react-i18next, same as every sibling manifest-editor component.
+ * FieldRow v2 — 一行式字段行(配置页重设计 v2 Task 1)。
+ * 布局:标签 | 控件 | 一句大白话(常显) | ⓘ(点击弹长解释) | 已自定义+恢复默认。
+ * 默认徽章废除:值===默认 → 行内零噪音;非默认 → 蓝「已自定义」Tag + 恢复默认按钮。
+ * 纯展示组件:文案由调用方翻好传入。
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Tag } from "antd";
+import { Button, Popover, Tag, Tooltip } from "antd";
+import { HelpCircle } from "lucide-react";
 
 export interface FieldRowProps {
-  /** manifest 路径,如 "workflow.max_iterations" → data-field-id */
   fieldId: string;
   label: string;
-  /** 一行作用,永远可见 */
+  /** 一句大白话,常显 */
   brief: string;
-  /** 影响说明,常显(调大/调小后果、生效条件) */
-  impact?: string;
-  /** 徽章文案;当前值===默认 → 灰"默认 <v>",否则蓝当前值 */
-  defaultValue?: string;
+  /** 长解释+场景,点击 ⓘ 弹 Popover;缺省不渲染 ⓘ */
+  help?: string;
   isDefault: boolean;
-  /** 控件本体 */
+  /** 非默认时渲染「恢复默认」;点击回调(通常 patch undefined) */
+  onReset?: () => void;
+  /** 恢复默认按钮的 Tooltip:「恢复默认:{resetHint}」;缺省只显按钮 */
+  resetHint?: string;
   children: ReactNode;
 }
 
@@ -36,35 +28,93 @@ export function FieldRow({
   fieldId,
   label,
   brief,
-  impact,
-  defaultValue,
+  help,
   isDefault,
+  onReset,
+  resetHint,
   children,
 }: FieldRowProps) {
   const { t } = useTranslation();
 
+  const resetButton = (
+    <Button
+      type="link"
+      size="small"
+      data-testid={`field-reset-${fieldId}`}
+      style={{ padding: 0, height: "auto" }}
+      onClick={onReset}
+    >
+      {t("manifest_editor.field_reset")}
+    </Button>
+  );
+
   return (
-    <div data-field-id={fieldId} style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ minWidth: 160, flexShrink: 0 }}>{label}</span>
-        <span style={{ flex: 1 }}>{children}</span>
-        {defaultValue !== undefined && (
-          <Tag color={isDefault ? undefined : "blue"} bordered={false}>
-            {isDefault
-              ? t("manifest_editor.field_default_badge", {
-                  value: defaultValue,
-                })
-              : defaultValue}
-          </Tag>
+    <div
+      data-field-id={fieldId}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        flexWrap: "wrap",
+        columnGap: 12,
+        rowGap: 4,
+        marginBottom: 12,
+      }}
+    >
+      <span style={{ minWidth: 160, flexShrink: 0 }}>{label}</span>
+      <span style={{ flexShrink: 0 }}>{children}</span>
+      <span
+        style={{
+          flex: "1 1 200px",
+          fontSize: 12,
+          color: "var(--ew-text-secondary)",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <span>{brief}</span>
+        {help !== undefined && (
+          <Popover
+            trigger="click"
+            content={
+              <div style={{ maxWidth: 360, fontSize: 12, whiteSpace: "pre-line" }}>
+                {help}
+              </div>
+            }
+          >
+            <button
+              type="button"
+              aria-label={t("common.field_help")}
+              data-testid={`field-help-${fieldId}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: 0,
+                border: "none",
+                background: "none",
+                cursor: "help",
+                color: "var(--ew-text-tertiary, #888)",
+              }}
+            >
+              <HelpCircle size={13} strokeWidth={1.75} />
+            </button>
+          </Popover>
         )}
-      </div>
-      <div style={{ fontSize: 12, color: "var(--ew-text-secondary)" }}>
-        {brief}
-      </div>
-      {impact && (
-        <div style={{ fontSize: 12, color: "var(--ew-text-secondary)", marginTop: 4 }}>
-          {impact}
-        </div>
+      </span>
+      {!isDefault && (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Tag color="blue" bordered={false} data-testid={`field-customized-${fieldId}`}>
+            {t("manifest_editor.field_customized_badge")}
+          </Tag>
+          {onReset !== undefined &&
+            (resetHint !== undefined ? (
+              <Tooltip title={t("manifest_editor.field_reset_hint", { value: resetHint })}>
+                {resetButton}
+              </Tooltip>
+            ) : (
+              resetButton
+            ))}
+        </span>
       )}
     </div>
   );

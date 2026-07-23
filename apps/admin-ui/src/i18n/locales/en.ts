@@ -593,13 +593,16 @@ export interface TranslationKeys {
     group_sandbox: string;
     group_observability: string;
     field_impact_label: string;
-    field_default_badge: string;
+    field_customized_badge: string;
+    field_reset: string;
+    field_reset_hint: string;
   };
   // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Six
   // FieldRow-rendered knobs living in three manifest locations
   // (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
   // top-level spec.stream_deadline_s+idle_timeout_s).
   run_budget: {
+    subhead_steps: string;
     max_iterations_label: string;
     max_iterations_brief: string;
     max_iterations_impact: string;
@@ -611,11 +614,11 @@ export interface TranslationKeys {
     wf_type_opt_react: string;
     wf_type_opt_plan_execute: string;
     wf_type_opt_custom: string;
-    workflow_note: string;
     max_no_progress_label: string;
     max_no_progress_brief: string;
     max_no_progress_impact: string;
     max_no_progress_default: string;
+    subhead_time: string;
     run_deadline_label: string;
     run_deadline_brief: string;
     run_deadline_impact: string;
@@ -3410,9 +3413,12 @@ const en: TranslationKeys = {
     group_sandbox: "Sandbox & Resources",
     group_observability: "Triggers & Observability",
     field_impact_label: "Impact",
-    field_default_badge: "Default {{value}}",
+    field_customized_badge: "Customized",
+    field_reset: "Reset to default",
+    field_reset_hint: "Reset to default: {{value}}",
   },
   run_budget: {
+    subhead_steps: "Steps & flow",
     max_iterations_label: "Max steps",
     max_iterations_brief:
       "How many 'think, then act' cycles a single run may go through at most",
@@ -3428,14 +3434,13 @@ const en: TranslationKeys = {
     wf_type_opt_react: "react (think, then act)",
     wf_type_opt_plan_execute: "plan_execute (plan, then execute)",
     wf_type_opt_custom: "custom (deprecated — same as react)",
-    workflow_note:
-      "workflow still accepts early_stop and builder, but they're dead: setting them doesn't error, but they no longer do anything — harmless to leave in the YAML.",
     max_no_progress_label: "No-progress stop",
     max_no_progress_brief:
       "Stop early after N consecutive steps with no real progress; 0 = off",
     max_no_progress_impact:
       "Keeps the agent from spinning in place and burning through steps for nothing (e.g. calling the same tool over and over without getting anywhere useful). Set it too low, though, and it may cut off a legitimate retry — 3-5 is a reasonable starting point.",
     max_no_progress_default: "0 (off)",
+    subhead_time: "Time & spend",
     run_deadline_label: "Max run time",
     run_deadline_brief:
       "The most seconds this run (including any sub-agents it spawns) may take; 0 = falls back to the platform default (currently 1h)",

@@ -108,7 +108,7 @@ export function ModelRoutingSection({
                   fieldId="reflection"
                   label={t("model_group.rf_enable_label")}
                   brief={t("model_group.rf_enable_brief")}
-                  impact={t("model_group.rf_enable_impact")}
+                  help={t("model_group.rf_enable_impact")}
                   isDefault={!reflectionOn}
                 >
                   <Switch

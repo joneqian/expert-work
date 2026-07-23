@@ -50,14 +50,59 @@ const optionContent =
     el.textContent === label;
 
 describe("RunBudgetSection", () => {
-  it("renders as a PolicyFieldTable with all seven fields as visible table rows", () => {
+  it("renders all seven fields, all visible", () => {
     const { container } = renderSection();
-    expect(screen.getByTestId("policy-field-table")).toBeInTheDocument();
     for (const id of FIELD_IDS) {
       const row = container.querySelector(`[data-field-id="${id}"]`);
       expect(row).toBeInTheDocument();
       expect(row).toBeVisible();
     }
+  });
+
+  it("renders two subheads splitting steps/flow from time/spend", () => {
+    renderSection();
+    expect(screen.getByText("Steps & flow")).toBeInTheDocument();
+    expect(screen.getByText("Time & spend")).toBeInTheDocument();
+  });
+
+  it("groups max_iterations/workflow.type/max_no_progress under the steps subhead, and the rest under time", () => {
+    const { container } = renderSection();
+    const stepsHeading = screen.getByText("Steps & flow");
+    const timeHeading = screen.getByText("Time & spend");
+
+    for (const id of [
+      "workflow.max_iterations",
+      "workflow.type",
+      "policies.max_no_progress",
+    ]) {
+      const row = container.querySelector(`[data-field-id="${id}"]`) as HTMLElement;
+      expect(
+        stepsHeading.compareDocumentPosition(row) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        timeHeading.compareDocumentPosition(row) &
+          Node.DOCUMENT_POSITION_PRECEDING,
+      ).toBeTruthy();
+    }
+
+    for (const id of [
+      "policies.run_deadline_s",
+      "policies.token_budget",
+      "spec.stream_deadline_s",
+      "spec.idle_timeout_s",
+    ]) {
+      const row = container.querySelector(`[data-field-id="${id}"]`) as HTMLElement;
+      expect(
+        timeHeading.compareDocumentPosition(row) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it("no longer renders the removed workflow reserved-fields note", () => {
+    renderSection();
+    expect(screen.queryByTestId("budget-workflow-note")).not.toBeInTheDocument();
   });
 
   it("workflow.type select renders with 3 options", async () => {
@@ -104,11 +149,6 @@ describe("RunBudgetSection", () => {
     expect(last.spec?.workflow?.max_iterations).toBe(40);
   });
 
-  it("renders the workflow reserved-fields note", () => {
-    renderSection();
-    expect(screen.getByTestId("budget-workflow-note")).toBeInTheDocument();
-  });
-
   it("changing max_iterations writes spec.workflow.max_iterations", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -143,20 +183,40 @@ describe("RunBudgetSection", () => {
     expect(last.spec?.workflow?.max_iterations).toBeUndefined();
   });
 
-  it("shows the gray 'Default <value>' badge when a field is unset", () => {
+  it("shows no '已自定义' tag when a field is unset (at default)", () => {
     renderSection({});
-    // max_iterations defaults to 30 when unset.
-    expect(screen.getByText("Default 30")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("field-customized-workflow.max_iterations"),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows a blue current-value badge once a field diverges from default", () => {
+  it("shows the '已自定义' tag and a reset button once a field diverges from default", () => {
     const seed: AgentManifest = {
       spec: { workflow: { max_iterations: 60 } },
     };
     renderSection(seed);
-    expect(screen.queryByText("Default 30")).not.toBeInTheDocument();
-    const badge = screen.getByText("60");
-    expect(badge.closest(".ant-tag")).toHaveClass("ant-tag-blue");
+    expect(
+      screen.getByTestId("field-customized-workflow.max_iterations"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("field-reset-workflow.max_iterations"),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking reset on a diverged field reverts it to the platform default", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const seed: AgentManifest = {
+      spec: { workflow: { max_iterations: 60 } },
+    };
+    renderSection(seed, onChange);
+
+    await user.click(
+      screen.getByTestId("field-reset-workflow.max_iterations"),
+    );
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.workflow?.max_iterations).toBeUndefined();
   });
 
   it("changing max_no_progress writes spec.policies.max_no_progress", async () => {
