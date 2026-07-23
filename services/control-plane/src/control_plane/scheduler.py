@@ -21,15 +21,17 @@ is safe to run on more than one instance: ``_fire_due_cron`` claims the due
 slot via ``TriggerStore.claim_cron_fire`` (CAS on ``last_fired_at``) and
 ``_retry_due`` claims a retrying firing via ``TriggerRunStore.claim_retry``
 (CAS ``retrying`` → ``fired``) — exactly one instance wins each, so blue+green
-never double-spawn. The reconcile pass's status transition is idempotent (both
-instances derive the same terminal status from the same run outcome). Its
-result-delivery side effect (Spec 1 PR3/PR4 — appending a fired run's result
-into the originating conversation) is now idempotent too: ``inject_delivery``
-dedups by ``expert_work_source_run_id``, so two reconcilers — or the scheduler
-racing the manual ``:fire`` endpoint (Spec 1 PR4) — append at most one copy.
-(A duplicate reconcile still emits a redundant ``TRIGGER_COMPLETED`` audit
-entry; a CAS claim gating the ``fired`` → ``succeeded`` transition would make
-that exactly-once too — deferred, cosmetic.)
+never double-spawn. The reconcile pass's terminal-status transition is now
+CAS-guarded too (Spec 1 PR4 加固, Task 1/2): ``_reconcile_one`` routes every
+finalize through ``TriggerRunStore.claim_reconcile`` (CAS ``fired`` → the
+terminal status) and only emits the lifecycle audit when the CAS is won, so
+a duplicate reconcile — or the scheduler racing the manual ``:fire`` endpoint
+(Spec 1 PR4) — finalizes and audits at most once. Its result-delivery side
+effect (Spec 1 PR3/PR4 — appending a fired run's result into the originating
+conversation) stays deliver-first (before the CAS claim, so a crash between
+the two never silently loses a delivery) and is idempotent too:
+``inject_delivery`` dedups by ``expert_work_source_run_id``, so two
+reconcilers append at most one copy.
 
 Wiring (in :func:`control_plane.app.create_app`): started from the
 FastAPI ``lifespan`` ``yield``, stopped via :meth:`stop` from the
@@ -352,18 +354,19 @@ class TriggerScheduler:
                 return
             if run.status is RunStatus.SUCCESS:
                 delivery = await self._deliver(row, run)
-                await self._trigger_runs.update(
+                won = await self._trigger_runs.claim_reconcile(
                     row.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
                 )
-                await self._emit_lifecycle(
-                    row,
-                    action=AuditAction.TRIGGER_COMPLETED,
-                    details={"run_id": str(row.run_id), "delivery": delivery},
-                )
+                if won:
+                    await self._emit_lifecycle(
+                        row,
+                        action=AuditAction.TRIGGER_COMPLETED,
+                        details={"run_id": str(row.run_id), "delivery": delivery},
+                    )
             elif run.status in _FAILED_RUN_STATUSES:
                 new = self._after_failure(row, now=now, error=run.error)
-                await self._trigger_runs.update(new)
-                if new.status is TriggerRunStatus.DEAD_LETTER:
+                won = await self._trigger_runs.claim_reconcile(new)
+                if won and new.status is TriggerRunStatus.DEAD_LETTER:
                     await self._emit_lifecycle(
                         row,
                         action=AuditAction.TRIGGER_FAILED,
@@ -371,7 +374,7 @@ class TriggerScheduler:
                     )
             elif run.status is RunStatus.INTERRUPTED:
                 # A deliberately-cancelled run is a terminal failure — no retry.
-                await self._trigger_runs.update(
+                won = await self._trigger_runs.claim_reconcile(
                     row.model_copy(
                         update={
                             "status": TriggerRunStatus.FAILED,
@@ -379,11 +382,12 @@ class TriggerScheduler:
                         }
                     )
                 )
-                await self._emit_lifecycle(
-                    row,
-                    action=AuditAction.TRIGGER_FAILED,
-                    details={"run_id": str(row.run_id), "error": "run interrupted"},
-                )
+                if won:
+                    await self._emit_lifecycle(
+                        row,
+                        action=AuditAction.TRIGGER_FAILED,
+                        details={"run_id": str(row.run_id), "error": "run interrupted"},
+                    )
             # PAUSED / RUNNING / PENDING — not terminal; reconcile next sweep.
 
     async def _emit_lifecycle(

@@ -658,6 +658,72 @@ async def test_two_instances_retry_exactly_once() -> None:
     await _drain(row.run_id, blue_rt, green_rt)
 
 
+# --- Task 2 (PR4 加固) — reconcile CAS-finalize + audit-gate ---------------
+#
+# ``_reconcile_one`` now routes its terminal-status transition through
+# ``TriggerRunStore.claim_reconcile`` (Task 1's CAS) and only emits the
+# lifecycle audit when the CAS is won. This closes the same class of race
+# as the two tests above, but for the reconcile pass racing itself (a
+# duplicate sweep) or the manual fire-now endpoint (Spec 1 PR4).
+
+
+@pytest.mark.asyncio
+async def test_reconcile_success_audits_exactly_once() -> None:
+    """Two reconciles of the same FIRED row (duplicate sweep, or the sweep
+    racing the fire-now endpoint) must emit exactly one TRIGGER_COMPLETED
+    audit entry and leave the row SUCCEEDED — not double-audit."""
+    audit = InMemoryAuditLogStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    run_store = InMemoryRunStore()
+    run_id, trigger_id = uuid4(), uuid4()
+    await run_store.create(_run_info(run_id, status=RunStatus.SUCCESS))
+    fired = await trigger_runs.create(_fired_run(trigger_id=trigger_id, run_id=run_id))
+    scheduler, _ = await _build_scheduler(
+        trigger_store=InMemoryTriggerStore(),
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+        audit_store=audit,
+    )
+
+    now = datetime.now(UTC)
+    await scheduler._reconcile_one(fired, now=now)
+    await scheduler._reconcile_one(fired, now=now)  # duplicate sweep / endpoint race
+
+    page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_COMPLETED))
+    assert len(page.entries) == 1
+    row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+    assert row is not None
+    assert row.status is TriggerRunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_reconcile_failure_converges_no_double_transition() -> None:
+    """The failure path's first reconcile wins the CAS and transitions
+    FIRED→RETRYING; a second reconcile of the same (now-stale) row loses the
+    CAS and must not re-transition or overwrite the winner's state."""
+    trigger_runs = InMemoryTriggerRunStore()
+    run_store = InMemoryRunStore()
+    run_id, trigger_id = uuid4(), uuid4()
+    await run_store.create(_run_info(run_id, status=RunStatus.ERROR, error="boom"))
+    fired = await trigger_runs.create(_fired_run(trigger_id=trigger_id, run_id=run_id, attempt=1))
+    scheduler, _ = await _build_scheduler(
+        trigger_store=InMemoryTriggerStore(),
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+    )
+
+    now = datetime.now(UTC)
+    await scheduler._reconcile_one(fired, now=now)  # first pass — RETRYING (attempt < max)
+    got1 = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+    await scheduler._reconcile_one(fired, now=now)  # second pass — row no longer FIRED, CAS loses
+    got2 = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+
+    assert got1 is not None
+    assert got1.status is TriggerRunStatus.RETRYING
+    assert got2 is not None
+    assert got2.status is TriggerRunStatus.RETRYING  # not overwritten by the second pass
+
+
 # --- PR1 地基(scheduled-tasks-conversational) — RRULE dual-path -----------
 #
 # ``_next_occurrence`` is the new source of truth (rrule-first, cron-
