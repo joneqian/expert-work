@@ -71,15 +71,30 @@
   - **时间与花费**:run_deadline_s · token_budget · stream_deadline_s · idle_timeout_s
 - **`run_budget.workflow_note`(early_stop/builder YAML-only 注脚)删除**(技术细节,非技术人员无感;YAML 用户看文档)。
 
-### 沙箱与资源 / 触发器与可观测 / 模型与路由
+### 能力(capabilities)
 
-- 行样式与文案统一到 v2,不动结构(字段少)。
+- 现为 5 个 section 纵向堆叠,拆成子 tab:**[工具] [MCP] [知识库] [技能] [子智能体]**(section 组件现成,只改容器)。
+
+### 模型与路由(ModelRoutingSection)
+
+- 「反思自检」Collapse 拆平常显(开关 + 开启后 预算/超时 两行);其余结构不动,行样式与文案统一到 v2。
+
+### 沙箱与资源 / 触发器与可观测
+
+- 行样式与文案统一到 v2,不动结构(字段少)。persistent_workspace 文案须讲透:「关:运行结束文件不保留(产物另存不受影响);要跨会话续用文件再打开。开 = 每个使用者一块跨会话磁盘,不会自动回收」。
+
+## ②′ 工具默认姿态变更(2026-07-23 用户拍板)
+
+- **web_search、http、opt-in 7(manage_task/author_skill/refine_skill/fork_skill/propose_skill_to_tenant/note_behavior_patch/clarify_tool_usage)全部改为:模板种入、默认开、界面开关可关**——与 exec/bash 同档。BASE_MANIFEST_YAML 种子同步,`defaults` 测试同步。
+- 存量 agent 不动(种子只影响新建)。
+- web_search brief 带「需平台已配搜索服务」提示;计划期核对其运行前置。
+- tools_config_note 文案同步改写。
 
 ## ③ 预设档位「运行策略」
 
 - **位置**:「基础」组顶部卡片,三档 Radio:`均衡推荐`(默认)/ `成本优先` / `能力优先`;右侧状态 chip:当前匹配某档显示该档,否则「自定义」。
 - **机制**:纯前端。新 `form_model` helper `applyRunProfile(m, profile)` 一次性批量写以下受管字段;`inferRunProfile(m)` 打开编辑器时反推(全部字段精确匹配某档 → 该档,否则 `custom`)。**不新增任何后端/manifest 字段**。
-- **均衡档值 === effectiveDefault** ⇒ 应用均衡 = 全部受管键 patch `undefined`(manifest 回到最干净状态)。这是承重不变式。
+- **均衡档 = 新建模板姿态**:除 `max_no_progress`(均衡 4,有意偏离后端默认 0)外,均衡值 === effectiveDefault ⇒ 应用均衡 = 这些键 patch `undefined`(manifest 回到最干净状态)、`max_no_progress` 显式写 4。这是承重不变式。
 - 换档若会改动 ≥1 个字段值 → confirm Modal「将调整 N 项配置」列明细;否则直接应用。
 - **安全与防护字段一律不受管**(防护开关不允许被「成本优先」静默降级;其默认值本身已是推荐姿态)。run_deadline_s / stream_deadline_s / idle_timeout_s / token_budget 也不受管(安全阀/平台默认,不是调优旋钮)。
 
@@ -92,7 +107,7 @@
 | correction_token_budget | 500 | 300 | 800 |
 | consolidation.enabled | true | false | true |
 | workflow.max_iterations | 30 | 20 | 60 |
-| policies.max_no_progress | 0 | 3 | 0 |
+| policies.max_no_progress | **4**(模板亦种 4;后端默认 0=关检测,视为防呆缺陷) | 3 | 6 |
 | tool_result_prune.threshold_pct | 0.7 | 0.6 | 0.8 |
 | tool_result_prune.recent_kept | 4 | 2 | 8 |
 | working_memory.threshold_pct | 0.7 | 0.6 | 0.8 |
