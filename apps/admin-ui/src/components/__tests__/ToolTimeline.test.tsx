@@ -177,24 +177,40 @@ describe("ToolCallCard 立即触发 / run-now button (Spec 1 PR4 Task 4)", () =>
     vi.restoreAllMocks();
   });
 
-  it("shows the button for a successful manage_task card with a triggerId", () => {
-    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }));
+  it("shows the button for a successful manage_task create card with a triggerId", () => {
+    renderFireCard(
+      baseEntry({ toolName: "manage_task", triggerId: "trig-1", action: "create" }),
+    );
     expect(screen.getByTestId("tool-fire-now")).toBeInTheDocument();
   });
 
   it("hides the button when there is no triggerId", () => {
-    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: null }));
+    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: null, action: "create" }));
     expect(screen.queryByTestId("tool-fire-now")).not.toBeInTheDocument();
   });
 
   it("hides the button for a non-manage_task tool even if it somehow carried a triggerId", () => {
-    renderFireCard(baseEntry({ toolName: "search", triggerId: "trig-1" }));
+    renderFireCard(baseEntry({ toolName: "search", triggerId: "trig-1", action: "create" }));
     expect(screen.queryByTestId("tool-fire-now")).not.toBeInTheDocument();
   });
 
   it("hides the button while the call has not yet succeeded", () => {
     renderFireCard(
-      baseEntry({ toolName: "manage_task", triggerId: "trig-1", status: "pending" }),
+      baseEntry({
+        toolName: "manage_task",
+        triggerId: "trig-1",
+        status: "pending",
+        action: "create",
+      }),
+    );
+    expect(screen.queryByTestId("tool-fire-now")).not.toBeInTheDocument();
+  });
+
+  // PR4 Task 4 — an update card touches an existing task (no fresh trigger to
+  // preview-fire); only a create card gets the shortcut.
+  it("hides the button on an update card even with a triggerId and success status", () => {
+    renderFireCard(
+      baseEntry({ toolName: "manage_task", triggerId: "trig-1", action: "update" }),
     );
     expect(screen.queryByTestId("tool-fire-now")).not.toBeInTheDocument();
   });
@@ -211,7 +227,10 @@ describe("ToolCallCard 立即触发 / run-now button (Spec 1 PR4 Task 4)", () =>
     };
     const fireMock = vi.spyOn(triggersSdk, "fireTriggerNow").mockResolvedValue(result);
     const onFireResult = vi.fn();
-    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }), onFireResult);
+    renderFireCard(
+      baseEntry({ toolName: "manage_task", triggerId: "trig-1", action: "create" }),
+      onFireResult,
+    );
 
     await user.click(screen.getByTestId("tool-fire-now"));
 
@@ -233,7 +252,9 @@ describe("ToolCallCard 立即触发 / run-now button (Spec 1 PR4 Task 4)", () =>
       trigger_run_status: "fired",
       delivery: "pending",
     });
-    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }));
+    renderFireCard(
+      baseEntry({ toolName: "manage_task", triggerId: "trig-1", action: "create" }),
+    );
 
     await user.click(screen.getByTestId("tool-fire-now"));
 
@@ -249,7 +270,9 @@ describe("ToolCallCard 立即触发 / run-now button (Spec 1 PR4 Task 4)", () =>
     vi.spyOn(triggersSdk, "fireTriggerNow").mockRejectedValue(
       new ApiError("agent unavailable", "TRIGGER_AGENT_UNAVAILABLE", 409),
     );
-    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }));
+    renderFireCard(
+      baseEntry({ toolName: "manage_task", triggerId: "trig-1", action: "create" }),
+    );
 
     await user.click(screen.getByTestId("tool-fire-now"));
 
@@ -261,5 +284,60 @@ describe("ToolCallCard 立即触发 / run-now button (Spec 1 PR4 Task 4)", () =>
     );
     // No delivery ever resolved, so no status tag renders.
     expect(screen.queryByTestId("tool-fire-status")).not.toBeInTheDocument();
+  });
+
+  // PR4 Task 4 — re-firing must not leave the previous run's status tag
+  // showing while the new fire is in flight.
+  it("clears the previous delivery status as soon as a re-fire starts (no stale tag)", async () => {
+    const user = userEvent.setup();
+    const first: FireNowResult = {
+      run_id: "r1",
+      thread_id: "t1",
+      run_status: "success",
+      trigger_run_status: "succeeded",
+      delivery: "delivered",
+      delivered_text: "first run",
+    };
+    const second: FireNowResult = {
+      run_id: "r2",
+      thread_id: "t1",
+      run_status: "success",
+      trigger_run_status: "succeeded",
+      delivery: "delivered",
+      delivered_text: "second run",
+    };
+    let resolveSecond: (result: FireNowResult) => void = () => {};
+    const secondPromise = new Promise<FireNowResult>((resolve) => {
+      resolveSecond = resolve;
+    });
+    vi.spyOn(triggersSdk, "fireTriggerNow")
+      .mockResolvedValueOnce(first)
+      .mockReturnValueOnce(secondPromise);
+    renderFireCard(
+      baseEntry({ toolName: "manage_task", triggerId: "trig-1", action: "create" }),
+    );
+
+    await user.click(screen.getByTestId("tool-fire-now"));
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-fire-status")).toHaveTextContent(
+        /结果已落回对话|Result delivered/,
+      ),
+    );
+
+    // Re-fire while the second call is still pending — handleFire's
+    // setDelivery(null) at the top must clear the stale "delivered" tag
+    // from the first run immediately, not leave it hanging until the
+    // second call resolves.
+    await user.click(screen.getByTestId("tool-fire-now"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("tool-fire-status")).not.toBeInTheDocument(),
+    );
+
+    resolveSecond(second);
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-fire-status")).toHaveTextContent(
+        /结果已落回对话|Result delivered/,
+      ),
+    );
   });
 });

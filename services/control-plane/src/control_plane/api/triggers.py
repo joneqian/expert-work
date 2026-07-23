@@ -653,19 +653,20 @@ def build_triggers_router() -> APIRouter:
                 thread_message_store=thread_messages,
                 now=datetime.now(UTC),
             )
-            await trigger_runs.update(
+            won = await trigger_runs.claim_reconcile(
                 fired.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
             )
-            await emit(
-                audit,
-                tenant_id=tenant_id,
-                actor_id=request.state.actor_id,
-                action=AuditAction.TRIGGER_COMPLETED,
-                resource_type="trigger",
-                resource_id=str(record.id),
-                trace_id=current_trace_id_hex(),
-                details={"run_id": str(run_id), "delivery": outcome.status, "manual": True},
-            )
+            if won:
+                await emit(
+                    audit,
+                    tenant_id=tenant_id,
+                    actor_id=request.state.actor_id,
+                    action=AuditAction.TRIGGER_COMPLETED,
+                    resource_type="trigger",
+                    resource_id=str(record.id),
+                    trace_id=current_trace_id_hex(),
+                    details={"run_id": str(run_id), "delivery": outcome.status, "manual": True},
+                )
             return _FireNowResponse(
                 run_id=str(run_id),
                 thread_id=str(run.thread_id),
@@ -674,26 +675,33 @@ def build_triggers_router() -> APIRouter:
                 delivery=outcome.status,
                 delivered_text=outcome.text,
             )
-        # 失败:标 FAILED(fire-now 不做退避重试——一次性手动触发)。
+        # 失败:一次性手动触发不做退避重试,标 FAILED。经 claim_reconcile 与
+        # scheduler reconcile 收敛——先 CAS 者定终态;输家读实际状态回填响应。
         error = run.error or "run failed"
-        await trigger_runs.update(
+        won = await trigger_runs.claim_reconcile(
             fired.model_copy(update={"status": TriggerRunStatus.FAILED, "error": error})
         )
-        await emit(
-            audit,
-            tenant_id=tenant_id,
-            actor_id=request.state.actor_id,
-            action=AuditAction.TRIGGER_FAILED,
-            resource_type="trigger",
-            resource_id=str(record.id),
-            trace_id=current_trace_id_hex(),
-            details={"run_id": str(run_id), "error": error, "manual": True},
-        )
+        if won:
+            final_status = TriggerRunStatus.FAILED.value
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=request.state.actor_id,
+                action=AuditAction.TRIGGER_FAILED,
+                resource_type="trigger",
+                resource_id=str(record.id),
+                trace_id=current_trace_id_hex(),
+                details={"run_id": str(run_id), "error": error, "manual": True},
+            )
+        else:
+            # scheduler 已先终态化(如置 RETRYING);报实际状态,不重复审计。
+            current = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=tenant_id)
+            final_status = current.status.value if current else TriggerRunStatus.FAILED.value
         return _FireNowResponse(
             run_id=str(run_id),
             thread_id=str(run.thread_id),
             run_status=run.status.value,
-            trigger_run_status=TriggerRunStatus.FAILED.value,
+            trigger_run_status=final_status,
             delivery="skipped",
         )
 

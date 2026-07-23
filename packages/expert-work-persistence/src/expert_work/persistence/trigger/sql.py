@@ -358,6 +358,29 @@ class SqlTriggerRunStore(TriggerRunStore):
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
 
+    async def claim_reconcile(self, record: TriggerRunRecord) -> bool:
+        # CAS ``fired`` → ``record.status`` so exactly one of {scheduler
+        # reconcile, fire-now endpoint} finalizes this firing; the loser's
+        # UPDATE matches no row (status already moved off ``fired``).
+        async with self._sf() as session:
+            result = await session.execute(
+                sa_update(TriggerRunRow)
+                .where(
+                    TriggerRunRow.id == record.id,
+                    TriggerRunRow.tenant_id == record.tenant_id,
+                    TriggerRunRow.status == TriggerRunStatus.FIRED.value,
+                )
+                .values(
+                    run_id=record.run_id,
+                    status=record.status.value,
+                    attempt=record.attempt,
+                    next_retry_at=record.next_retry_at,
+                    error=record.error,
+                )
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
     async def list_by_trigger(self, *, trigger_id: UUID, tenant_id: UUID) -> list[TriggerRunRecord]:
         async with self._sf() as session:
             rows = (

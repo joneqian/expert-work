@@ -159,6 +159,25 @@ async def test_create_duplicate_name_friendly_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_meta_carries_action() -> None:
+    """The debug console's 「立即触发」button gate keys off ``meta.action`` to
+    distinguish a create card (has a fresh trigger to fire) from an update
+    card (touches an existing one, no shortcut)."""
+    store = _FakeStore()
+    res = await _tool(store).call(
+        {
+            "action": "create",
+            "instruction": "summarize AI news",
+            "frequency": "daily",
+            "time": {"hour": 3, "minute": 0},
+        },
+        ctx=_ctx(tenant_id=uuid4(), user_id=uuid4()),
+    )
+    assert res.meta.get("action") == "create"
+    assert "trigger_id" in res.meta
+
+
+@pytest.mark.asyncio
 async def test_create_once_in_past_rejected() -> None:
     with pytest.raises(ValueError, match="past"):
         await _tool(_FakeStore()).call(
@@ -248,6 +267,31 @@ async def test_update_enabled_toggle() -> None:
         ctx=_ctx(tenant_id=tenant, user_id=user),
     )
     assert store.rows[tid].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_update_meta_carries_action() -> None:
+    """See ``test_create_meta_carries_action`` — the update side of the same
+    gate: an update card's meta.action must read "update", not "create"."""
+    store = _FakeStore()
+    tenant, user = uuid4(), uuid4()
+    await _tool(store).call(
+        {
+            "action": "create",
+            "instruction": "job",
+            "name": "j",
+            "frequency": "daily",
+            "time": {"hour": 3, "minute": 0},
+        },
+        ctx=_ctx(tenant_id=tenant, user_id=user),
+    )
+    (tid,) = store.rows.keys()
+    res = await _tool(store).call(
+        {"action": "update", "task_id": str(tid), "enabled": False},
+        ctx=_ctx(tenant_id=tenant, user_id=user),
+    )
+    assert res.meta.get("action") == "update"
+    assert "trigger_id" in res.meta
 
 
 @pytest.mark.asyncio

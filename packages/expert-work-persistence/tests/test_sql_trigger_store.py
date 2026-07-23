@@ -460,3 +460,45 @@ async def test_list_by_user_scopes_ordered_and_filters_agent(
 
     filtered = await trigger_store.list_by_user(tenant_id=tenant, user_id=u1, agent_name="reporter")
     assert [t.name for t in filtered] == ["a"]
+
+
+# --- Task 1 (PR4 hardening) — claim_reconcile CAS (fired → terminal) ------
+
+
+@pytest.mark.asyncio
+async def test_claim_reconcile_wins_then_loses(trigger_run_store: SqlTriggerRunStore) -> None:
+    rid, tenant = uuid4(), uuid4()
+    row = _run_record(run_record_id=rid, tenant_id=tenant)  # default status=FIRED
+    await trigger_run_store.create(row)
+
+    won = await trigger_run_store.claim_reconcile(
+        row.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
+    )
+    lost = await trigger_run_store.claim_reconcile(
+        row.model_copy(update={"status": TriggerRunStatus.FAILED, "error": "x"})
+    )
+    assert won is True
+    assert lost is False  # already moved off `fired` — the UPDATE matches no row
+
+    got = await trigger_run_store.get(trigger_run_id=rid, tenant_id=tenant)
+    assert got is not None
+    assert got.status is TriggerRunStatus.SUCCEEDED  # loser did not overwrite
+
+
+@pytest.mark.asyncio
+async def test_claim_reconcile_false_when_not_fired(trigger_run_store: SqlTriggerRunStore) -> None:
+    rid, tenant = uuid4(), uuid4()
+    row = _run_record(run_record_id=rid, tenant_id=tenant)  # starts FIRED
+    await trigger_run_store.create(row)
+    # Row moved off `fired` via the ordinary (non-CAS) update — e.g. the
+    # scheduler already routed it to a retry before this stale claim arrives.
+    await trigger_run_store.update(row.model_copy(update={"status": TriggerRunStatus.RETRYING}))
+
+    won = await trigger_run_store.claim_reconcile(
+        row.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
+    )
+    assert won is False
+
+    got = await trigger_run_store.get(trigger_run_id=rid, tenant_id=tenant)
+    assert got is not None
+    assert got.status is TriggerRunStatus.RETRYING

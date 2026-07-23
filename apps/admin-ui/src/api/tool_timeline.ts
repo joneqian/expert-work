@@ -40,6 +40,9 @@ export interface ToolCallEntry {
   workers?: WorkerTimeline[];
   /** 定时任务工具(``manage_task`` create)回传的 trigger id —— 供「立即触发」按钮。取自 wire ToolMessage 的 ``artifact.trigger_id``。 */
   triggerId?: string | null;
+  /** ``manage_task`` 动作(create/update/…),取自 wire ``artifact.action``。
+   *  「立即触发」按钮据此收紧为仅 create 卡。 */
+  action?: string | null;
 }
 
 const MCP_PREFIX = "mcp__";
@@ -237,6 +240,7 @@ export function parseToolCalls(
             resultPreview: null,
             durationMs: null,
             triggerId: null,
+            action: null,
           }));
           // A re-seen call (replayed frame) refreshes name/args, never status.
           entry.rawName = rawName;
@@ -266,6 +270,7 @@ export function parseToolCalls(
             resultPreview: preview,
             durationMs: null,
             triggerId: null,
+            action: null,
           };
         });
         // Fill the name from the result only if the call side didn't provide it.
@@ -292,8 +297,11 @@ export function parseToolCalls(
         // console can offer a 立即触发 (run now) shortcut.
         const art = (m as { artifact?: unknown }).artifact;
         if (art !== null && typeof art === "object") {
-          const tid = (art as Record<string, unknown>).trigger_id;
+          const rec = art as Record<string, unknown>;
+          const tid = rec.trigger_id;
           if (typeof tid === "string" && tid !== "") entry.triggerId = tid;
+          const act = rec.action;
+          if (typeof act === "string" && act !== "") entry.action = act;
         }
       }
     }

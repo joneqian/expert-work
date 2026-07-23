@@ -486,3 +486,55 @@ async def test_memory_list_by_user_scopes() -> None:
     )
     got = await store.list_by_user(tenant_id=tenant, user_id=u1)
     assert [t.name for t in got] == ["a", "b"]  # created_at ascending, not insertion order
+
+
+# --- Task 1 (PR4 hardening) — claim_reconcile CAS (fired → terminal) ------
+
+
+@pytest.mark.asyncio
+async def test_claim_reconcile_wins_from_fired() -> None:
+    store = InMemoryTriggerRunStore()
+    tenant = uuid4()
+    row = _run_record(tenant_id=tenant)  # default status=FIRED
+    await store.create(row)
+
+    won = await store.claim_reconcile(row.model_copy(update={"status": TriggerRunStatus.SUCCEEDED}))
+    assert won is True
+
+    got = await store.get(trigger_run_id=row.id, tenant_id=tenant)
+    assert got is not None
+    assert got.status is TriggerRunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_claim_reconcile_loses_when_already_terminal() -> None:
+    store = InMemoryTriggerRunStore()
+    tenant = uuid4()
+    row = _run_record(tenant_id=tenant)  # default status=FIRED
+    await store.create(row)
+
+    first = await store.claim_reconcile(
+        row.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
+    )
+    second = await store.claim_reconcile(
+        row.model_copy(update={"status": TriggerRunStatus.FAILED, "error": "x"})
+    )
+    assert first is True
+    assert second is False
+
+    got = await store.get(trigger_run_id=row.id, tenant_id=tenant)
+    assert got is not None
+    assert got.status is TriggerRunStatus.SUCCEEDED  # 输家不覆盖
+
+
+@pytest.mark.asyncio
+async def test_claim_reconcile_cross_tenant_miss() -> None:
+    store = InMemoryTriggerRunStore()
+    tenant = uuid4()
+    row = _run_record(tenant_id=tenant)  # default status=FIRED
+    await store.create(row)
+
+    won = await store.claim_reconcile(
+        row.model_copy(update={"tenant_id": uuid4(), "status": TriggerRunStatus.SUCCEEDED})
+    )
+    assert won is False

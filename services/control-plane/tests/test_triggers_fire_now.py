@@ -34,7 +34,7 @@ from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from expert_work.persistence.audit_log import InMemoryAuditLogStore
-from expert_work.protocol import AgentSpec, TriggerRecord
+from expert_work.protocol import AgentSpec, TriggerRecord, TriggerRunRecord, TriggerRunStatus
 from expert_work.runtime.checkpointer import make_checkpointer
 from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 from expert_work.runtime.secret_store import LocalDevSecretStore
@@ -465,3 +465,175 @@ async def test_fire_now_timeout_returns_pending(
     assert body["delivery"] == "pending"
     assert body["trigger_run_status"] == "fired"
     assert body["run_status"] == "running"
+
+
+# --- Task 3 (PR4 加固) — fire-now CAS-finalize + audit-gate ----------------
+#
+# The endpoint's terminal branches (SUCCESS / failure) now route their
+# status transition through ``TriggerRunStore.claim_reconcile`` (Task 1's
+# CAS) and only emit the lifecycle audit when the CAS is won — the same
+# pattern Task 2 applied to the scheduler's ``_reconcile_one``. This closes
+# the race where the scheduler's reconcile sweep and this endpoint both
+# observe the same ``FIRED`` firing: pre-fix, both unconditionally
+# ``update()``+emit, producing a duplicate audit entry and (on the failure
+# path) a last-writer-wins split between the endpoint's ``FAILED`` and the
+# scheduler's ``RETRYING``.
+#
+# A genuine cross-request race can't be orchestrated precisely in a single
+# in-process test, so both tests below monkeypatch ``claim_reconcile`` on
+# the app's own in-memory trigger_run store to simulate "someone else won
+# first" — standing in for the scheduler. This is the same simplification
+# the task brief itself sanctions when a real race is impractical to
+# reproduce under a given fixture.
+
+
+@pytest.mark.asyncio
+async def test_fire_now_success_audit_gated_when_claim_reconcile_loses(
+    triggers_client: AsyncClient,
+    audit_store: InMemoryAuditLogStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the endpoint's own ``claim_reconcile(SUCCEEDED)`` call loses the
+    CAS (the scheduler's reconcile sweep finalized this same FIRED firing
+    first), the endpoint must NOT emit a second ``TRIGGER_COMPLETED`` audit
+    entry — but it must still have run ``deliver_run_result`` and report its
+    outcome (deliver-first: delivery happens *before* the CAS claim,
+    unconditionally on win or loss, so a crash between the two never
+    silently drops a delivery).
+
+    The pre-refactor endpoint never calls ``claim_reconcile`` at all — it
+    unconditionally emits — so the audit-count assertion fails against it.
+    """
+    app = triggers_client._transport.app  # type: ignore[attr-defined,union-attr]
+    run_store = app.state.run_store
+    trigger_run_store = app.state.trigger_run_store
+
+    created = await _create_cron(triggers_client, name="fire-now-cas-loss-success")
+    trigger_id = created["id"]
+
+    async def _fake_fire_trigger(record: TriggerRecord, *, now: datetime, **_kwargs: Any) -> UUID:
+        """Seed a terminal SUCCESS run directly (no spawned task) — same
+        shape as ``test_fire_now_paused_run_left_pending``'s fake."""
+        run_id = uuid4()
+        await run_store.create(
+            RunInfo(
+                run_id=run_id,
+                tenant_id=record.tenant_id,
+                thread_id=uuid4(),
+                user_id=None,
+                status=RunStatus.SUCCESS,
+                on_disconnect=DisconnectMode.CANCEL,
+                is_resume=False,
+                error=None,
+                created_at=now,
+                updated_at=now,
+                finished_at=now,
+            )
+        )
+        return run_id
+
+    monkeypatch.setattr("control_plane.api.triggers.fire_trigger", _fake_fire_trigger)
+
+    async def _losing_claim_reconcile(record: TriggerRunRecord) -> bool:
+        return False
+
+    monkeypatch.setattr(trigger_run_store, "claim_reconcile", _losing_claim_reconcile)
+
+    resp = await triggers_client.post(f"/v1/triggers/{trigger_id}:fire")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["trigger_run_status"] == "succeeded"
+    # A bare _create_cron trigger has no reuse_thread/originating_thread_id,
+    # so deliver_run_result's own precondition check yields "skipped" —
+    # delivery still runs (deliver-first) regardless of the CAS outcome.
+    assert body["delivery"] == "skipped"
+
+    from expert_work.protocol import AuditAction, AuditQuery
+
+    page = await audit_store.query(
+        AuditQuery(
+            tenant_id=_DEFAULT_TENANT,
+            action=AuditAction.TRIGGER_COMPLETED,
+            resource_id=trigger_id,
+        )
+    )
+    assert page.entries == []  # CAS lost on this call — no audit from it
+
+
+@pytest.mark.asyncio
+async def test_fire_now_failure_reports_actual_status_when_claim_reconcile_loses(
+    triggers_client: AsyncClient,
+    audit_store: InMemoryAuditLogStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure-path sibling of the SUCCESS test above. When the endpoint's
+    ``claim_reconcile(FAILED)`` call loses (the scheduler's reconcile pass
+    already finalized this same firing — e.g. to RETRYING under the DLQ
+    backoff budget), the endpoint must NOT emit a second ``TRIGGER_FAILED``
+    audit entry, and must report the row's ACTUAL current status (read back
+    via ``trigger_runs.get``) rather than blindly claiming FAILED —
+    otherwise the HTTP response would say "failed" while the DB says
+    "retrying": a caller-visible state split.
+
+    The monkeypatched ``claim_reconcile`` both flips the row to RETRYING
+    (standing in for what the scheduler's own reconcile would have written)
+    and reports a loss — exactly what the real CAS returns to a second
+    caller. The pre-refactor endpoint never reads the row back — it always
+    reports its own hardcoded FAILED — so the status assertion fails
+    against it.
+    """
+    app = triggers_client._transport.app  # type: ignore[attr-defined,union-attr]
+    run_store = app.state.run_store
+    trigger_run_store = app.state.trigger_run_store
+
+    created = await _create_cron(triggers_client, name="fire-now-cas-loss-failure")
+    trigger_id = created["id"]
+
+    async def _fake_fire_trigger(record: TriggerRecord, *, now: datetime, **_kwargs: Any) -> UUID:
+        """Seed a terminal ERROR run directly."""
+        run_id = uuid4()
+        await run_store.create(
+            RunInfo(
+                run_id=run_id,
+                tenant_id=record.tenant_id,
+                thread_id=uuid4(),
+                user_id=None,
+                status=RunStatus.ERROR,
+                on_disconnect=DisconnectMode.CANCEL,
+                is_resume=False,
+                error="boom",
+                created_at=now,
+                updated_at=now,
+                finished_at=now,
+            )
+        )
+        return run_id
+
+    monkeypatch.setattr("control_plane.api.triggers.fire_trigger", _fake_fire_trigger)
+
+    async def _losing_claim_reconcile(record: TriggerRunRecord) -> bool:
+        # Stand in for the scheduler's reconcile sweep having already won
+        # this exact firing and moved it to RETRYING (attempt < max budget).
+        await trigger_run_store.update(
+            record.model_copy(update={"status": TriggerRunStatus.RETRYING})
+        )
+        return False
+
+    monkeypatch.setattr(trigger_run_store, "claim_reconcile", _losing_claim_reconcile)
+
+    resp = await triggers_client.post(f"/v1/triggers/{trigger_id}:fire")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["trigger_run_status"] == "retrying"  # read actual, not hardcoded "failed"
+    assert body["delivery"] == "skipped"
+
+    from expert_work.protocol import AuditAction, AuditQuery
+
+    page = await audit_store.query(
+        AuditQuery(
+            tenant_id=_DEFAULT_TENANT,
+            action=AuditAction.TRIGGER_FAILED,
+            resource_id=trigger_id,
+        )
+    )
+    assert page.entries == []  # CAS lost on this call — no audit from it
