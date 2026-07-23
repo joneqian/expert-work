@@ -3,30 +3,29 @@
  * of the agent-config-page redesign (PR2). Visualizes the three sequential
  * context gates (PolicySpec.tool_result_prune → .working_memory →
  * .context_compression) plus the sibling tool-output-budget master switch,
- * as four collapsible panels (18 knobs total) — the pending-hint placeholder
- * this group showed since Phase 1/PR1 is now real.
+ * as a single table (18 knobs total) — the pending-hint placeholder this
+ * group showed since Phase 1/PR1 is now real.
  *
- * Structure: an intro ``Text`` explaining the three-gate order, then an antd
- * ``Collapse`` with one panel per PolicySpec sub-block. The first panel
- * (tool-result prune, the cheapest/first gate) is expanded by default per
- * spec ("防疲劳" — don't dump all 18 fields open at once); the other three
- * start collapsed. Every panel uses ``forceRender`` so all 18 fields mount
- * regardless of collapse state (collapsed panels are hidden via antd's own
- * motion/height, not unmounted) — needed for both testability and so a
- * browser "find in page" can reach a collapsed field's copy.
+ * Structure: an intro ``Text`` explaining the three-gate order, then one
+ * ``PolicyFieldTable`` (a later redesign PR's table-layout renderer) with
+ * one titled group per PolicySpec sub-block. All four groups and all 18
+ * fields are always visible, table-row-dense — no per-group expand/collapse
+ * step (this component previously rendered a four-panel antd ``Collapse``
+ * here, first panel open by default; that's gone, along with the
+ * ``forceRender`` plumbing it needed to keep collapsed fields reachable).
  *
- * Each panel's field array is a ``FieldDef`` table (Task 1's declarative
- * pattern, same as ``RunBudgetSection``) rendered via ``PolicyFieldList``;
- * this component only wires the ``readContextGates``/``patchContextGates``
- * pair (form_model.ts, Task 2) to it. ``kind: "number"`` fields with
- * ``effectiveDefault: null`` (max_turns / max_tokens) render as an empty
- * InputNumber when unset — unset IS the feature-off state (a coarse legacy
- * cap that predates the three gates), not "falls back to a numeric default".
+ * Each group's field array is a ``FieldDef`` table (Task 1's declarative
+ * pattern, same as ``RunBudgetSection``); this component only wires the
+ * ``readContextGates``/``patchContextGates`` pair (form_model.ts, Task 2) to
+ * it. ``kind: "number"`` fields with ``effectiveDefault: null`` (max_turns /
+ * max_tokens) render as an empty InputNumber when unset — unset IS the
+ * feature-off state (a coarse legacy cap that predates the three gates), not
+ * "falls back to a numeric default".
  */
-import { Collapse, Typography } from "antd";
+import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { PolicyFieldList, type FieldDef } from "./field_defs";
+import { PolicyFieldTable, type FieldDef } from "./field_defs";
 import {
   patchContextGates,
   readContextGates,
@@ -214,58 +213,15 @@ export function ContextGatesSection({
       <Text type="secondary" style={{ display: "block", marginBottom: 16 }}>
         {t("context_gates.group_intro")}
       </Text>
-      <Collapse
-        defaultActiveKey={["tool_result_prune"]}
-        items={[
-          {
-            key: "tool_result_prune",
-            label: t("context_gates.panel_tool_result_prune"),
-            forceRender: true,
-            children: (
-              <PolicyFieldList
-                defs={TOOL_RESULT_PRUNE_DEFS}
-                values={values}
-                onPatch={handlePatch}
-              />
-            ),
-          },
-          {
-            key: "working_memory",
-            label: t("context_gates.panel_working_memory"),
-            forceRender: true,
-            children: (
-              <PolicyFieldList
-                defs={WORKING_MEMORY_DEFS}
-                values={values}
-                onPatch={handlePatch}
-              />
-            ),
-          },
-          {
-            key: "context_compression",
-            label: t("context_gates.panel_context_compression"),
-            forceRender: true,
-            children: (
-              <PolicyFieldList
-                defs={CONTEXT_COMPRESSION_DEFS}
-                values={values}
-                onPatch={handlePatch}
-              />
-            ),
-          },
-          {
-            key: "tool_output_budget",
-            label: t("context_gates.panel_tool_output_budget"),
-            forceRender: true,
-            children: (
-              <PolicyFieldList
-                defs={TOOL_OUTPUT_BUDGET_DEFS}
-                values={values}
-                onPatch={handlePatch}
-              />
-            ),
-          },
+      <PolicyFieldTable
+        groups={[
+          { titleKey: "context_gates.panel_tool_result_prune", defs: TOOL_RESULT_PRUNE_DEFS },
+          { titleKey: "context_gates.panel_working_memory", defs: WORKING_MEMORY_DEFS },
+          { titleKey: "context_gates.panel_context_compression", defs: CONTEXT_COMPRESSION_DEFS },
+          { titleKey: "context_gates.panel_tool_output_budget", defs: TOOL_OUTPUT_BUDGET_DEFS },
         ]}
+        values={values}
+        onPatch={handlePatch}
       />
     </div>
   );
