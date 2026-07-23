@@ -31,6 +31,18 @@ spec:
       retrieve_top_k: 5
       write_back: true
       recall_mode: per_session
+  tools:
+    - { type: builtin, name: read_file }
+    - { type: builtin, name: write_file }
+    - { type: builtin, name: edit_file }
+    - { type: builtin, name: list_dir }
+    - { type: builtin, name: read_document }
+    - { type: builtin, name: save_artifact }
+    - { type: builtin, name: list_artifacts }
+    - { type: builtin, name: ask_for_approval }
+    - { type: builtin, name: remember }
+    - { type: builtin, name: exec_python }
+    - { type: builtin, name: bash }
   sandbox:
     resources: { cpu: "1.0", memory: "1Gi" }
     network:

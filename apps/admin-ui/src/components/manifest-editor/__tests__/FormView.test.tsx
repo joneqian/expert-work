@@ -4,8 +4,10 @@ import userEvent from "@testing-library/user-event";
 import "../../../i18n";
 
 import * as catalog from "../catalog";
+import { BASE_MANIFEST_YAML } from "../defaults";
 import { FormView, type FormSection } from "../FormView";
 import type { AgentManifest } from "../form_model";
+import { parseYaml } from "../yaml";
 
 // The MCP tab mounts McpToolPicker, which loads servers on mount.
 vi.mock("../../../api/mcp-servers", () => ({
@@ -299,6 +301,47 @@ describe("FormView", () => {
         expect.objectContaining({ type: "builtin", name: "web_search" }),
       ]),
     );
+  });
+
+  // Task 1 — builtin tool toggles (exec_python/bash default-on + opt-in-7).
+  it("renders the exec_python/bash/opt-in builtin tool toggles", () => {
+    renderSection("tools");
+    expect(screen.getByTestId("af-tool-exec_python")).toBeInTheDocument();
+    expect(screen.getByTestId("af-tool-bash")).toBeInTheDocument();
+    expect(screen.getByTestId("af-tool-manage_task")).toBeInTheDocument();
+    expect(screen.getByTestId("af-tool-author_skill")).toBeInTheDocument();
+    expect(screen.getByTestId("af-tool-refine_skill")).toBeInTheDocument();
+    expect(screen.getByTestId("af-tool-fork_skill")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("af-tool-propose_skill_to_tenant"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("af-tool-note_behavior_patch"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("af-tool-clarify_tool_usage"),
+    ).toBeInTheDocument();
+  });
+
+  it("checking manage_task (opt-in) adds a builtin manage_task tool entry", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection("tools", SEED, onChange);
+    await user.click(screen.getByTestId("af-tool-manage_task"));
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "builtin", name: "manage_task" }),
+      ]),
+    );
+  });
+
+  it("new-agent default seed: exec_python/bash checked on, opt-in tools checked off", () => {
+    const seeded = parseYaml(BASE_MANIFEST_YAML) as AgentManifest;
+    renderSection("tools", seeded);
+    expect(screen.getByTestId("af-tool-exec_python")).toBeChecked();
+    expect(screen.getByTestId("af-tool-bash")).toBeChecked();
+    expect(screen.getByTestId("af-tool-manage_task")).not.toBeChecked();
   });
 
   it("editing the prompt updates spec.system_prompt.template", async () => {

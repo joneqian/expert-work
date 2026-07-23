@@ -11,6 +11,7 @@ const FIELD_IDS = [
   "workflow.type",
   "policies.max_no_progress",
   "policies.run_deadline_s",
+  "policies.token_budget",
   "spec.stream_deadline_s",
   "spec.idle_timeout_s",
 ];
@@ -49,12 +50,13 @@ const optionContent =
     el.textContent === label;
 
 describe("RunBudgetSection", () => {
-  it("renders all six FieldRows, one per manifest path", () => {
+  it("renders as a PolicyFieldTable with all seven fields as visible table rows", () => {
     const { container } = renderSection();
+    expect(screen.getByTestId("policy-field-table")).toBeInTheDocument();
     for (const id of FIELD_IDS) {
-      expect(
-        container.querySelector(`[data-field-id="${id}"]`),
-      ).toBeInTheDocument();
+      const row = container.querySelector(`[data-field-id="${id}"]`);
+      expect(row).toBeInTheDocument();
+      expect(row).toBeVisible();
     }
   });
 

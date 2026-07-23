@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../../../i18n";
 
@@ -30,6 +30,16 @@ const FIELD_IDS = [
   "policies.tool_output_budget.enabled",
 ];
 
+// The four PolicyFieldTable group-header rows ContextGatesSection wires one
+// per PolicySpec sub-block — mirrors the ``context_gates.panel_*`` i18n
+// values (en locale).
+const GROUP_TITLES = [
+  "① Tool-result prune",
+  "② Sliding window",
+  "③ Context compression",
+  "④ Tool-output budget",
+];
+
 function renderSection(
   formData: AgentManifest = {},
   onChange: (d: unknown) => void = vi.fn(),
@@ -41,49 +51,23 @@ function rowFor(fieldId: string): HTMLElement {
   return document.querySelector(`[data-field-id="${fieldId}"]`) as HTMLElement;
 }
 
-// Fields in a collapsed panel are mounted (``forceRender``) but not in the
-// accessibility tree, so ``getByRole`` can't reach them until the panel is
-// opened — matches how a real user would interact with the section. Matches
-// on the panel's header text, which is unique among panel titles (never
-// collides with a nested FieldRow's "Impact" expander text).
-async function openPanel(
-  user: ReturnType<typeof userEvent.setup>,
-  label: string,
-): Promise<void> {
-  const header = within(document.body)
-    .getByText(label, { selector: ".ant-collapse-header-text" })
-    .closest(".ant-collapse-header") as HTMLElement;
-  await user.click(header);
-}
-
 describe("ContextGatesSection", () => {
-  it("renders all 18 FieldRows across the four panels", () => {
+  it("renders as a single PolicyFieldTable — no Collapse anywhere", () => {
     renderSection();
-    for (const id of FIELD_IDS) {
-      expect(rowFor(id)).toBeInTheDocument();
-    }
+    expect(screen.getByTestId("policy-field-table")).toBeInTheDocument();
+    expect(document.querySelector(".ant-collapse")).not.toBeInTheDocument();
   });
 
-  it("expands only the first panel (结果修剪) by default; the other three stay collapsed", () => {
-    const { container } = renderSection();
-    // Scope to the SECTION's own top-level Collapse's direct-child panels —
-    // each FieldRow with an impact note renders its own nested Collapse (the
-    // "Impact" expander), so a bare ``.ant-collapse-header`` query over the
-    // whole container would also pick up those 18 inner headers. (jsdom's
-    // ``:scope`` combinator support is unreliable here, so walk the DOM
-    // directly instead of ``:scope > …`` selectors.)
-    const outer = container.querySelector(
-      '[data-testid="context-gates-section"] > .ant-collapse',
-    ) as HTMLElement;
-    const panelItems = Array.from(outer.children).filter((el) =>
-      el.classList.contains("ant-collapse-item"),
-    );
-    expect(panelItems).toHaveLength(4);
-    const headers = panelItems.map((item) => item.children[0]);
-    expect(headers[0]).toHaveAttribute("aria-expanded", "true");
-    expect(headers[1]).toHaveAttribute("aria-expanded", "false");
-    expect(headers[2]).toHaveAttribute("aria-expanded", "false");
-    expect(headers[3]).toHaveAttribute("aria-expanded", "false");
+  it("renders all four group titles and all 18 fields, all visible with no expand step", () => {
+    renderSection();
+    for (const title of GROUP_TITLES) {
+      expect(screen.getByText(title)).toBeVisible();
+    }
+    for (const id of FIELD_IDS) {
+      const row = rowFor(id);
+      expect(row).toBeInTheDocument();
+      expect(row).toBeVisible();
+    }
   });
 
   it("changing the tool-result-prune threshold writes policies.tool_result_prune.threshold_pct", async () => {
@@ -131,7 +115,6 @@ describe("ContextGatesSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
-    await openPanel(user, "② Sliding window");
 
     const row = rowFor("policies.working_memory.max_recent_turns");
     const input = within(row).getByRole("spinbutton");
@@ -146,7 +129,6 @@ describe("ContextGatesSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
-    await openPanel(user, "③ Context compression");
 
     const row = rowFor("policies.context_compression.head_keep");
     const input = within(row).getByRole("spinbutton");
@@ -161,7 +143,6 @@ describe("ContextGatesSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
-    await openPanel(user, "③ Context compression");
 
     const row = rowFor("policies.context_compression.max_turns");
     const input = within(row).getByRole("spinbutton") as HTMLInputElement;
@@ -176,7 +157,6 @@ describe("ContextGatesSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
-    await openPanel(user, "④ Tool-output budget");
 
     const row = rowFor("policies.tool_output_budget.enabled");
     await user.click(within(row).getByRole("switch"));

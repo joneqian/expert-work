@@ -6,10 +6,11 @@
  * (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
  * top-level spec.stream_deadline_s+idle_timeout_s) behind one screen.
  *
- * Rendering itself is delegated to ``PolicyFieldList`` (Task 1's FieldDef
- * config-array pattern) — ``RUN_BUDGET_DEFS`` below is the data table that
- * used to be five hand-written ``FieldRow`` blocks; this component now only
- * wires the ``readRunBudget``/``patchRunBudget`` pair (form_model.ts) to it.
+ * Rendering itself is delegated to ``PolicyFieldTable`` (a later redesign
+ * PR's table-layout renderer over Task 1's FieldDef config-array pattern) —
+ * ``RUN_BUDGET_DEFS`` below is the data table that used to be five
+ * hand-written ``FieldRow`` blocks; this component now only wires the
+ * ``readRunBudget``/``patchRunBudget`` pair (form_model.ts) to it.
  *
  * Clearing an InputNumber (antd emits ``null``) reverts that field to the
  * platform default: the patch carries an explicit ``undefined``, which
@@ -27,7 +28,7 @@
 import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { PolicyFieldList, type FieldDef } from "./field_defs";
+import { PolicyFieldTable, type FieldDef } from "./field_defs";
 import {
   patchRunBudget,
   readRunBudget,
@@ -118,8 +119,8 @@ export function RunBudgetSection({ formData, onChange }: RunBudgetSectionProps) 
 
   return (
     <div data-testid="run-budget-section" style={{ maxWidth: 760 }}>
-      <PolicyFieldList
-        defs={RUN_BUDGET_DEFS}
+      <PolicyFieldTable
+        groups={[{ defs: RUN_BUDGET_DEFS }]}
         values={budget as Record<string, number | string | undefined>}
         onPatch={handlePatch}
       />

@@ -949,6 +949,24 @@ export interface TranslationKeys {
     tool_web_search_help: string;
     tool_http_help: string;
     tool_mcp_help: string;
+    tool_exec_python: string;
+    tool_exec_python_help: string;
+    tool_bash: string;
+    tool_bash_help: string;
+    tool_manage_task: string;
+    tool_manage_task_help: string;
+    tool_author_skill: string;
+    tool_author_skill_help: string;
+    tool_refine_skill: string;
+    tool_refine_skill_help: string;
+    tool_fork_skill: string;
+    tool_fork_skill_help: string;
+    tool_propose_skill: string;
+    tool_propose_skill_help: string;
+    tool_note_behavior_patch: string;
+    tool_note_behavior_patch_help: string;
+    tool_clarify_tool_usage: string;
+    tool_clarify_tool_usage_help: string;
     tools_config_note: string;
     section_approval: string;
     section_approval_help: string;
@@ -3396,197 +3414,199 @@ const en: TranslationKeys = {
   },
   run_budget: {
     max_iterations_label: "Max steps",
-    max_iterations_brief: "Max think+act steps a single run may execute",
+    max_iterations_brief:
+      "How many 'think, then act' cycles a single run may go through at most",
     max_iterations_impact:
-      "Once exceeded, the run is forced to wrap up: the model must summarize directly and stop calling tools, so the output may be incomplete. Raise it for research or long multi-tool tasks (heavy tasks typically need 40-60); lower it to control cost. A sub-worker's actual step budget = min(this value, the platform's worker ceiling).",
+      "Once the budget runs out, the agent is forced to wrap up right away — no more tool calls, just a summary — so the answer may be incomplete. Raise it for research-heavy agents that need many lookups (40-60 is a common range for heavy tasks); lower it to keep costs down. If this run spins up helper sub-tasks along the way, each helper's own step budget is capped at whichever is smaller: this value, or the platform's worker ceiling.",
     max_iterations_default: "30",
     wf_type_label: "Workflow type",
     wf_type_brief:
-      "react = the classic think-then-act loop; plan_execute = a planning model produces a full plan up front, then execution proceeds step by step",
+      "react = the classic think-then-act loop; plan_execute = a planning model writes a full plan up front, then execution follows it step by step",
     wf_type_impact:
-      "react: the agent self-plans on demand — it calls the update_plan tool to lay out steps when a task is complex, and skips planning for simple ones (recommended for agents whose tasks vary widely in complexity). plan_execute: every task first gets a full plan before execution — more stable for long-chain tasks (e.g. report generation) and guarantees an upfront plan, but even trivial tasks can't skip the forced planning step (one extra planning-model call, slower and costlier). The planning model is set by the model group's routing planning rule; when no rule is set, the main model is used. custom is deprecated and has no dedicated implementation — it behaves the same as react.",
+      "react (recommended): the agent thinks as it goes — simple requests get answered directly, and only complex ones get a step-by-step plan first. This covers most cases. plan_execute: every task gets a full plan up front no matter how simple, then runs it step by step; this is more reliable for long, sequential jobs like writing a report, but even trivial requests pay the planning cost — slower and pricier, since it's one extra model call. The model that does the planning is set by a rule in the Model & Routing group; if none is set, the main model handles it. custom is deprecated — picking it behaves exactly like react.",
     wf_type_default: "react",
     wf_type_opt_react: "react (think, then act)",
     wf_type_opt_plan_execute: "plan_execute (plan, then execute)",
     wf_type_opt_custom: "custom (deprecated — same as react)",
     workflow_note:
-      "workflow's early_stop and builder are deprecated fields: they pass validation but are never read at runtime — leaving them in the YAML is harmless.",
+      "workflow still accepts early_stop and builder, but they're dead: setting them doesn't error, but they no longer do anything — harmless to leave in the YAML.",
     max_no_progress_label: "No-progress stop",
     max_no_progress_brief:
       "Stop early after N consecutive steps with no real progress; 0 = off",
     max_no_progress_impact:
-      "Keeps the model from spinning in place and burning through steps; too low a value risks cutting off a legitimate retry. 3–5 is a reasonable starting range.",
+      "Keeps the agent from spinning in place and burning through steps for nothing (e.g. calling the same tool over and over without getting anywhere useful). Set it too low, though, and it may cut off a legitimate retry — 3-5 is a reasonable starting point.",
     max_no_progress_default: "0 (off)",
-    run_deadline_label: "Run wall-clock cap",
+    run_deadline_label: "Max run time",
     run_deadline_brief:
-      "Wall-clock cap (seconds) on the whole run, including sub-agents; 0 = falls back to the platform floor (default 1h)",
+      "The most seconds this run (including any sub-agents it spawns) may take; 0 = falls back to the platform default (currently 1h)",
     run_deadline_impact:
-      "How long a single run may take (seconds), including any sub-agents it spawns; when exceeded the run is aborted, guarding against runaway runs and cost. 0 is not truly unlimited — it falls back to the platform's wall-clock floor (currently 3600s / 1h, ops-configurable). Set an explicit value here for precise control or a longer run.",
-    run_deadline_default: "0 (platform floor)",
+      "The longest this run may take, in seconds, including any sub-agents it spawns along the way; once exceeded, the run is force-stopped, so a stuck run can't quietly run up the bill. 0 doesn't mean unlimited — it just falls back to the platform's own default cap (currently 3600 seconds / 1 hour, set by ops). Set an explicit number here for a longer run or tighter control.",
+    run_deadline_default: "0 (platform default, 1h)",
     stream_deadline_label: "First-token timeout",
     stream_deadline_brief:
-      "Max wait (seconds) for the first token of a single LLM call; 0 = off",
+      "The longest wait, in seconds, from calling the model to its first word back; 0 = no limit",
     stream_deadline_impact:
-      "Caps how long a single LLM call may wait before its first token arrives; a timeout raises LLMStreamStaleError so the router falls back to the next provider instead of stalling the whole run. Defaults to 180s to cover heavy generations like long report sections. Distinct from the inter-token idle timeout (idle_timeout_s, which only starts counting after the first token). 0 = off (dev / long-batch use only).",
+      "How long this may wait, from calling the model, until its first word comes back. Wait too long — the model may be stuck — and it automatically switches to a backup model instead of leaving the whole run hanging. Defaults to 180 seconds, enough for slow jobs like long report generation. This is different from the inter-token idle timeout below, which only starts counting after the first word arrives. 0 = no limit (only recommended for development or long batch jobs).",
     stream_deadline_default: "180",
     idle_timeout_label: "Inter-token idle timeout",
     idle_timeout_brief:
-      "Max gap (seconds) between tokens of a single streaming LLM call; 0 = off",
+      "The longest gap, in seconds, allowed between words once the model starts answering; 0 = no limit",
     idle_timeout_impact:
-      "Once the first token has arrived, a gap between subsequent tokens longer than this ends the turn early with whatever output was generated so far (the model went silent mid-stream). Distinct from the first-token timeout (stream_deadline_s). 0 = off (dev / long-batch use only); non-streaming providers ignore this.",
+      "Once the model starts answering, if the gap between two words grows longer than this, it's treated as the model going silent mid-answer (stuck, or it just stopped) — the run ends that turn early and keeps whatever was generated so far. Different from the first-token timeout above: that one covers the wait before the answer starts, this one covers pauses after it's already started. 0 = no limit (only recommended for development or long batch jobs); providers that don't stream ignore this.",
     idle_timeout_default: "45",
     token_budget_label: "Token budget",
-    token_budget_brief: "Per-run total token cap across the whole delegation tree (main agent + all workers).",
+    token_budget_brief:
+      "The total token spending cap for this run, including every sub-task it kicks off.",
     token_budget_impact:
-      "Counts input/output/cache tokens of every main-loop LLM call into one shared pool. At 80% the model is warned to converge; at the cap the run does one final tool-less wrap-up turn and completes normally. Guard markers appear on the timeline.",
+      "Sets a spending cap for this run, counted in tokens (covers every sub-task it kicks off too). At 80% of the cap, the model gets nudged to wrap up soon; once it's used up, the model is forced to give its best answer from what it already has, without calling any more tools. 0 = no cap.",
     token_budget_default: "0 (disabled)",
   },
   context_gates: {
     group_intro:
-      "Three gates step in, in order, whenever the estimated prompt exceeds context window × threshold: ① tool-result prune (cheapest — collapses old tool results into references) → ② sliding window (no LLM call — trims old turns) → ③ context compression (LLM summarizes the middle). Most mild overflows are resolved by the first two; the threshold's denominator is the model's real window (from the model catalog).",
+      "Whenever the estimated content sent to the model goes over 'context window × threshold', three steps kick in, in order: ① old tool results get squashed into a one-line reference first (cheapest, barely touches quality) → ② if that's not enough, older turns get trimmed, keeping only the most recent ones (no extra model call, free) → ③ if it's still too much, a model summarizes a big chunk of the middle into a short paragraph (the last resort). Most overflows get solved by the first two steps alone. 'Window' here means the model's real capacity, as listed in the model catalog.",
     panel_tool_result_prune: "① Tool-result prune",
     panel_working_memory: "② Sliding window",
     panel_context_compression: "③ Context compression",
     panel_tool_output_budget: "④ Tool-output budget",
     pr_enabled_label: "Enable tool-result prune",
     pr_enabled_brief:
-      "Above the threshold, collapse old tool results into a one-line reference",
+      "Above the threshold, squash old tool results into a one-line reference",
     pr_enabled_impact:
-      "The cheapest, least lossy of the three gates: every turn and all reasoning is kept — only tool results beyond the most recent N are swapped for a reference (losslessly recoverable, since it's already externalized to the workspace). Affects only this send's view; history is never rewritten. Turning it off means mild overflows fall to the sliding window / compression sooner.",
+      "The cheapest and least lossy of the three steps: the full conversation and all reasoning stay intact — only older tool results get swapped for a one-line reference (and only ones already saved to the workspace, so they're always recoverable). This only affects what's sent this one time; the real history is never rewritten. Turn it off and mild overflows fall to the next two steps (trimming, then summarizing) sooner.",
     pr_enabled_default: "true",
     pr_threshold_pct_label: "Trigger threshold (% of window)",
     pr_threshold_pct_brief:
-      "Prune only once the estimated prompt reaches context window × this value; below it, zero changes",
+      "Prune only once the estimated content reaches window × this value; below it, nothing changes",
     pr_threshold_pct_impact:
-      "Shares the same ratio format as the sliding window / compression gates (each configured independently). Lower = prunes earlier, cheaper; higher = more faithful but relies more on the two later gates. Range 0.05–1.",
+      "Uses the same ratio setup as the sliding window and context compression below, but each is configured independently. Lower = prunes earlier, cheaper; higher = keeps more original content but leans more on the two later steps. Range 0.05–1.",
     pr_threshold_pct_default: "0.7",
     pr_recent_kept_label: "Recent tool results kept",
     pr_recent_kept_brief:
-      "The most recent N tool results stay intact; older ones collapse to a reference",
+      "The most recent N tool results stay intact; older ones get squashed",
     pr_recent_kept_impact:
-      "Higher = the model sees more intact results but a larger context; 0 = every result collapses to a reference once over threshold.",
+      "Higher = the model sees more intact results, at the cost of a bigger prompt; 0 = once over the threshold, every tool result gets squashed, none kept in full.",
     pr_recent_kept_default: "4",
     wm_enabled_label: "Enable sliding window",
     wm_enabled_brief:
-      "Above the threshold, trim to the first turn + the most recent N turns, no LLM call needed",
+      "Above the threshold, keep only the first turn plus the most recent few, with no extra model call",
     wm_enabled_impact:
-      "Cuts only at user-message boundaries — never splits a tool-call pair. Most mild overflows are resolved here, saving the summarization LLM call compression would need. Affects only this turn's view; the next turn re-trims from the full history.",
+      "Only ever cuts at a user-message boundary — never splits a tool call from its result. Most mild overflows are solved right here, saving the cost of the summarization step below. This only affects what's sent this one turn; the next turn re-trims from the full history again.",
     wm_enabled_default: "true",
     wm_threshold_pct_label: "Trigger threshold (% of window)",
     wm_threshold_pct_brief:
-      "Trim only once the estimated prompt reaches context window × this value; below it, zero changes",
+      "Trim only once the estimated content reaches window × this value; below it, nothing changes",
     wm_threshold_pct_impact:
-      "Shares the same ratio format as tool-result prune / compression (each configured independently). Lower = trims earlier, cheaper; higher = more faithful but relies more on the compression gate after it. Range 0.05–1.",
+      "Uses the same ratio setup as tool-result prune above and context compression below, but each is configured independently. Lower = trims earlier, cheaper; higher = keeps more of the conversation but leans more on context compression to catch the rest. Range 0.05–1.",
     wm_threshold_pct_default: "0.7",
     wm_max_recent_turns_label: "Recent turns kept",
     wm_max_recent_turns_brief:
-      "How many of the most recent user turns the window keeps",
+      "How many of the most recent turns the window keeps",
     wm_max_recent_turns_impact:
-      "Lower = cheaper but drops more mid-conversation context (the dropped middle isn't summarized — that's compression's job); for long multi-turn sessions, ≥10 is recommended.",
+      "Lower = cheaper, but drops more of the middle of the conversation (the dropped part isn't summarized anywhere — that's context compression's job). For long, many-turn conversations, 10 or more is a reasonable floor.",
     wm_max_recent_turns_default: "20",
     wm_keep_first_turn_label: "Keep first turn",
     wm_keep_first_turn_brief:
-      "Always keep the very first turn when trimming (the task-goal anchor)",
+      "Always keep the very first turn when trimming (it anchors the original task)",
     wm_keep_first_turn_impact:
-      "Turning it off risks losing the original task description in a long session; generally not recommended.",
+      "Turn it off and a long conversation can lose the original task description — generally not recommended.",
     wm_keep_first_turn_default: "true",
     cc_enabled_label: "Enable context compression",
     cc_enabled_brief:
-      "Above the threshold, use an LLM to summarize the middle of the conversation into one background summary",
+      "Above the threshold, use a model to summarize the middle of the conversation into one background note",
     cc_enabled_impact:
-      "The last of the three gates. Keeps the first N and last M entries as-is, replacing the middle with a 〈context-summary〉; the dropped middle is flushed into long-term memory first (if that's on). If this is off and the first two gates aren't enough, a very large context will fail outright.",
+      "The last of the three steps: keeps the first N and last M messages untouched, and replaces everything in between with a single 〈context-summary〉 note; before anything is dropped, if long-term memory is on, the key points get saved there first. If this is off and the first two steps aren't enough, an oversized conversation just fails outright — there's nothing left to fall back on.",
     cc_enabled_default: "true",
     cc_threshold_pct_label: "Trigger threshold (% of window)",
     cc_threshold_pct_brief:
-      "Compress only once the estimated prompt reaches context window × this value; below it, zero changes",
+      "Compress only once the estimated content reaches window × this value; below it, nothing changes",
     cc_threshold_pct_impact:
-      "Shares the same ratio format as tool-result prune / sliding window (each configured independently). Lower = compresses earlier, cheaper; higher = more faithful but riskier, since this is the last gate — no later gate to fall back on. Range 0.05–1.",
+      "Uses the same ratio setup as tool-result prune and the sliding window above, but each is configured independently. Lower = compresses earlier, cheaper; higher = keeps more of the original text but is riskier, since this is the last step — nothing catches an overflow after this. Range 0.05–1.",
     cc_threshold_pct_default: "0.7",
     cc_head_keep_label: "Head entries kept",
     cc_head_keep_brief:
       "Keep the first N non-system messages untouched when summarizing",
     cc_head_keep_impact:
-      "Includes the memory-injection anchor; if set to 0 while memory injection is on, the runtime auto-raises it to 1.",
+      "Includes wherever memory content gets injected; if this is set to 0 while memory injection is on, the runtime automatically bumps it to 1 (it never actually runs at 0).",
     cc_head_keep_default: "4",
     cc_tail_keep_label: "Tail entries kept",
     cc_tail_keep_brief:
       "Keep the most recent M entries untouched when summarizing",
     cc_tail_keep_impact:
-      "The tail is the current working context — too small a value loses recent detail.",
+      "The tail is whatever's currently being worked on — set it too low and recent details get lost.",
     cc_tail_keep_default: "6",
     cc_flush_before_compaction_label: "Flush to memory before compacting",
     cc_flush_before_compaction_brief:
-      "Before the dropped middle is discarded, write its key points to long-term memory first",
+      "Before the dropped middle is discarded, save its key points to long-term memory first",
     cc_flush_before_compaction_impact:
-      "Only takes effect when long-term-memory write-back is on, otherwise it's a no-op. Keeps key decisions from being lost across repeated compressions.",
+      "Only actually does anything when 'Learn (remember new info)' is on — otherwise this switch is a no-op. Keeps important decisions from being lost after repeated compressions.",
     cc_flush_before_compaction_default: "true",
     cc_max_passes_label: "Max compression passes",
     cc_max_passes_brief:
-      "If still over threshold after repeated compression, retry at most N more times",
+      "If still over the threshold after compressing, retry at most N more times",
     cc_max_passes_impact:
-      "If still over threshold after exhausting these passes, the run fails with a context-overflow error (no silent fallback). A transient summarization-LLM failure skips that pass and retries; only 3 consecutive failures fail the run.",
+      "Still over the threshold after using up these retries? The run just fails outright (a context-overflow error, not a silent workaround). A one-off failure in the summarization model just skips that pass and retries; only 3 failures in a row actually fails the run.",
     cc_max_passes_default: "3",
-    cc_max_turns_label: "Coarse turn cap",
+    cc_max_turns_label: "Hard turn cap (legacy)",
     cc_max_turns_brief:
-      "Hard-truncate every call to the most recent N turns (the old trim layer); empty = off",
+      "Every call gets hard-cut to the most recent N turns; empty = off",
     cc_max_turns_impact:
-      "An older mechanism that predates the three gates, off (empty) by default. Once set, it truncates unconditionally on every call — usually unnecessary; prefer the ratio-based gates above.",
+      "An older mechanism from before the three-step pipeline existed, off (empty) by default. Once set, every call gets cut unconditionally — usually unnecessary; the ratio-based steps above are almost always the better choice.",
     cc_max_turns_default: "Empty (off)",
-    cc_max_tokens_label: "Coarse token cap",
-    cc_max_tokens_brief: "Same idea, truncated by token count; empty = off",
+    cc_max_tokens_label: "Hard token cap (legacy)",
+    cc_max_tokens_brief: "Same idea, but cut by token count instead; empty = off",
     cc_max_tokens_impact:
-      "Same as the turn cap — once set it takes effect unconditionally, so generally leave it empty.",
+      "Same as the turn cap above — once set, it applies unconditionally, so it's usually best left empty.",
     cc_max_tokens_default: "Empty (off)",
     cc_pressure_feedback_label: "Pressure-feedback nudge",
     cc_pressure_feedback_brief:
-      "Near the window ceiling, append a budget reminder to the model",
+      "As usage nears the window limit, add a budget reminder for the model",
     cc_pressure_feedback_impact:
-      "Once usage reaches window × warn %, a reminder is appended to the last message (the system prompt is untouched, so prefix caching stays valid), nudging the model to self-trim. Below the threshold, zero changes.",
+      "Once usage hits window × warn %, a reminder gets tacked onto the last message so the model knows to wrap up (it never touches the system prompt, so prompt caching stays intact). Below that percentage, nothing is added.",
     cc_pressure_feedback_default: "true",
     cc_pressure_warn_pct_label: "Pressure warn %",
     cc_pressure_warn_pct_brief:
       "The window percentage that triggers the budget reminder",
     cc_pressure_warn_pct_impact:
-      "Should be lower than the compression threshold to actually give the model a head start (default 0.75 vs. compression's 0.7 — note the warning currently fires LATER than compression; lower it if you want an earlier nudge).",
+      "Should, in theory, be lower than the compression threshold for the reminder to actually give a head start — but by default the warning is 0.75 and compression is 0.7, meaning compression currently fires BEFORE the warning does. Lower this value if you want the reminder to actually come first.",
     cc_pressure_warn_pct_default: "0.75",
     budget_enabled_label: "Enable tool-output budget",
     budget_enabled_brief:
-      "This agent's master switch for large tool-output externalization / persistence / pruning",
+      "This agent's master switch for handling oversized tool output — whether to move it elsewhere, keep it, or trim it",
     budget_enabled_impact:
-      "Effective = platform switch AND this switch (if the platform switch is off, turning this on has no effect). Once off, large outputs are no longer externalized to the workspace — an oversized result can only be truncated. Early bash/exec/http/mcp overflow externalization is unaffected by this switch.",
+      "Only takes effect when both switches are on: the platform-wide one and this one (if the platform switch is off, turning this on does nothing). Once off, oversized tool results no longer get saved to the workspace — anything too long just gets truncated instead. This doesn't affect the separate, older overflow-handling built into bash/exec/http/mcp, which keeps working regardless.",
     budget_enabled_default: "true",
   },
   security_gates: {
     group_intro:
-      "The sandbox's outbound network policy for code and tools inside it, decided in three layers: egress mode → denylist (priority) → allowlist.",
+      "The sandbox's outbound network policy for code and tools running inside it — checked in order: egress mode (the master switch) → denylist (checked first) → allowlist.",
     panel_network: "① Network egress",
     panel_enforce: "② Tool-use enforcement",
     egress_label: "Egress mode",
     egress_brief:
-      "The sandbox's master outbound-network switch: proxy = via the credentialed proxy (default) / direct = direct connection / none = no network",
+      "The sandbox's master switch for reaching the outside world: proxy = through the credentialed proxy (default, recommended) / direct = connect directly, no proxy / none = no network at all",
     egress_impact:
-      "Under none, every outbound call from inside the sandbox is unavailable; direct bypasses the proxy's credential injection and centralized audit — generally not recommended; proxy goes out through the credentialed proxy, fully audited.",
+      "Choose none and the sandbox can't reach the outside world at all — every request fails. Choose direct and traffic goes straight out with no proxy, so there's no automatic credential injection and no centralized audit trail — generally not recommended. Choose proxy (the default) and everything goes through the credentialed proxy, fully audited.",
     egress_default: "proxy",
     egress_opt_proxy: "Proxy (default)",
     egress_opt_direct: "Direct",
     egress_opt_none: "None (blocked)",
     allowlist_label: "Domain allowlist",
     allowlist_brief:
-      "Non-empty = only these domains are allowed; empty = open to the public internet (SSRF / internal-network probing is still blocked, fully audited)",
+      "Non-empty = only these domains are reachable; empty = the whole public internet is open (spoofed requests and internal-network probing are still blocked, and everything is audited)",
     allowlist_impact:
-      "Matches an exact domain or its subdomains. Wildcards like ['*'] aren't allowed (submission validation rejects them). When both lists are present, the denylist wins.",
+      "Matches an exact domain or its subdomains. Wildcards like ['*'] aren't allowed — submitting one gets rejected outright. If both an allowlist and a denylist are set, the denylist wins.",
     allowlist_default: "Empty (open to the public internet)",
     denylist_label: "Domain denylist",
     denylist_brief:
-      "Regardless of the allowlist / default-open behavior, these domains are always blocked",
+      "Regardless of the allowlist or the default-open behavior, these domains are always blocked",
     denylist_impact:
-      "Takes priority over the allowlist; matches an exact domain or its subdomains. Good for \"stay open to the public internet but block a few specific bad targets.\"",
+      "Takes priority over the allowlist, and matches the same way — exact domain or subdomain. Good for 'leave everything open, just block these few.'",
     denylist_default: "Empty",
     enforce_label: "Tool-use enforcement",
     enforce_brief:
-      "Appends an enforcement block to the system prompt: must use tools for real-time facts, act immediately, never fabricate tool output",
+      "Adds a hard requirement to the system prompt: for anything needing real-time facts, actually call a tool, act right away, and never make up a tool result",
     enforce_impact:
-      "auto (default) = enabled for every model family except the ones (Claude/GPT, etc.) that reliably self-initiate tool calls — a newly onboarded weak model gets enforcement for free, no config change needed; on/off = force it on/off regardless of the model.",
+      "auto (default) = turned on for every model except the families — Claude, GPT, etc. — that are already reliable about calling tools on their own; a newly onboarded weak model gets this safety net for free, no config change needed. on/off = force it on or off regardless of which model is in use.",
     enforce_default: "auto",
     enforce_opt_auto: "Auto (default)",
     enforce_opt_on: "Always on",
@@ -3597,72 +3617,72 @@ const en: TranslationKeys = {
   sandbox_group: {
     pw_label: "Project plan to workspace",
     pw_brief:
-      "At the end of each turn, write PLAN.md / TODO.md / MEMORY.md into the user's workspace, and read them back when a run starts — sharing task progress inside and outside the sandbox",
+      "At the end of each turn, write PLAN.md / TODO.md / MEMORY.md into the user's workspace, and read them back when the next run starts — so progress is visible both inside and outside the sandbox",
     pw_impact:
-      "Controls plan/status projection only, not file persistence: a run with a user_id already auto-mounts that user's persistent /workspace volume (restored automatically next time after idle reclaim); a system run (no user_id) is always ephemeral — neither depends on this switch. Also requires the deployment to wire up the sandbox supervisor to take effect.",
+      "This switch only controls whether plan/progress files get written — it has nothing to do with whether files stick around. A run with a user_id already auto-mounts that user's own persistent workspace regardless (restored automatically next time, even after an idle cleanup); a system run with no user_id always gets a throwaway workspace — neither case depends on this switch. It also needs the deployment to have the sandbox supervisor wired up to actually take effect.",
     platform_note_title: "Platform-effective values",
     platform_note_body:
-      "The sandbox's actual runtime parameters are decided by the platform deployment; the manifest has no say: image = the platform's unified image (Python + the full office/data/media stack); resources = the supervisor's environment configuration (default 1.0 CPU / 1024 MB memory / 128 processes); per-command timeout defaults to 30s, tool calls may specify their own, capped at 300s; the root filesystem is always read-only, writable paths are always /workspace and /tmp; the container runtime (gVisor/runc) is set by a deployment environment variable.",
+      "How much the sandbox can actually use, and what image it runs, is decided by the platform deployment — the manifest has no say, no matter what's written here: the image is always the platform's shared one (Python plus the usual office / data / media libraries); resources (default 1 CPU, 1024 MB memory, up to 128 processes) come from the deployment environment; a single command gets 30 seconds by default, a tool call can ask for more, capped at 300 seconds; the sandbox's root filesystem is always read-only, and the only writable paths are always /workspace and /tmp; which container tech runs it (gVisor or runc) is set by a deployment environment variable.",
     declarative_note:
-      "The manifest's runtime / image / image_build / resources / readonly_root / writable / mounts fields and the code block are currently declarative: they pass validation but aren't read at runtime, and are harmless left in the YAML. To change the actual resource limits, edit the platform deployment config (the sandbox-supervisor environment variables).",
+      "The manifest's runtime / image / image_build / resources / readonly_root / writable / mounts fields, and the whole code block, are currently just for show (the technical term is 'declarative'): writing them doesn't error, but the system never actually reads them at run time — harmless to leave them in the YAML. To actually change the resource limits, edit the platform deployment config instead (the sandbox-supervisor environment variables).",
   },
   memory_group: {
     panel_injection: "① Injection budget",
     panel_consolidation: "② Background memory consolidation",
     inj_budget_label: "Memory injection token budget",
     inj_budget_brief:
-      "Token ceiling for recalled memories rendered into the prompt — packed greedily in relevance order, truncated once the ceiling is hit",
+      "The most tokens recalled memories may take up in the prompt — packed in from most to least relevant until this fills up",
     inj_budget_impact:
-      "The number of recalled items is capped by retrieve_top_k, but a single oversized memory can still blow out the injection block — this budget is the backstop (the boundary entry is truncated and flagged). Raise it for more memory context at a higher per-turn cost; lower it to save tokens at the risk of truncating long memories.",
+      "How many memories get recalled is capped by 'memories recalled per run', but a single unusually long memory can still blow up the space it takes — this budget is the backstop (whichever entry lands on the boundary gets truncated and flagged). Raise it for more memory context at a higher per-turn cost; lower it to save tokens, at the risk of cutting off long memories.",
     inj_budget_default: "2000",
     corr_budget_label: "User-correction reserve budget",
     corr_budget_brief:
-      "A dedicated token allowance that explicit user-correction memories (confidence=1.0) get priority claim on",
+      "A dedicated token allowance that explicit user corrections (the kind the system treats as 100% certain) get first claim on",
     corr_budget_impact:
-      "Guarantees ordinary memories can't crowd out a user's explicit corrections: correction entries are allocated up to this many tokens first, then ordinary memories fill the remaining budget. Set to 0 to disable the reserve.",
+      "Makes sure ordinary memories can't crowd out a user's explicit corrections: correction memories get first claim on up to this many tokens, and ordinary memories only get what's left. Set it to 0 to skip this protection.",
     corr_budget_default: "500",
     consolidation_label: "Background memory consolidation",
     consolidation_brief:
-      "A control-plane background job (every 4 hours by default) that clusters and merges similar short-term memories and prunes noisy entries — not on the run path, so it never affects session latency",
+      "Runs in the background on a schedule (every 4 hours by default), merging similar short-term memories and clearing out noisy ones — it's a background job, so it never slows down the conversation",
     consolidation_impact:
-      "Turning it off stops this agent's long-term memory from being auto-deduplicated, distilled, and denoised — short-term memories will keep accumulating unchecked. Consolidation runs on the auxiliary model and is billed under the memory_consolidation purpose; the clustering threshold is a tenant-level setting, not part of this manifest.",
+      "Turn it off and this agent's long-term memory stops auto-deduplicating, distilling, and cleaning itself up — short-term memories just keep piling up. The cleanup runs on the auxiliary model and is billed separately under 'memory consolidation'; what counts as 'similar enough to merge' is a tenant-level setting, not something this manifest controls.",
     aux_model_note:
-      "The auxiliary model used for consolidation defaults to the platform configuration (claude-sonnet-4-6); to set one specifically for this agent, edit policies.memory_consolidation.aux_model (a full ModelSpec block) in the YAML view.",
+      "The model that does the cleanup defaults to the platform-wide setting (claude-sonnet-4-6); to pick a different one just for this agent, edit policies.memory_consolidation.aux_model in the YAML view (it needs a full model config block).",
     reserved_note:
-      "memory.short_term and dynamic_context.inject_memory are currently reserved fields: they pass validation but aren't read at runtime. Whether memory is enabled is decided solely by whether memory.long_term is declared (the toggle above).",
+      "memory.short_term and dynamic_context.inject_memory are currently reserved fields — placeholders that don't error when set, but that the system never actually reads. Whether memory is on comes down to one thing only: whether memory.long_term is declared (the toggle above).",
   },
   model_group: {
     panel_reflection: "Reflection self-assessment",
     rf_enable_label: "Reflection self-assessment",
     rf_enable_brief:
-      "Before replying, the judge model reflects on and scores its own answer, auto-retrying with improvements if it falls short",
+      "Before answering, have a judge model score and critique the draft answer, retrying automatically if it falls short",
     rf_enable_impact:
-      "Each reflection round adds one extra LLM call: higher quality, but more latency and cost. The judge model is set by the \"reflection evaluator model\" rule below; when unset, reflection reuses the main model.",
+      "Each extra round of reflection is one more model call: better quality, but slower and pricier. Which model judges is set by the 'reflection evaluator model' setting below; if it's unset, the main model judges its own answer.",
     rf_budget_label: "Reflection retry cap",
     rf_budget_brief:
-      "Maximum reflection calls per run; once the cap is hit, the current answer is accepted",
+      "The most reflection rounds a single run may use before it just accepts the current answer",
     rf_budget_impact:
-      "Raise it for more rounds of self-improvement — cost and latency scale roughly linearly; 1 = judge only once.",
+      "Raise it for more rounds of self-improvement — cost and time scale up roughly in step; 1 = judged once, no retries.",
     rf_budget_default: "2",
     rf_deadline_label: "Per-reflection time limit (seconds)",
     rf_deadline_brief:
-      "Wall-clock cap for each reflection call; on timeout, the current answer is force-accepted",
+      "The most seconds a single reflection round may take before the current answer is accepted as-is",
     rf_deadline_impact:
-      "Prevents a stuck judge model from stalling the whole run. Raise it to tolerate a slow model; lower it to keep response times tight. Capped at 600.",
+      "Keeps a stuck judge model from dragging down the whole run. Raise it to tolerate a slow model; lower it to keep things responsive. Capped at 600 seconds.",
     rf_deadline_default: "30",
     yaml_note:
-      "The following capabilities are currently configured only via the YAML view: routing.rules' planning rule (only takes effect for the plan_execute workflow), vision.fallbacks (the vision-model fallback chain), and base_url / azure_deployment / azure_api_version (Azure and self-hosted wiring). api_key_ref is deprecated: setting it in the manifest is ignored, with a warning.",
+      "The following are still YAML-only for now: the planning rule under routing.rules (only used when the workflow type is plan_execute), vision.fallbacks (the fallback chain for the vision model), and the base_url / azure_deployment / azure_api_version connection settings for Azure or self-hosted models. Also, api_key_ref is deprecated: setting it in the manifest gets ignored, with a warning.",
   },
   observability_group: {
     resp_cache_label: "LLM response cache",
     resp_cache_brief:
-      "A repeated request hits the cache and reuses the full answer directly, without calling the model — saves cost and speeds up responses",
+      "A repeated request reuses last time's full answer instead of calling the model again — cheaper and faster",
     resp_cache_impact:
-      "A cache hit skips the model call entirely (including routing and the fallback chain). Turn this off for an agent whose prompt has time-sensitive content (the current date, live data, etc.), or it may return a stale answer. This is a different thing from the model group's \"prompt caching\" (Anthropic prompt caching): that only saves input tokens, while this switch reuses the entire answer verbatim.",
+      "A cache hit skips the model call entirely — no provider selection, no fallback chain, none of it. Turn this off for an agent whose prompt has time-sensitive content (today's date, live data, etc.), or it may hand back a stale answer. This is a different thing from the Model & Routing group's 'prompt caching' (Anthropic prompt caching): that one only saves on input tokens, while this switch reuses the entire answer as-is.",
     triggers_note:
-      "The manifest's triggers declaration is currently not wired up: cron/webhook triggers written into the manifest have no effect. For scheduled and webhook automation, create them via the trigger-management API (/v1/triggers) instead — that path's scheduling and firing work correctly.",
+      "The manifest can declare a triggers field, but it's currently not wired up: cron or webhook triggers written into the manifest have no effect. To set up scheduled or webhook automation, create it through trigger management (the /v1/triggers API) instead — that's the path that actually runs.",
     declarative_note:
-      "observability's trace / log_level / redact_fields are currently declarative fields: they pass validation but aren't read at runtime — tracing is always on per the platform configuration, the log level is decided by each service's deployment environment, and PII redaction is handled by the platform's defense chain.",
+      "observability's trace / log_level / redact_fields fields are currently declarative — they don't error when set, but the system never actually reads them at run time. Tracing is controlled by the platform's own configuration, the log level comes from each service's deployment environment, and PII redaction is handled entirely by the platform's defense chain — none of that depends on these fields.",
   },
   model_select: {
     provider_label: "Provider",
@@ -3822,11 +3842,37 @@ const en: TranslationKeys = {
       "Let the agent call external APIs (through the audited egress proxy).\nExample: weather, internal services",
     tool_mcp_help:
       "Let the agent use tools provided by MCP servers (databases, business systems).\nOnce checked, pick the specific servers and tools below.\nExample: connect your company's CRM",
+    tool_exec_python: "Run Python code",
+    tool_exec_python_help:
+      "Let the agent run Python in an isolated sandbox for calculations and data processing. On by default; can be turned off for purely conversational agents.",
+    tool_bash: "Run shell commands",
+    tool_bash_help:
+      "Let the agent run shell commands in an isolated sandbox (e.g. installing dependencies, running scripts). On by default; can be turned off for agents that don't need to touch the system.",
+    tool_manage_task: "Scheduled tasks",
+    tool_manage_task_help:
+      "Let the agent create scheduled tasks for the user from within the conversation (e.g. \"search news every day at 9am\") — it runs automatically at the scheduled time and the result comes back to the conversation.",
+    tool_author_skill: "Create skills",
+    tool_author_skill_help:
+      "Let the agent turn a reusable approach into a saved \"skill\" that it — or other agents — can use directly later.",
+    tool_refine_skill: "Refine skills",
+    tool_refine_skill_help: "Let the agent improve the content of an existing skill.",
+    tool_fork_skill: "Fork skills",
+    tool_fork_skill_help:
+      "Let the agent copy an existing skill and modify the copy, leaving the original untouched.",
+    tool_propose_skill: "Propose skill to team",
+    tool_propose_skill_help:
+      "Let the agent submit its own skill for team-wide sharing (requires approval).",
+    tool_note_behavior_patch: "Record behavior corrections",
+    tool_note_behavior_patch_help:
+      "Let the agent jot down small corrections — \"next time, handle this situation like so\" — to gradually improve its own performance.",
+    tool_clarify_tool_usage: "Clarify tool usage",
+    tool_clarify_tool_usage_help:
+      "Let the agent record the correct way to use a tool after misusing it, so it doesn't repeat the mistake.",
     tools_config_note:
-      "Per-tool configuration for built-in tools (tools[].config, e.g. search engine / result count) and built-in tool entries other than web_search are edited in the YAML view.",
+      "The switches above only control whether a tool is on or off. To fine-tune a specific tool's own settings (e.g. which search engine web_search uses, how many results it returns), edit that tool's tools[].config in the YAML view.",
     section_approval: "Human approval",
     section_approval_help:
-      "For the tools you check, every run pauses before they execute and waits for a human to approve.\nBase abilities like code execution are on by default and can't be turned off — use this to add a human checkpoint before they run.\nExample: add approval for exec_python, http",
+      "For the tools you check, execution pauses every time and waits for a human to approve — whether it's a base capability that's always on, or one you turned on yourself above in Tools.\nExample: add approval for exec_python, http",
     approval_hint: "Check the tools that need a human sign-off before running.",
     section_dynamic_workers: "Temporary helpers",
     section_dynamic_workers_help:
@@ -3918,7 +3964,7 @@ const en: TranslationKeys = {
     inject_date_hint:
       "Writes today's date into the system prompt at build time (on by default, cache-stable per calendar day). When off, the agent doesn't know today's date - only suitable for agents whose behavior doesn't depend on the date.",
     dynamic_context_note:
-      "Custom reminders (dynamic_context.custom_reminders) are a structured list - edit them in the YAML view.",
+      "Custom reminders (dynamic_context.custom_reminders) need to be written as a list in a specific format - edit them in the YAML view.",
   },
   playground: {
     session_label: "Session",

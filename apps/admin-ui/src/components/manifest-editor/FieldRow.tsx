@@ -2,19 +2,20 @@
  * FieldRow — the per-field rendering contract for the agent-config-page
  * redesign (PR1, Task 4): label + control + default-value badge on one
  * line, a one-line brief always visible beneath it, and an optional impact
- * note that stays collapsed until expanded.
+ * note, also always visible beneath the brief (Task 2 of a later redesign
+ * PR replaced the collapsed "Impact" expander with a plain always-visible
+ * line, so a field's full effect is legible without a click).
  *
  * Purely presentational: per-field copy (label/brief/impact) and the
  * control itself come from the caller, already translated — this component
  * formats none of it, it just lays the pieces out. Task 6 supplies the
  * actual field copy when it wires the pilot "运行预算与超时" group. The
- * component's own chrome (impact-expander label, default-value badge
- * prefix) is sourced via react-i18next, same as every sibling
- * manifest-editor component.
+ * component's own chrome (default-value badge prefix) is sourced via
+ * react-i18next, same as every sibling manifest-editor component.
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Collapse, Tag } from "antd";
+import { Tag } from "antd";
 
 export interface FieldRowProps {
   /** manifest 路径,如 "workflow.max_iterations" → data-field-id */
@@ -22,7 +23,7 @@ export interface FieldRowProps {
   label: string;
   /** 一行作用,永远可见 */
   brief: string;
-  /** 展开的影响说明(调大/调小后果、生效条件) */
+  /** 影响说明,常显(调大/调小后果、生效条件) */
   impact?: string;
   /** 徽章文案;当前值===默认 → 灰"默认 <v>",否则蓝当前值 */
   defaultValue?: string;
@@ -61,17 +62,9 @@ export function FieldRow({
         {brief}
       </div>
       {impact && (
-        <Collapse
-          ghost
-          size="small"
-          items={[
-            {
-              key: "impact",
-              label: t("manifest_editor.field_impact_label"),
-              children: <div style={{ fontSize: 12 }}>{impact}</div>,
-            },
-          ]}
-        />
+        <div style={{ fontSize: 12, color: "var(--ew-text-secondary)", marginTop: 4 }}>
+          {impact}
+        </div>
       )}
     </div>
   );
