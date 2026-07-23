@@ -11,7 +11,7 @@
  * ``user_id``), not the surrogate.
  */
 import { useEffect, useState } from "react";
-import { Alert, Button, Empty, Space, Tabs, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Empty, Space, Tabs, Tag, Typography } from "antd";
 import { Trash2, UserRound } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -76,6 +76,10 @@ export function UserProfile() {
   const displayName = navState.displayName ?? fetchedName ?? undefined;
   const isMember = navState.isMember;
   const memberRole = navState.memberRole;
+  // "Clear this user's data" is decoupled from account deletion (see
+  // PurgeUserModal): it's allowed for any user, including the caller's own —
+  // isSelf only raises the confirmation stakes in the modal, never gates it.
+  const isSelf = subjectId !== undefined && subjectId === identity?.subject;
 
   if (denied) {
     return (
@@ -104,24 +108,17 @@ export function UserProfile() {
         backTo={{ label: t("user_profile.back_label"), to: "/users" }}
         actions={
           subjectId ? (
-            isMember === true ? (
-              // Employees are purged from the members page (which also revokes
-              // their role + Keycloak account); the /users purge endpoint 409s.
-              <Tooltip title={t("user_profile.purge_employee_hint")}>
-                <Button danger disabled icon={<Trash2 size={15} strokeWidth={1.75} />}>
-                  {t("user_profile.purge_action")}
-                </Button>
-              </Tooltip>
-            ) : (
-              <Button
-                danger
-                icon={<Trash2 size={15} strokeWidth={1.75} />}
-                onClick={() => setPurgeOpen(true)}
-                data-testid="user-purge-btn"
-              >
-                {t("user_profile.purge_action")}
-              </Button>
-            )
+            // Clearing data is allowed for any user — external, employee, or
+            // the caller themself (account deletion stays a members-page-only
+            // concern, unaffected by this button).
+            <Button
+              danger
+              icon={<Trash2 size={15} strokeWidth={1.75} />}
+              onClick={() => setPurgeOpen(true)}
+              data-testid="user-purge-btn"
+            >
+              {t("user_profile.purge_action")}
+            </Button>
           ) : undefined
         }
         subtitle={
@@ -195,6 +192,7 @@ export function UserProfile() {
           userId={userId}
           subjectId={subjectId}
           displayName={displayName}
+          isSelf={isSelf}
           onPurged={() => {
             setPurgeOpen(false);
             navigate("/users");

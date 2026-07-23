@@ -312,12 +312,14 @@ async def test_purge_endpoint_unknown_user_404(app_client: tuple[AsyncClient, UU
 
 
 @pytest.mark.asyncio
-async def test_purge_endpoint_refuses_employee_member() -> None:
-    """An employee (tenant_user linked to a console member) is not purgeable here.
+async def test_purge_endpoint_allows_employee_member() -> None:
+    """Purge is decoupled from account deletion — an employee's *data* is purgeable here too.
 
-    This data-only entry would leave their membership + role bindings + Keycloak
-    account intact; employees are purged from the members page instead. The guard
-    returns 409 and the tenant_user row stays active.
+    Just like any other user, this data-only endpoint clears
+    conversations/memory/workspace and soft-deactivates the ``tenant_user``
+    row, but it never touches ``tenant_member`` (role, status, Keycloak
+    account) — deleting the employee's *account* is still only done from the
+    members page (revoke), unaffected by this endpoint.
     """
     settings = Settings(
         env="dev",
@@ -357,7 +359,55 @@ async def test_purge_endpoint_refuses_employee_member() -> None:
         resp = await client.post(
             f"/v1/users/{user.id}:purge", headers={"Authorization": f"Bearer {jwt}"}
         )
-    assert resp.status_code == 409, resp.text
-    # The employee's tenant_user is untouched — not deactivated.
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["deactivated"] is True
+        # The purged employee drops out of the roster (data gone)...
+        listed = await client.get("/v1/users", headers={"Authorization": f"Bearer {jwt}"})
+        ids = {row["user_id"] for row in listed.json()["data"]["items"]}
+        assert str(user.id) not in ids
+    # ...the tenant_user row is soft-deactivated (data-only)...
     still = await app.state.tenant_user_repo.get(user.id, tenant_id=_ENDPOINT_TENANT)
-    assert still is not None and still.deleted_at is None
+    assert still is not None and still.deleted_at is not None
+    # ...but the console membership, role and Keycloak account are untouched.
+    member_after = await members.get(tenant_id=_ENDPOINT_TENANT, member_id=member.id)
+    assert member_after is not None
+    assert member_after.status == "active"
+    assert member_after.role == "operator"
+    assert member_after.keycloak_user_id == "kc-e"
+
+
+@pytest.mark.asyncio
+async def test_purge_endpoint_allows_self() -> None:
+    """The caller may purge their own data — no backend self-block.
+
+    Data-only: purging yourself clears your conversations/memory/workspace
+    like purging anyone else; it never signs you out or touches your account
+    (no Keycloak / role changes). The UI carries the extra confirmation
+    weight for a self-purge; the backend treats it the same as any target.
+    """
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    caller_sub = str(uuid4())
+    user = await app.state.tenant_user_repo.resolve(
+        tenant_id=_ENDPOINT_TENANT, subject_type="user", subject_id=caller_sub, display_name="Self"
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # The caller's own JWT sub matches the purge target's subject_id.
+        jwt = make_test_jwt(tenant_id=_ENDPOINT_TENANT, subject=caller_sub, roles=("admin",))
+        resp = await client.post(
+            f"/v1/users/{user.id}:purge", headers={"Authorization": f"Bearer {jwt}"}
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["deactivated"] is True

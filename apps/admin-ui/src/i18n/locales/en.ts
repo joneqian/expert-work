@@ -323,9 +323,9 @@ export interface TranslationKeys {
     deleted: string;
     failed_to_load: string;
     purge_action: string;
-    purge_employee_hint: string;
     purge_title: string;
     purge_warning: string;
+    purge_self_warning: string;
     purge_deletes: string;
     purge_anonymizes: string;
     purge_archive_note: string;
@@ -3134,9 +3134,10 @@ const en: TranslationKeys = {
     deleted: "Deleted {{name}}",
     failed_to_load: "Failed to load",
     purge_action: "Purge this user's data",
-    purge_employee_hint: "Employees are removed from the Members page",
     purge_title: "Purge user data · irreversible",
     purge_warning: "This permanently purges everything for {{who}}:",
+    purge_self_warning:
+      "This is your own account's data — purging it deletes your own conversations, memory, and workspace, and cannot be undone.",
     purge_deletes:
       "Conversations · memory · workspace · uploads · triggers · webhooks — all deleted.",
     purge_anonymizes:

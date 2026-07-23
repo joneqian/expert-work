@@ -2,10 +2,14 @@
  * PurgeUserModal — the high-risk, type-to-confirm gate for
  * ``POST /v1/users/{id}:purge`` (Phase 3a).
  *
- * Irreversibly cascade-purges an external end-user's data + assets. To arm the
- * danger button the admin must type the user's ``subject_id`` verbatim. An
- * employee (console member) is rejected 409 by the backend — surfaced as a hint
- * to use the members page instead.
+ * Irreversibly cascade-purges a user's data + assets — external end-user,
+ * employee (console member), or the caller themself; purging is decoupled
+ * from account deletion, which stays a members-page-only concern (this
+ * endpoint never touches Keycloak / roles / ``tenant_member``). To arm the
+ * danger button the admin must type the user's ``subject_id`` verbatim; a
+ * self-purge (``isSelf``) additionally shows a reinforced warning. The 409
+ * handler below is now a defensive fallback — the backend no longer rejects
+ * employees — kept in case some other conflict ever surfaces here.
  */
 import { useState } from "react";
 import { Alert, App, Input, Modal, Typography } from "antd";
@@ -24,6 +28,8 @@ interface PurgeUserModalProps {
   /** The value the admin must type to arm the delete (the passed-in user id). */
   subjectId: string;
   displayName?: string;
+  /** ``true`` when the target is the caller's own data — shows a reinforced warning. */
+  isSelf?: boolean;
   /** Called after a successful purge — the caller navigates away. */
   onPurged: () => void;
 }
@@ -34,6 +40,7 @@ export function PurgeUserModal({
   userId,
   subjectId,
   displayName,
+  isSelf = false,
   onPurged,
 }: PurgeUserModalProps) {
   const { t } = useTranslation();
@@ -71,7 +78,8 @@ export function PurgeUserModal({
       // (a fast second Enter could otherwise re-fire the purge).
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        // Employee (console member) — must be purged from the members page.
+        // Defensive fallback — the backend no longer 409s for employees, but
+        // keep the hint in case some other conflict ever surfaces here.
         modal.warning({
           title: t("user_profile.purge_employee_title"),
           content: t("user_profile.purge_employee_body"),
@@ -100,6 +108,15 @@ export function PurgeUserModal({
       destroyOnClose
       data-testid="purge-user-modal"
     >
+      {isSelf && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("user_profile.purge_self_warning")}
+          style={{ marginBottom: 16 }}
+          data-testid="purge-self-warning"
+        />
+      )}
       <Alert
         type="error"
         showIcon
