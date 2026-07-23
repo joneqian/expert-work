@@ -38,6 +38,8 @@ export interface ToolCallEntry {
   durationMs: number | null;
   /** B2 PR2 — 本次调用派生的 worker 子时间线(spawn_worker / subagent);无则缺省。 */
   workers?: WorkerTimeline[];
+  /** 定时任务工具(``manage_task`` create)回传的 trigger id —— 供「立即触发」按钮。取自 wire ToolMessage 的 ``artifact.trigger_id``。 */
+  triggerId?: string | null;
 }
 
 const MCP_PREFIX = "mcp__";
@@ -234,6 +236,7 @@ export function parseToolCalls(
             status: "pending",
             resultPreview: null,
             durationMs: null,
+            triggerId: null,
           }));
           // A re-seen call (replayed frame) refreshes name/args, never status.
           entry.rawName = rawName;
@@ -262,6 +265,7 @@ export function parseToolCalls(
             status,
             resultPreview: preview,
             durationMs: null,
+            triggerId: null,
           };
         });
         // Fill the name from the result only if the call side didn't provide it.
@@ -281,6 +285,15 @@ export function parseToolCalls(
             : undefined;
         if (typeof durRaw === "number" && Number.isFinite(durRaw)) {
           entry.durationMs = durRaw;
+        }
+        // artifact — LangChain ToolMessage's structured metadata field
+        // (``ToolResult.meta``, builder.py:2819-2827). ``manage_task``'s
+        // create action stashes the new trigger's id here so the debug
+        // console can offer a 立即触发 (run now) shortcut.
+        const art = (m as { artifact?: unknown }).artifact;
+        if (art !== null && typeof art === "object") {
+          const tid = (art as Record<string, unknown>).trigger_id;
+          if (typeof tid === "string" && tid !== "") entry.triggerId = tid;
         }
       }
     }

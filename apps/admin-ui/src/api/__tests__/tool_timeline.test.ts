@@ -35,6 +35,13 @@ function toolResult(id: string, content: string, status = "success"): unknown {
   return { type: "tool", tool_call_id: id, name: null, content, status };
 }
 
+/** A ToolMessage carrying LangChain's ``artifact`` field — the wire shape a
+ *  ``manage_task`` create result takes (builder.py:2827's
+ *  ``ToolMessage(..., artifact=...)``, sourced from ``ToolResult.meta``). */
+function toolResultWithArtifact(id: string, content: string, artifact: unknown): unknown {
+  return { type: "tool", tool_call_id: id, name: null, content, status: "success", artifact };
+}
+
 describe("parseToolCalls", () => {
   it("links a call to its result and parses an MCP server from the name", () => {
     const events = [
@@ -147,6 +154,58 @@ describe("parseToolCalls", () => {
       ] } }, "t1"),
     ];
     expect(parseToolCalls(events)[0].durationMs).toBe(null);
+  });
+});
+
+describe("parseToolCalls artifact.trigger_id (Spec 1 PR4 Task 4)", () => {
+  it("reads triggerId from the ToolMessage artifact (manage_task create)", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "create", name: "daily digest" })]),
+      updates("tools", [
+        toolResultWithArtifact("c1", "Created task 'daily digest': ...", {
+          trigger_id: "trig-abc-123",
+        }),
+      ]),
+    ];
+    const [entry] = parseToolCalls(events);
+    expect(entry.triggerId).toBe("trig-abc-123");
+  });
+
+  it("leaves triggerId null when the result carries no artifact", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "list" })]),
+      updates("tools", [toolResult("c1", "no tasks")]),
+    ];
+    expect(parseToolCalls(events)[0].triggerId).toBeNull();
+  });
+
+  it("leaves triggerId null when the artifact carries no trigger_id key", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "delete" })]),
+      updates("tools", [toolResultWithArtifact("c1", "Deleted.", { some_other_key: 1 })]),
+    ];
+    expect(parseToolCalls(events)[0].triggerId).toBeNull();
+  });
+
+  it("ignores a non-string trigger_id", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "create" })]),
+      updates("tools", [toolResultWithArtifact("c1", "Created.", { trigger_id: 12345 })]),
+    ];
+    expect(parseToolCalls(events)[0].triggerId).toBeNull();
+  });
+
+  it("ignores an empty-string trigger_id", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "manage_task", { action: "create" })]),
+      updates("tools", [toolResultWithArtifact("c1", "Created.", { trigger_id: "" })]),
+    ];
+    expect(parseToolCalls(events)[0].triggerId).toBeNull();
+  });
+
+  it("defaults triggerId to null for a call with no result yet", () => {
+    const events = [updates("agent", [aiCall("c1", "manage_task", { action: "create" })])];
+    expect(parseToolCalls(events)[0].triggerId).toBeNull();
   });
 });
 

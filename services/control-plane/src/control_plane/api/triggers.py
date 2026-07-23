@@ -13,11 +13,12 @@ Two routers:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
@@ -44,6 +45,7 @@ from control_plane.tenant_scope import (
     ensure_tenant_scope,
 )
 from control_plane.tenant_status import TenantStatusService
+from control_plane.trigger_delivery import deliver_run_result
 from control_plane.trigger_firing import fire_trigger
 from control_plane.uplift.threat_metrics import (
     record_threat_pattern_hits,
@@ -55,6 +57,7 @@ from expert_work.common.observability import current_trace_id_hex
 from expert_work.common.threat_patterns import ThreatFinding
 from expert_work.persistence import (
     ApprovalStore,
+    ThreadMessageStore,
     ThreadMetaStore,
     TriggerRunStore,
     TriggerStore,
@@ -76,6 +79,8 @@ from expert_work.protocol import (
     TriggerSpec,
 )
 from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunInfo, RunStore
+from expert_work.runtime.runs.schemas import TERMINAL_RUN_STATUSES, RunStatus
 
 logger = logging.getLogger("expert_work.control_plane.triggers")
 
@@ -212,6 +217,17 @@ class _PatchTriggerBody(BaseModel):
     config: dict[str, Any] | None = None
 
 
+class _FireNowResponse(BaseModel):
+    """Spec 1 PR4 Task 3 — the debug console's "fire now" synchronous result."""
+
+    run_id: str
+    thread_id: str
+    run_status: str
+    trigger_run_status: str
+    delivery: str
+    delivered_text: str | None = None
+
+
 def _get_trigger_store(request: Request) -> TriggerStore:
     return request.app.state.trigger_store  # type: ignore[no-any-return]
 
@@ -254,6 +270,14 @@ def _get_agent_disable_service(request: Request) -> AgentDisableService:
 
 def _get_tenant_status_service(request: Request) -> TenantStatusService:
     return request.app.state.tenant_status_service  # type: ignore[no-any-return]
+
+
+def _get_run_store(request: Request) -> RunStore:
+    return request.app.state.run_store  # type: ignore[no-any-return]
+
+
+def _get_thread_message_store(request: Request) -> ThreadMessageStore:
+    return request.app.state.thread_message_store  # type: ignore[no-any-return]
 
 
 def build_triggers_router() -> APIRouter:
@@ -517,6 +541,161 @@ def build_triggers_router() -> APIRouter:
             trace_id=current_trace_id_hex(),
         )
         return JSONResponse(content={"deleted": True})
+
+    @router.post("/{trigger_id}:fire", response_model=None)
+    async def fire_trigger_now(
+        trigger_id: UUID,
+        request: Request,
+        triggers: Annotated[TriggerStore, Depends(_get_trigger_store)],
+        trigger_runs: Annotated[TriggerRunStore, Depends(_get_trigger_run_store)],
+        runs: Annotated[RunStore, Depends(_get_run_store)],
+        agents: Annotated[AgentSpecStore, Depends(_get_agent_spec_store)],
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_store)],
+        runtime: Annotated[AgentRuntime, Depends(_get_runtime)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        approvals: Annotated[ApprovalStore, Depends(_get_approval_store)],
+        tenant_configs: Annotated[TenantConfigStore, Depends(_get_tenant_config_store)],
+        disable_service: Annotated[AgentDisableService, Depends(_get_agent_disable_service)],
+        tenant_status: Annotated[TenantStatusService, Depends(_get_tenant_status_service)],
+        thread_messages: Annotated[ThreadMessageStore, Depends(_get_thread_message_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        settings: Annotated[Settings, Depends(_get_settings)],
+    ) -> _FireNowResponse:
+        """调试台「立即触发」:发射一次 + 有界轮询到终态 + 成功则投递回原对话。"""
+        tenant_id: UUID = request.state.tenant_id
+        record = await triggers.get(trigger_id=trigger_id, tenant_id=tenant_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="trigger not found")
+        # 所有权闸——与 get_trigger 逐字一致。
+        if record.user_id is None:
+            if not is_admin(request.state.principal):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "USER_SCOPE_FORBIDDEN",
+                        "message": "only tenant admins may act on unowned triggers",
+                    },
+                )
+        else:
+            await resolve_target_user_id(request, users, requested=record.user_id)
+        if record.kind != "cron":
+            raise HTTPException(status_code=400, detail="only cron tasks support manual fire")
+
+        now = datetime.now(UTC)
+        # 在触发器自己的 user RLS scope 里发射(webhook path 先例:triggers.py:569-585)。
+        user_tok = current_user_id_var.set(record.user_id)
+        try:
+            run_id = await fire_trigger(
+                record,
+                now=now,
+                agent_spec_store=agents,
+                runtime=runtime,
+                thread_store=threads,
+                audit_logger=audit,
+                approval_store=approvals,
+                trigger_store=triggers,
+                tenant_config_store=tenant_configs,
+                agent_disable_service=disable_service,
+                tenant_status_service=tenant_status,
+            )
+            if run_id is None:
+                raise HTTPException(status_code=409, detail="trigger agent unavailable")
+            fired = TriggerRunRecord(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                trigger_id=record.id,
+                run_id=run_id,
+                status=TriggerRunStatus.FIRED,
+                attempt=1,
+                triggered_at=now,
+            )
+            await trigger_runs.create(fired)
+        finally:
+            current_user_id_var.reset(user_tok)
+
+        # 有界轮询 run 到终态。
+        deadline = now + timedelta(seconds=settings.trigger_fire_now_timeout_s)
+        run: RunInfo | None = None
+        while True:
+            run = await runs.get(run_id=run_id, tenant_id=tenant_id)
+            if run is not None and run.status is RunStatus.PAUSED:
+                # PAUSED = live run waiting on a human approval gate, NOT an
+                # outcome. Mirror scheduler._reconcile_one: leave the trigger_run
+                # FIRED so a later sweep delivers once the human approves; never
+                # mark it FAILED (list_fired filters status==FIRED, so a FAILED
+                # mismark would permanently orphan the eventual delivery).
+                return _FireNowResponse(
+                    run_id=str(run_id),
+                    thread_id=str(run.thread_id),
+                    run_status=run.status.value,
+                    trigger_run_status=TriggerRunStatus.FIRED.value,
+                    delivery="pending",
+                )
+            if run is not None and run.status in TERMINAL_RUN_STATUSES:
+                break
+            if datetime.now(UTC) >= deadline:
+                return _FireNowResponse(
+                    run_id=str(run_id),
+                    thread_id=str(run.thread_id) if run else "",
+                    run_status=run.status.value if run else "running",
+                    trigger_run_status=TriggerRunStatus.FIRED.value,
+                    delivery="pending",
+                )
+            await asyncio.sleep(1)
+
+        # 终态处置——SUCCESS 投递,失败转终态(与 scheduler _reconcile_one 语义一致)。
+        if run.status is RunStatus.SUCCESS:
+            outcome = await deliver_run_result(
+                trigger=record,
+                run=run,
+                runtime=runtime,
+                agent_spec_store=agents,
+                thread_message_store=thread_messages,
+                now=datetime.now(UTC),
+            )
+            await trigger_runs.update(
+                fired.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
+            )
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=request.state.actor_id,
+                action=AuditAction.TRIGGER_COMPLETED,
+                resource_type="trigger",
+                resource_id=str(record.id),
+                trace_id=current_trace_id_hex(),
+                details={"run_id": str(run_id), "delivery": outcome.status, "manual": True},
+            )
+            return _FireNowResponse(
+                run_id=str(run_id),
+                thread_id=str(run.thread_id),
+                run_status=run.status.value,
+                trigger_run_status=TriggerRunStatus.SUCCEEDED.value,
+                delivery=outcome.status,
+                delivered_text=outcome.text,
+            )
+        # 失败:标 FAILED(fire-now 不做退避重试——一次性手动触发)。
+        error = run.error or "run failed"
+        await trigger_runs.update(
+            fired.model_copy(update={"status": TriggerRunStatus.FAILED, "error": error})
+        )
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=request.state.actor_id,
+            action=AuditAction.TRIGGER_FAILED,
+            resource_type="trigger",
+            resource_id=str(record.id),
+            trace_id=current_trace_id_hex(),
+            details={"run_id": str(run_id), "error": error, "manual": True},
+        )
+        return _FireNowResponse(
+            run_id=str(run_id),
+            thread_id=str(run.thread_id),
+            run_status=run.status.value,
+            trigger_run_status=TriggerRunStatus.FAILED.value,
+            delivery="skipped",
+        )
 
     return router
 

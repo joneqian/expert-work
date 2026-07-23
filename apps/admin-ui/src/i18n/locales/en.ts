@@ -1175,6 +1175,11 @@ export interface TranslationKeys {
     tl_worker_task: string;
     tl_worker_summary: string; // "{{steps}} steps · {{calls}} LLM calls · {{duration}}"
     tl_worker_children: string;
+    task_result: string;
+    lifecycle_created: string;
+    lifecycle_fired: string;
+    lifecycle_completed: string;
+    fire_pending: string;
   };
   session_history: {
     title: string;
@@ -1235,6 +1240,11 @@ export interface TranslationKeys {
     exit_code: string;
     stdout_label: string;
     stderr_label: string;
+    fire_now: string;
+    firing: string;
+    fire_delivered: string;
+    fire_pending: string;
+    fire_failed: string;
   };
   approval_card: {
     awaiting_human: string;
@@ -4071,6 +4081,12 @@ const en: TranslationKeys = {
     tl_worker_task: "Task",
     tl_worker_summary: "{{steps}} steps · {{calls}} LLM calls · {{duration}}",
     tl_worker_children: "child workers",
+    task_result: "Task result",
+    lifecycle_created: "Created",
+    lifecycle_fired: "Fired",
+    lifecycle_completed: "Completed",
+    fire_pending:
+      "The result hasn't landed yet — the run is still going. Reopen this conversation later to see it.",
   },
   session_history: {
     title: "Session history",
@@ -4131,6 +4147,11 @@ const en: TranslationKeys = {
     exit_code: "Exit code",
     stdout_label: "stdout",
     stderr_label: "stderr",
+    fire_now: "Run now",
+    firing: "Running…",
+    fire_delivered: "Result delivered",
+    fire_pending: "Fired, still running",
+    fire_failed: "Fire failed",
   },
   approval_card: {
     awaiting_human: "awaiting approval",

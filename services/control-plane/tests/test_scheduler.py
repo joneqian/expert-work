@@ -357,6 +357,38 @@ async def test_reconcile_exhausted_budget_dead_letters() -> None:
     assert row.status is TriggerRunStatus.DEAD_LETTER
 
 
+@pytest.mark.asyncio
+async def test_reconcile_dead_letter_emits_trigger_failed() -> None:
+    """FU3 — a dead-lettered firing (retry budget exhausted) emits exactly one
+    TRIGGER_FAILED audit entry carrying the run id. Merges the DEAD_LETTER
+    status coverage of ``test_reconcile_exhausted_budget_dead_letters`` above
+    (which doesn't check audit) with the audit-entry shape asserted by
+    ``test_reconcile_interrupted_emits_trigger_failed`` below (which goes
+    through the INTERRUPTED path, not DLQ exhaustion)."""
+    audit = InMemoryAuditLogStore()
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    run_store = InMemoryRunStore()
+    trig = await triggers.create(_trigger(name="t"))
+    run_id = uuid4()
+    await trigger_runs.create(_fired_run(trigger_id=trig.id, run_id=run_id, attempt=5))
+    await run_store.create(_run_info(run_id, status=RunStatus.ERROR, error="boom"))
+    scheduler, _ = await _build_scheduler(
+        trigger_store=triggers,
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+        audit_store=audit,
+    )
+
+    await scheduler._reconcile_fired()
+
+    rows = await trigger_runs.list_by_trigger(trigger_id=trig.id, tenant_id=_TENANT)
+    assert rows[0].status is TriggerRunStatus.DEAD_LETTER
+    page = await audit.query(AuditQuery(tenant_id=_TENANT, action=AuditAction.TRIGGER_FAILED))
+    assert len(page.entries) == 1
+    assert page.entries[0].details["run_id"] == str(run_id)
+
+
 # --- PR3 D1 — reconcile delivers result + trigger lifecycle audit ---------
 
 

@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { App } from "antd";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "../../i18n";
 
 import { ToolCallCard, ToolTimeline } from "../ToolTimeline";
+import { ApiError } from "../../api/client";
 import type { SseEvent } from "../../api/sessions";
 import type { ToolCallEntry } from "../../api/tool_timeline";
+import * as triggersSdk from "../../api/triggers";
+import type { FireNowResult } from "../../api/triggers";
 
 function updates(node: string, messages: unknown[]): SseEvent {
   return { id: null, event: "updates", data: { [node]: { messages } }, rawData: "", receivedAt: "" };
@@ -29,6 +34,17 @@ function baseEntry(over: Partial<ToolCallEntry> = {}): ToolCallEntry {
  *  (always visible), but the cleaned text is inside the collapsed body. */
 function openResultPanel() {
   fireEvent.click(screen.getByText(/^(Result|结果)$/));
+}
+
+/** ``ToolCallCard`` calls ``App.useApp()`` for the 立即触发 button's error
+ *  toast — needs a real ``<App>`` ancestor (the antd v5 static-method
+ *  fallback used outside one is an empty stub, not the real message API). */
+function renderFireCard(entry: ToolCallEntry, onFireResult?: (result: FireNowResult) => void) {
+  return render(
+    <App>
+      <ToolCallCard entry={entry} onFireResult={onFireResult} />
+    </App>,
+  );
 }
 
 describe("ToolTimeline", () => {
@@ -153,5 +169,97 @@ describe("ToolTimeline", () => {
     openResultPanel();
     const pre = screen.getByText(/结果 内容/);
     expect(pre.textContent).not.toContain("▁");
+  });
+});
+
+describe("ToolCallCard 立即触发 / run-now button (Spec 1 PR4 Task 4)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the button for a successful manage_task card with a triggerId", () => {
+    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }));
+    expect(screen.getByTestId("tool-fire-now")).toBeInTheDocument();
+  });
+
+  it("hides the button when there is no triggerId", () => {
+    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: null }));
+    expect(screen.queryByTestId("tool-fire-now")).not.toBeInTheDocument();
+  });
+
+  it("hides the button for a non-manage_task tool even if it somehow carried a triggerId", () => {
+    renderFireCard(baseEntry({ toolName: "search", triggerId: "trig-1" }));
+    expect(screen.queryByTestId("tool-fire-now")).not.toBeInTheDocument();
+  });
+
+  it("hides the button while the call has not yet succeeded", () => {
+    renderFireCard(
+      baseEntry({ toolName: "manage_task", triggerId: "trig-1", status: "pending" }),
+    );
+    expect(screen.queryByTestId("tool-fire-now")).not.toBeInTheDocument();
+  });
+
+  it("fires, shows a delivered status, and calls onFireResult with the response", async () => {
+    const user = userEvent.setup();
+    const result: FireNowResult = {
+      run_id: "r1",
+      thread_id: "t1",
+      run_status: "success",
+      trigger_run_status: "succeeded",
+      delivery: "delivered",
+      delivered_text: "Today's digest: …",
+    };
+    const fireMock = vi.spyOn(triggersSdk, "fireTriggerNow").mockResolvedValue(result);
+    const onFireResult = vi.fn();
+    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }), onFireResult);
+
+    await user.click(screen.getByTestId("tool-fire-now"));
+
+    await waitFor(() => expect(fireMock).toHaveBeenCalledWith("trig-1"));
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-fire-status")).toHaveTextContent(
+        /结果已落回对话|Result delivered/,
+      ),
+    );
+    expect(onFireResult).toHaveBeenCalledWith(result);
+  });
+
+  it("shows a pending status when the bounded poll times out before completion", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(triggersSdk, "fireTriggerNow").mockResolvedValue({
+      run_id: "r1",
+      thread_id: "t1",
+      run_status: "running",
+      trigger_run_status: "fired",
+      delivery: "pending",
+    });
+    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }));
+
+    await user.click(screen.getByTestId("tool-fire-now"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-fire-status")).toHaveTextContent(
+        /已触发,运行中|Fired, still running/,
+      ),
+    );
+  });
+
+  it("surfaces an error toast and resets the button after a failed fire", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(triggersSdk, "fireTriggerNow").mockRejectedValue(
+      new ApiError("agent unavailable", "TRIGGER_AGENT_UNAVAILABLE", 409),
+    );
+    renderFireCard(baseEntry({ toolName: "manage_task", triggerId: "trig-1" }));
+
+    await user.click(screen.getByTestId("tool-fire-now"));
+
+    // The error toast (App.useApp().message) carries the ApiError code.
+    await screen.findByText(/TRIGGER_AGENT_UNAVAILABLE/);
+    // Loading resets — the button falls back to its idle label.
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-fire-now")).toHaveTextContent(/^(立即触发|Run now)$/),
+    );
+    // No delivery ever resolved, so no status tag renders.
+    expect(screen.queryByTestId("tool-fire-status")).not.toBeInTheDocument();
   });
 });

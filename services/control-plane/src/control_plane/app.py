@@ -942,6 +942,9 @@ def create_app(
             # Stream RT-4 — kill switch gate for scheduled fires.
             agent_disable_service=resolved_agent_disable_service,
             tenant_status_service=resolved_tenant_status_service,
+            # Spec 1 PR4 Task 2 — FU2: mirror-sync the originating thread into
+            # content search after a successful delivery.
+            thread_message_store=resolved_thread_messages,
         )
         if enable_scheduler
         else None
