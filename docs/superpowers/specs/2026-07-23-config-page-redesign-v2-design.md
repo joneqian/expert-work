@@ -101,6 +101,14 @@
 | context_compression.head_keep | 4 | 2 | 6 |
 | context_compression.tail_keep | 6 | 4 | 10 |
 | dynamic_workers on | true | false | true |
+| memory.verify_reads(回答前核对) | true | false | true |
+| memory.rewrite_reads(改写问题) | false | false | true |
+| memory.recall_mode(插入位置) | per_session | per_session | per_turn |
+| memory.abstain_threshold(跳过弱匹配) | 0 | 0.2 | 0 |
+
+共 **18** 个受管字段。
+
+**扫过、明确排除的(理由)**:工具开关(种子已定默认姿态——基础9+exec/bash 默认开;工具集是"干什么"的领域选择,不是成本旋钮)· 审批工具勾选(安全姿态)· 反思评估器/视觉(开启需选模型,预设无法代选)· 响应缓存(默认已开,三档同值)· 三道压缩 enabled 开关与去重整理(三档都该开,关了反而更费)· 重要性过滤(影响记忆质量非成本)· 轨迹录制(省存储的代价是排查盲区)· 模型/回退链(租户模型与价格各异)。
 
 - 卡片文案:每档一句大白话(均衡「日常够用,费用适中」/ 成本「省 token,长对话砍得更狠」/ 能力「多记多想,复杂任务更稳,费用更高」)+ 一行「选档后下面模块自动配好;单项仍可改,改过会显示已自定义」。
 
@@ -132,6 +140,6 @@
 
 - FieldRow v2:brief 常显、ⓘ Popover 出 impact、非默认值出「已自定义 + 恢复默认」、恢复默认 patch undefined(变异证)。
 - 各组子 tab:每个 tab 激活后字段可查可改;记忆关 → 检索细节 disabled、注入预算隐藏。
-- 预设:apply 成本优先 → 14 字段全写入;apply 均衡 → 受管键全部删除(manifest 最干净);infer 精确反推;confirm 门槛(变异证)。
+- 预设:apply 成本优先 → 18 字段全写入;apply 均衡 → 受管键全部删除(manifest 最干净);infer 精确反推;confirm 门槛(变异证)。
 - schema 编辑器:round-trip 等价;不可表示护栏(嵌套 object → 只读、不改写);字段名校验;关闭清块。
 - `npx tsc -b --noEmit` exit 0 + vitest 全绿;i18n 键集守卫。
