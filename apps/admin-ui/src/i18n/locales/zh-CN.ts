@@ -758,8 +758,6 @@ const zhCN: TranslationKeys = {
     budget_enabled_default: "true",
   },
   security_gates: {
-    group_intro:
-      "控制沙箱里的代码和工具能不能连外网,按顺序判断三层:先看出网模式这个总开关,然后看黑名单(优先级最高),最后看白名单。",
     tab_defenses: "防护开关",
     tab_approval: "人工审批",
     tab_network: "子任务与网络",

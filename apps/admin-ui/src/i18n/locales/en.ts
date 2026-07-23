@@ -727,7 +727,6 @@ export interface TranslationKeys {
   // prefixes mirror SecurityFields' value keys (egress/allowlist/denylist/
   // enforce ~ toolUseEnforcement).
   security_gates: {
-    group_intro: string;
     tab_defenses: string;
     tab_approval: string;
     tab_network: string;
@@ -3600,8 +3599,6 @@ const en: TranslationKeys = {
     budget_enabled_default: "true",
   },
   security_gates: {
-    group_intro:
-      "The sandbox's outbound network policy for code and tools running inside it — checked in order: egress mode (the master switch) → denylist (checked first) → allowlist.",
     tab_defenses: "Defenses",
     tab_approval: "Human approval",
     tab_network: "Subtasks & network",
