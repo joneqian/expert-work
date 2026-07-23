@@ -1048,9 +1048,9 @@ const zhCN: TranslationKeys = {
     section_mcp_help:
       "把 Agent 接到 MCP 服务器(外部工具来源)。\n选服务器,还能进一步限定到具体工具。\n示例:接高德地图查位置",
     tool_web_search_help:
-      "允许 Agent 联网搜实时信息(走平台配的搜索服务)。\n示例:问「今天的新闻」时用得上",
+      "允许 Agent 联网搜实时信息,开箱可用(平台自带免费搜索服务,不用自己配置)。\n示例:问「今天的新闻」时用得上",
     tool_http_help:
-      "允许 Agent 调外部 API(经审计代理出网)。\n示例:查天气、调内部服务",
+      "允许 Agent 访问外部网址、调用第三方接口(所有请求都会留痕,方便审计)。\n示例:查天气、调用你们自己的内部系统",
     tool_mcp_help:
       "允许 Agent 用 MCP 服务器提供的工具(数据库、业务系统等)。\n勾选后在下面选具体服务器和工具。\n示例:接公司 CRM",
     tool_exec_python: "运行 Python 代码",
@@ -1064,20 +1064,23 @@ const zhCN: TranslationKeys = {
       "让 Agent 能在对话里帮用户建定时任务(如「每天9点搜新闻」),到点自动跑、结果回到对话。",
     tool_author_skill: "创作技能",
     tool_author_skill_help:
-      "让 Agent 能把一段可复用的做法沉淀成「技能」保存起来,以后自己或别的 Agent 直接用。",
+      "让 Agent 能把一段可复用的做法保存成「技能」,以后自己或别的 Agent 能直接拿来用。\n示例:把「整理周报」的固定步骤存成技能,下次一句话就能触发。",
     tool_refine_skill: "优化技能",
-    tool_refine_skill_help: "让 Agent 能改进已有技能的内容。",
+    tool_refine_skill_help:
+      "让 Agent 能改进已有技能里的内容。\n示例:某个技能的步骤过时了,让 Agent 自己更新一遍。",
     tool_fork_skill: "复制技能",
-    tool_fork_skill_help: "让 Agent 基于已有技能复制一份再改,不动原技能。",
+    tool_fork_skill_help:
+      "让 Agent 基于已有技能复制一份再改,不会动到原技能。\n示例:想照着「周报」技能改出一个「日报」版本。",
     tool_propose_skill: "提交技能到团队",
-    tool_propose_skill_help: "让 Agent 把自己的技能提交给团队共享(需审批)。",
+    tool_propose_skill_help:
+      "让 Agent 把自己摸索出的技能提交给团队共享(需要人工审批通过)。\n示例:Agent 总结出一套好用的做法,想让团队里其他 Agent 也能用上。",
     tool_note_behavior_patch: "记录行为修正",
     tool_note_behavior_patch_help:
-      "让 Agent 能记下「以后这类情况该怎么做」的小修正,逐步改进自己的表现。",
+      "让 Agent 能记下「以后遇到这种情况该怎么做」的小修正,慢慢把自己做得更好。",
     tool_clarify_tool_usage: "澄清工具用法",
     tool_clarify_tool_usage_help: "让 Agent 在用错工具时记下正确用法,下次不再犯。",
     tools_config_note:
-      "上面这些工具开关,只负责决定「用不用这个工具」。如果还想细调某个工具的具体参数(比如联网搜索用哪个搜索引擎、一次返回几条结果),请到 YAML 视图里编辑对应工具的 tools[].config。",
+      "文件读写、产物保存、请求人工确认这些基础能力默认开启,不在此列出;要调整请到 YAML 视图。网页搜索开箱可用(平台自带免费搜索服务)。",
     section_approval: "人工审批",
     section_approval_help:
       "勾选的工具,每次执行前都会暂停,等人工批准后才继续——不管这个工具是一直开着的基础能力,还是你在上面「工具」里手动打开的。\n示例:给 exec_python、http 加一道审批",

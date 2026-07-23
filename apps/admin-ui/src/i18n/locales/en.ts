@@ -3898,9 +3898,9 @@ const en: TranslationKeys = {
     section_mcp_help:
       "Connect the agent to MCP servers (sources of external tools).\nPick servers, and optionally narrow to specific tools.\nExample: connect a maps service for location lookups",
     tool_web_search_help:
-      "Let the agent search the web for fresh info (via the platform's search service).\nExample: needed for 'today's news' questions",
+      "Let the agent search the web for fresh info — works out of the box (the platform's own free search service, no setup needed).\nExample: handy for 'what's in today's news' questions",
     tool_http_help:
-      "Let the agent call external APIs (through the audited egress proxy).\nExample: weather, internal services",
+      "Let the agent visit external URLs and call third-party APIs (every request is logged for audit).\nExample: checking the weather, calling your own internal services",
     tool_mcp_help:
       "Let the agent use tools provided by MCP servers (databases, business systems).\nOnce checked, pick the specific servers and tools below.\nExample: connect your company's CRM",
     tool_exec_python: "Run Python code",
@@ -3914,15 +3914,16 @@ const en: TranslationKeys = {
       "Let the agent create scheduled tasks for the user from within the conversation (e.g. \"search news every day at 9am\") — it runs automatically at the scheduled time and the result comes back to the conversation.",
     tool_author_skill: "Create skills",
     tool_author_skill_help:
-      "Let the agent turn a reusable approach into a saved \"skill\" that it — or other agents — can use directly later.",
+      "Let the agent save a reusable approach as a \"skill\" that it — or other agents — can use directly later.\nExample: save the fixed steps for \"compiling the weekly report\" as a skill, then trigger it with one line next time.",
     tool_refine_skill: "Refine skills",
-    tool_refine_skill_help: "Let the agent improve the content of an existing skill.",
+    tool_refine_skill_help:
+      "Let the agent improve the content of an existing skill.\nExample: a skill's steps are out of date, so let the agent update it itself.",
     tool_fork_skill: "Fork skills",
     tool_fork_skill_help:
-      "Let the agent copy an existing skill and modify the copy, leaving the original untouched.",
+      "Let the agent copy an existing skill and modify the copy, leaving the original untouched.\nExample: base a new \"daily report\" skill on the existing \"weekly report\" one.",
     tool_propose_skill: "Propose skill to team",
     tool_propose_skill_help:
-      "Let the agent submit its own skill for team-wide sharing (requires approval).",
+      "Let the agent submit a skill it worked out for team-wide sharing (needs human approval).\nExample: the agent found a good approach and wants other agents on the team to use it too.",
     tool_note_behavior_patch: "Record behavior corrections",
     tool_note_behavior_patch_help:
       "Let the agent jot down small corrections — \"next time, handle this situation like so\" — to gradually improve its own performance.",
@@ -3930,7 +3931,7 @@ const en: TranslationKeys = {
     tool_clarify_tool_usage_help:
       "Let the agent record the correct way to use a tool after misusing it, so it doesn't repeat the mistake.",
     tools_config_note:
-      "The switches above only control whether a tool is on or off. To fine-tune a specific tool's own settings (e.g. which search engine web_search uses, how many results it returns), edit that tool's tools[].config in the YAML view.",
+      "File read/write, saving artifacts, and asking for human approval are on by default and not listed here — edit the YAML view to change them. Web search works out of the box (the platform's own free search service).",
     section_approval: "Human approval",
     section_approval_help:
       "For the tools you check, execution pauses every time and waits for a human to approve — whether it's a base capability that's always on, or one you turned on yourself above in Tools.\nExample: add approval for exec_python, http",

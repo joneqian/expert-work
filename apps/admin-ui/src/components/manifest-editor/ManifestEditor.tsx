@@ -27,6 +27,7 @@ import { SettingsSearch } from "./SettingsSearch";
 import { CONFIG_GROUPS } from "./groups";
 import { RunBudgetSection } from "./groups/RunBudgetSection";
 import { ContextGatesSection } from "./groups/ContextGatesSection";
+import { CapabilitiesSection } from "./groups/CapabilitiesSection";
 import { MemorySection } from "./groups/MemorySection";
 import { ModelRoutingSection } from "./groups/ModelRoutingSection";
 import { SecuritySection } from "./groups/SecuritySection";
@@ -37,8 +38,10 @@ import type { McpPickerSource } from "./widgets/McpToolPicker";
 /** Curated group panes — a hand-written component that replaces FormView's
  * registered-sections pathway for that group entirely, checked BEFORE the
  * plain ``FormView`` stacked-sections fallback below — so it wins even for
- * "model", whose ``CONFIG_GROUPS`` entry still lists real sections —
- * ``ModelRoutingSection`` embeds those itself.
+ * "model"/"capabilities", whose ``CONFIG_GROUPS`` entries still list real
+ * sections — ``ModelRoutingSection``/``CapabilitiesSection`` embed those
+ * themselves (the latter as five ``Tabs`` sub-tabs instead of one stacked
+ * pane).
  * "budget"/"context"/"memory"/"security"/"sandbox"/"observability" instead
  * have a statically-empty entry (``sections: []``) and render ONLY their
  * curated pane — "memory" and "security" used to embed real FormView
@@ -52,6 +55,9 @@ import type { McpPickerSource } from "./widgets/McpToolPicker";
 interface CuratedPaneProps {
   formData: unknown;
   onChange: (data: unknown) => void;
+  /** Only consumed by ``CapabilitiesSection`` (its "mcp" sub-tab) — every
+   *  other curated pane ignores it. */
+  mcpSource?: McpPickerSource;
 }
 const CURATED_GROUP_PANES: Record<
   string,
@@ -59,6 +65,7 @@ const CURATED_GROUP_PANES: Record<
 > = {
   budget: RunBudgetSection,
   context: ContextGatesSection,
+  capabilities: CapabilitiesSection,
   memory: MemorySection,
   model: ModelRoutingSection,
   security: SecuritySection,
@@ -293,7 +300,11 @@ export function ManifestEditor({
   ) : yamlActive ? (
     <YamlView value={yamlText} onChange={handleYamlChange} />
   ) : CuratedPane ? (
-    <CuratedPane formData={manifestObject} onChange={handleFormChange} />
+    <CuratedPane
+      formData={manifestObject}
+      onChange={handleFormChange}
+      mcpSource={mcpSource}
+    />
   ) : activeConfigGroup ? (
     <FormView
       formData={manifestObject}

@@ -281,12 +281,22 @@ describe("FormView", () => {
     );
   });
 
-  it("new-agent default seed: exec_python/bash checked on, opt-in tools checked off", () => {
+  it("new-agent default seed: every toggleable tool (incl. web_search/http/opt-in-7) checked on", () => {
     const seeded = parseYaml(BASE_MANIFEST_YAML) as AgentManifest;
     renderSection("tools", seeded);
+    expect(screen.getByTestId("af-tool-web_search")).toBeChecked();
+    expect(screen.getByTestId("af-tool-http")).toBeChecked();
     expect(screen.getByTestId("af-tool-exec_python")).toBeChecked();
     expect(screen.getByTestId("af-tool-bash")).toBeChecked();
-    expect(screen.getByTestId("af-tool-manage_task")).not.toBeChecked();
+    expect(screen.getByTestId("af-tool-manage_task")).toBeChecked();
+    expect(screen.getByTestId("af-tool-author_skill")).toBeChecked();
+    expect(screen.getByTestId("af-tool-refine_skill")).toBeChecked();
+    expect(screen.getByTestId("af-tool-fork_skill")).toBeChecked();
+    expect(
+      screen.getByTestId("af-tool-propose_skill_to_tenant"),
+    ).toBeChecked();
+    expect(screen.getByTestId("af-tool-note_behavior_patch")).toBeChecked();
+    expect(screen.getByTestId("af-tool-clarify_tool_usage")).toBeChecked();
   });
 
   it("editing the prompt updates spec.system_prompt.template", async () => {

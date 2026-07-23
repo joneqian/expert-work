@@ -52,20 +52,6 @@ function rowFor(fieldId: string): HTMLElement | null {
   return document.querySelector(`[data-field-id="${fieldId}"]`);
 }
 
-// The reflection panel is mounted (``forceRender``) but collapsed by
-// default, so its contents aren't in the accessibility tree until opened —
-// mirrors ``MemorySection.test.tsx``'s helper of the same shape.
-async function openPanel(
-  user: ReturnType<typeof userEvent.setup>,
-): Promise<void> {
-  const header = within(document.body)
-    .getByText("Reflection self-assessment", {
-      selector: ".ant-collapse-header-text",
-    })
-    .closest(".ant-collapse-header") as HTMLElement;
-  await user.click(header);
-}
-
 describe("ModelRoutingSection", () => {
   it("embeds the existing 'model' FormView section (model-select-provider always visible, af-fallback once a primary model is picked)", async () => {
     renderSection();
@@ -81,39 +67,35 @@ describe("ModelRoutingSection", () => {
     expect(screen.getByTestId("af-fallback")).toBeInTheDocument();
   });
 
-  it("the reflection panel starts collapsed", async () => {
-    const { container } = renderSection();
-    const outer = container.querySelector(
-      '[data-testid="model-routing-section"] > .ant-collapse',
-    ) as HTMLElement;
-    const panelItems = Array.from(outer.children).filter((el) =>
-      el.classList.contains("ant-collapse-item"),
-    );
-    expect(panelItems).toHaveLength(1);
-    expect(panelItems[0].children[0]).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+  it("renders the reflection section as a plain heading + always-visible switch (no collapse)", () => {
+    renderSection();
+    // The heading and the FieldRow's own label both read "Reflection
+    // self-assessment" in English — both present (no collapse hiding the
+    // FieldRow) means exactly two matches.
+    expect(screen.getAllByText("Reflection self-assessment")).toHaveLength(2);
+    // The reflection row isn't nested inside a collapse panel (unlike the
+    // embedded FormView's own unrelated "Advanced" ModelSelect collapse) —
+    // the switch is directly clickable, no panel header to open first.
+    expect(rowFor("reflection")?.closest(".ant-collapse")).toBeNull();
+    expect(
+      within(rowFor("reflection") as HTMLElement).getByRole("switch"),
+    ).toBeVisible();
   });
 
-  it("does not render the tuning FieldRows while reflection is off (absent block)", async () => {
-    const user = userEvent.setup();
+  it("does not render the tuning FieldRows while reflection is off (absent block)", () => {
     renderSection(SEED);
-    await openPanel(user);
 
     expect(rowFor("reflection")).toBeInTheDocument();
     expect(rowFor("reflection.budget")).not.toBeInTheDocument();
     expect(rowFor("reflection.deadline_s")).not.toBeInTheDocument();
   });
 
-  it("does not render the tuning FieldRows while reflection is off (explicit reflection: null)", async () => {
-    const user = userEvent.setup();
+  it("does not render the tuning FieldRows while reflection is off (explicit reflection: null)", () => {
     const offSeed: AgentManifest = {
       ...SEED,
       spec: { ...SEED.spec, reflection: null },
     };
     renderSection(offSeed);
-    await openPanel(user);
 
     expect(rowFor("reflection")).toBeInTheDocument();
     expect(rowFor("reflection.budget")).not.toBeInTheDocument();
@@ -124,7 +106,6 @@ describe("ModelRoutingSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const { rerender } = renderSection(SEED, onChange);
-    await openPanel(user);
 
     const switchEl = within(rowFor("reflection") as HTMLElement).getByRole(
       "switch",
@@ -143,7 +124,6 @@ describe("ModelRoutingSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection(REFLECTION_ON_SEED, onChange);
-    await openPanel(user);
 
     const input = within(
       rowFor("reflection.budget") as HTMLElement,
@@ -159,7 +139,6 @@ describe("ModelRoutingSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const { rerender } = renderSection(REFLECTION_ON_SEED, onChange);
-    await openPanel(user);
     expect(rowFor("reflection.budget")).toBeInTheDocument();
 
     const switchEl = within(rowFor("reflection") as HTMLElement).getByRole(

@@ -67,35 +67,39 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("cfg-pane")).toBeInTheDocument();
   });
 
-  it("selecting the capabilities group stacks tools/mcp/knowledge/skills/subagents in one pane", async () => {
+  it("selecting the capabilities group renders CapabilitiesSection's five sub-tabs (tools/mcp/knowledge/skills/subagents)", async () => {
     const user = userEvent.setup();
-    const { container } = render(
+    render(
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-capabilities"));
+    expect(screen.getByTestId("capabilities-section")).toBeInTheDocument();
+    // "tools" is the default-active sub-tab.
     expect(screen.getByTestId("af-tools")).toBeInTheDocument();
-    expect(screen.getByTestId("af-mcp")).toBeInTheDocument();
-    expect(screen.getByTestId("af-knowledge")).toBeInTheDocument();
-    expect(screen.getByTestId("af-skills")).toBeInTheDocument();
-    expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
     // "basic" is no longer shown once another group is active.
     expect(screen.queryByTestId("af-basic")).not.toBeInTheDocument();
 
-    // Each stacked section is wrapped in a `data-section-id` anchor div...
-    for (const id of ["tools", "mcp", "knowledge", "skills", "subagents"]) {
-      expect(
-        container.querySelector(`[data-section-id="${id}"]`),
-      ).toBeInTheDocument();
-    }
-    // ...with its own stacked sub-section title (checked for two sections
-    // whose tab label doesn't collide with the section's own heading text).
-    expect(
-      screen.getByText(en.manifest_editor.tab_knowledge),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(en.manifest_editor.tab_subagents),
-    ).toBeInTheDocument();
+    // Each sub-tab lazily mounts its own FormView section on click.
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_mcp }),
+    );
+    expect(screen.getByTestId("af-mcp")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_knowledge }),
+    );
+    expect(screen.getByTestId("af-knowledge")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_skills }),
+    );
+    expect(screen.getByTestId("af-skills")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_subagents }),
+    );
+    expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
   });
 
   it("the 'budget' group renders RunBudgetSection instead of the pending hint", async () => {

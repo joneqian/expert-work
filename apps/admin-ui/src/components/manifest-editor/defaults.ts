@@ -9,6 +9,21 @@
  * with ``spec.memory.long_term``. This requires a platform embedding config —
  * CreateAgentModal blocks+guides when none is set (the build-time embedder
  * gate is the backstop).
+ *
+ * config-page redesign v2 Task 5 — ``tools`` seeds a "default all-on"
+ * profile: the base-9 essentials + exec_python/bash (already the case) PLUS
+ * web_search/http and every opt-in-7 builtin (manage_task/author_skill/
+ * refine_skill/fork_skill/propose_skill_to_tenant/note_behavior_patch/
+ * clarify_tool_usage), 20 tools total. This only changes what a brand-new
+ * template starts with — the ``tools`` FormView checkboxes turn any of them
+ * back off, and an EXISTING agent's manifest is never touched by this file.
+ * The web_search/http entry shapes exactly mirror what ``form_model.ts``'s
+ * ``setTool`` writes when a user checks the box (``{type: builtin, name:
+ * web_search, config: {}}`` / ``{type: http}``) so toggling either off then
+ * back on round-trips byte-identical; the opt-in-7 entries mirror
+ * ``setBuiltinTool``'s plain ``{type: builtin, name}`` shape the same way.
+ * ``policies.max_no_progress: 4`` is also seeded here (T6 depends on this
+ * default existing on new agents).
  */
 import { parseYaml } from "./yaml";
 import type { CatalogModel, ModelCatalog } from "../../api/model_catalog";
@@ -43,6 +58,17 @@ spec:
     - { type: builtin, name: remember }
     - { type: builtin, name: exec_python }
     - { type: builtin, name: bash }
+    - { type: builtin, name: web_search, config: {} }
+    - { type: http }
+    - { type: builtin, name: manage_task }
+    - { type: builtin, name: author_skill }
+    - { type: builtin, name: refine_skill }
+    - { type: builtin, name: fork_skill }
+    - { type: builtin, name: propose_skill_to_tenant }
+    - { type: builtin, name: note_behavior_patch }
+    - { type: builtin, name: clarify_tool_usage }
+  policies:
+    max_no_progress: 4
   sandbox:
     resources: { cpu: "1.0", memory: "1Gi" }
     network:
