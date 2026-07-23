@@ -59,7 +59,9 @@
 |---|---|
 | **防护开关** | 现 defenses section 全部:输入防护(prompt_injection)· 输出防护(output_screen / output_judge+on_error / output_dlp)· 工具行为防护(action_screen+on_error);extends 提示 Alert 保留 |
 | **人工审批** | 审批工具勾选(7 个 GATEABLE_TOOLS)+ 审批超时(approval_timeout,从「高级」Collapse 提出来) |
-| **子任务与网络** | 临时小助手开关(dynamic_workers)· 运行轨迹录制(trajectory_recording,从「高级」提出)· 网络出网 3 项(egress/allowlist/denylist)· 工具强制(tool_use_enforcement) |
+| **子任务与网络** | 临时小助手开关(dynamic_workers)· 网络出网 3 项(egress/allowlist/denylist)· 工具强制(tool_use_enforcement) |
+
+- **轨迹录制(policies.trajectory_recording)从表单移除**(用户拍板 2026-07-23):运行时不读的声明性死字段,不给非技术人员摆假开关;归入声明性注脚一行,YAML 写了无害。
 
 - 「高级」「①网络出网」「②工具强制」Collapse 全拆。
 - `security_gates.dict_note` 缩成一行:「限流、隐私脱敏、安全策略等高级项请在 YAML 视图配置」。
@@ -87,7 +89,7 @@
 
 - **web_search、http、opt-in 7(manage_task/author_skill/refine_skill/fork_skill/propose_skill_to_tenant/note_behavior_patch/clarify_tool_usage)全部改为:模板种入、默认开、界面开关可关**——与 exec/bash 同档。BASE_MANIFEST_YAML 种子同步,`defaults` 测试同步。
 - 存量 agent 不动(种子只影响新建)。
-- web_search brief 带「需平台已配搜索服务」提示;计划期核对其运行前置。
+- web_search 后端 = 自托管 SearXNG(免费无 key),compose 默认自带、开箱即用;未配 SearXNG 的部署,后端派生时不注册该工具,manifest 开着也无害 → 默认开安全,无需前置提示。
 - tools_config_note 文案同步改写。
 
 ## ③ 预设档位「运行策略」
