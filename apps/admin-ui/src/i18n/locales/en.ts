@@ -646,7 +646,6 @@ export interface TranslationKeys {
     panel_tool_result_prune: string;
     panel_working_memory: string;
     panel_context_compression: string;
-    panel_tool_output_budget: string;
     pr_enabled_label: string;
     pr_enabled_brief: string;
     pr_enabled_impact: string;
@@ -3482,11 +3481,10 @@ const en: TranslationKeys = {
   },
   context_gates: {
     group_intro:
-      "Whenever the estimated content sent to the model goes over 'context window × threshold', three steps kick in, in order: ① old tool results get squashed into a one-line reference first (cheapest, barely touches quality) → ② if that's not enough, older turns get trimmed, keeping only the most recent ones (no extra model call, free) → ③ if it's still too much, a model summarizes a big chunk of the middle into a short paragraph (the last resort). Most overflows get solved by the first two steps alone. 'Window' here means the model's real capacity, as listed in the model catalog.",
+      "When there's too much content to fit, it falls back on three steps in order: ① prune old tool results → ② keep only the most recent conversation → ③ have the model summarize the middle. Most of the time the first two steps are enough. Window size depends on whichever model is selected.",
     panel_tool_result_prune: "① Tool-result prune",
     panel_working_memory: "② Sliding window",
     panel_context_compression: "③ Context compression",
-    panel_tool_output_budget: "④ Tool-output budget",
     pr_enabled_label: "Enable tool-result prune",
     pr_enabled_brief:
       "Above the threshold, squash old tool results into a one-line reference",

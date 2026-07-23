@@ -1,19 +1,23 @@
 /**
  * ContextGatesSection — "上下文与压缩" (Context & Compression) group, Task 3
- * of the agent-config-page redesign (PR2). Visualizes the three sequential
- * context gates (PolicySpec.tool_result_prune → .working_memory →
- * .context_compression) plus the sibling tool-output-budget master switch —
- * the pending-hint placeholder this group showed since Phase 1/PR1 is now
- * real.
+ * of the agent-config-page redesign (PR2), reshaped again by config-page
+ * redesign v2's own Task 3. Visualizes the three sequential context gates
+ * (PolicySpec.tool_result_prune → .working_memory → .context_compression)
+ * plus the sibling tool-output-budget master switch.
  *
- * Structure: an intro ``Text`` explaining the three-gate order, then one
- * titled ``Text strong`` + ``PolicyFieldList`` (config-page redesign v2 Task
- * 1's one-row-per-field ``FieldRow`` renderer) pair per PolicySpec sub-block.
- * All four groups and all 18 fields are always visible — no per-group
- * expand/collapse step (this component previously rendered a four-panel antd
- * ``Collapse`` here, first panel open by default; that's gone, along with
- * the ``forceRender`` plumbing it needed to keep collapsed fields reachable).
- * Tab-izing these four groups is left to a later task in the v2 redesign.
+ * Structure: an intro ``Text`` explaining the three-gate order, then the
+ * tool-output-budget master switch (a single-field ``PolicyFieldList``) as
+ * its own row ABOVE the Tabs — it's a sibling "policies" block, not a fourth
+ * gate in the sequence, so it doesn't belong inside the ①②③ tab strip. Below
+ * that, an antd ``Tabs`` (``size="small"``, mirrors ``MemorySection``'s
+ * sub-tab precedent) with one tab per gate — prune (①, default active) /
+ * window (②) / compress (③) — each rendering its ``PolicyFieldList`` (Task
+ * 1's declarative one-row-per-field renderer). Unlike ``MemorySection``,
+ * these tabs are NOT ``forceRender``: a hidden tab's fields simply aren't
+ * mounted, matching antd Tabs' default lazy-mount behavior — there's no
+ * cross-tab visibility requirement here (every write already goes through
+ * the same ``handlePatch``/``readContextGates`` pair regardless of which tab
+ * is open), so the extra mounted-but-hidden DOM has no payoff.
  *
  * Each group's field array is a ``FieldDef`` table (Task 1's declarative
  * pattern, same as ``RunBudgetSection``); this component only wires the
@@ -23,7 +27,7 @@
  * feature-off state (a coarse legacy cap that predates the three gates), not
  * "falls back to a numeric default".
  */
-import { Typography } from "antd";
+import { Tabs, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { PolicyFieldList, type FieldDef } from "./field_defs";
@@ -214,37 +218,49 @@ export function ContextGatesSection({
       <Text type="secondary" style={{ display: "block", marginBottom: 16 }}>
         {t("context_gates.group_intro")}
       </Text>
-      <Text strong style={{ display: "block", marginBottom: 8 }}>
-        {t("context_gates.panel_tool_result_prune")}
-      </Text>
-      <PolicyFieldList
-        defs={TOOL_RESULT_PRUNE_DEFS}
-        values={values}
-        onPatch={handlePatch}
-      />
-      <Text strong style={{ display: "block", margin: "16px 0 8px" }}>
-        {t("context_gates.panel_working_memory")}
-      </Text>
-      <PolicyFieldList
-        defs={WORKING_MEMORY_DEFS}
-        values={values}
-        onPatch={handlePatch}
-      />
-      <Text strong style={{ display: "block", margin: "16px 0 8px" }}>
-        {t("context_gates.panel_context_compression")}
-      </Text>
-      <PolicyFieldList
-        defs={CONTEXT_COMPRESSION_DEFS}
-        values={values}
-        onPatch={handlePatch}
-      />
-      <Text strong style={{ display: "block", margin: "16px 0 8px" }}>
-        {t("context_gates.panel_tool_output_budget")}
-      </Text>
       <PolicyFieldList
         defs={TOOL_OUTPUT_BUDGET_DEFS}
         values={values}
         onPatch={handlePatch}
+      />
+      <Tabs
+        size="small"
+        defaultActiveKey="prune"
+        items={[
+          {
+            key: "prune",
+            label: t("context_gates.panel_tool_result_prune"),
+            children: (
+              <PolicyFieldList
+                defs={TOOL_RESULT_PRUNE_DEFS}
+                values={values}
+                onPatch={handlePatch}
+              />
+            ),
+          },
+          {
+            key: "window",
+            label: t("context_gates.panel_working_memory"),
+            children: (
+              <PolicyFieldList
+                defs={WORKING_MEMORY_DEFS}
+                values={values}
+                onPatch={handlePatch}
+              />
+            ),
+          },
+          {
+            key: "compress",
+            label: t("context_gates.panel_context_compression"),
+            children: (
+              <PolicyFieldList
+                defs={CONTEXT_COMPRESSION_DEFS}
+                values={values}
+                onPatch={handlePatch}
+              />
+            ),
+          },
+        ]}
       />
     </div>
   );

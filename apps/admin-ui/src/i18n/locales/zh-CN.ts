@@ -657,11 +657,10 @@ const zhCN: TranslationKeys = {
   },
   context_gates: {
     group_intro:
-      "当发给模型的内容估算超过「上下文窗口 × 阈值」时,会按顺序启动三道处理:①先把旧的工具执行结果压成一句引用(最省事,几乎不影响效果)→ ②如果还不够,砍掉早期的对话轮次,只留最近的(不额外调用模型,免费)→ ③如果还是不够,才用模型把中间一大段对话总结成一段话(最后一招)。大多数超限情况,前两步就能解决;这里的「窗口」以模型实际能装多少内容为准(在模型目录里能查到)。",
+      "内容太长装不下时,按 ①修剪旧工具结果 → ②只留最近对话 → ③模型总结中间段 的顺序兜底,大多数情况前两步就够。窗口大小以所选模型为准。",
     panel_tool_result_prune: "①结果修剪",
     panel_working_memory: "②滑动窗口",
     panel_context_compression: "③上下文压缩",
-    panel_tool_output_budget: "④工具输出预算",
     pr_enabled_label: "启用结果修剪",
     pr_enabled_brief: "内容超限时,把比较旧的工具执行结果压缩成一行引用",
     pr_enabled_impact:
