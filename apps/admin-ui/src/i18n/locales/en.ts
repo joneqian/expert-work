@@ -2546,6 +2546,21 @@ export interface TranslationKeys {
     action_playground: string;
     action_edit: string;
     action_runs: string;
+    action_delete: string;
+    action_disable: string;
+    action_enable: string;
+    delete_title: string;
+    delete_warning: string;
+    delete_warning_desc: string;
+    delete_type_to_confirm: string;
+    delete_success: string;
+    delete_failed: string;
+    disable_confirm_title: string;
+    disable_confirm_body: string;
+    disable_success: string;
+    disable_failed: string;
+    enable_success: string;
+    enable_failed: string;
     create: string;
     from_template: string;
   };
@@ -5633,6 +5648,23 @@ const en: TranslationKeys = {
     action_playground: "Playground",
     action_edit: "Edit manifest",
     action_runs: "Runs",
+    action_delete: "Delete",
+    action_disable: "Disable",
+    action_enable: "Enable",
+    delete_title: "Delete agent",
+    delete_warning: "This deletes {{name}} v{{version}} — it cannot be undone from the UI.",
+    delete_warning_desc:
+      "Marks it as deleted (soft delete); other versions of this agent are not affected.",
+    delete_type_to_confirm: "Type the agent name to confirm deletion:",
+    delete_success: "Deleted {{name}} v{{version}}",
+    delete_failed: "Failed to delete agent: {{error}}",
+    disable_confirm_title: "Disable this agent?",
+    disable_confirm_body:
+      "Rejects new runs and sessions for {{name}} (all versions) and cancels its in-flight runs. You can re-enable it anytime.",
+    disable_success: "Disabled {{name}} — cancelled {{count}} in-flight run(s)",
+    disable_failed: "Failed to disable agent: {{error}}",
+    enable_success: "Enabled {{name}}",
+    enable_failed: "Failed to enable agent: {{error}}",
     create: "Create",
     from_template: "From template",
   },

@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  App,
   Button,
   Dropdown,
   Empty,
@@ -32,7 +33,9 @@ import {
 import type { TableColumnsType } from "antd";
 import {
   Activity,
+  Ban,
   Bot,
+  CircleCheck,
   Globe2,
   MoreHorizontal,
   Pencil,
@@ -40,14 +43,23 @@ import {
   Plus,
   RefreshCw,
   Store,
+  Trash2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
-import { listAgents, type AgentRecord, type AgentList } from "../api/agents";
+import {
+  listAgents,
+  getAgent,
+  disableAgent,
+  enableAgent,
+  type AgentRecord,
+  type AgentList,
+} from "../api/agents";
 import { ApiError } from "../api/client";
 import { useTenantScope } from "../tenant/TenantScopeContext";
 import { CreateAgentModal } from "../components/CreateAgentModal";
+import { DeleteAgentModal } from "../components/DeleteAgentModal";
 import { PageHeader } from "../components/PageHeader";
 
 const { Text } = Typography;
@@ -66,6 +78,148 @@ function agentPath(record: AgentRecord, tab: string): string {
   return `/agents/${encodeURIComponent(record.name)}/${encodeURIComponent(record.version)}/${tab}`;
 }
 
+function errMessage(err: unknown): string {
+  return err instanceof ApiError
+    ? `${err.code}: ${err.message}`
+    : err instanceof Error
+      ? err.message
+      : "unknown error";
+}
+
+/** Per-row "..." action menu. The list payload doesn't carry the agent-level
+ *  kill-switch flag (only ``GET /v1/agents/{name}/{version}`` does — see
+ *  :func:`getAgent`), so disable/enable is lazily resolved from the detail
+ *  endpoint the first time a row's menu opens; before that (and on a failed
+ *  fetch) it defaults to showing "disable", the common case since most
+ *  agents are enabled. Disable affects *all* versions of the name and
+ *  bulk-cancels in-flight runs, so it's danger-confirmed; enable is cheap
+ *  and reversible (re-disabling is one click away) so it fires directly. */
+function AgentRowActions({
+  record,
+  onNavigate,
+  onDeleteClick,
+  onChanged,
+}: {
+  record: AgentRecord;
+  onNavigate: (tab: string) => void;
+  onDeleteClick: () => void;
+  onChanged: () => void;
+}) {
+  const { t } = useTranslation();
+  const { message, modal } = App.useApp();
+  const [disabled, setDisabled] = useState<boolean | null>(null);
+
+  const loadDisabledState = useCallback(() => {
+    getAgent(record.name, record.version).then(
+      (detail) => setDisabled(detail.disabled ?? false),
+      () => setDisabled(false),
+    );
+  }, [record.name, record.version]);
+
+  const runEnable = useCallback(async () => {
+    try {
+      await enableAgent(record.name);
+      message.success(t("agents_page.enable_success", { name: record.name }));
+      onChanged();
+    } catch (err) {
+      message.error(t("agents_page.enable_failed", { error: errMessage(err) }));
+    }
+  }, [record.name, message, t, onChanged]);
+
+  const confirmDisable = useCallback(() => {
+    modal.confirm({
+      title: t("agents_page.disable_confirm_title"),
+      content: t("agents_page.disable_confirm_body", { name: record.name }),
+      okButtonProps: { danger: true },
+      okText: t("agents_page.action_disable"),
+      cancelText: t("common.cancel"),
+      onOk: async () => {
+        try {
+          const result = await disableAgent(record.name);
+          message.success(
+            t("agents_page.disable_success", {
+              name: record.name,
+              count: result.cancelled_runs ?? 0,
+            }),
+          );
+          onChanged();
+        } catch (err) {
+          message.error(t("agents_page.disable_failed", { error: errMessage(err) }));
+        }
+      },
+    });
+  }, [modal, message, t, record.name, onChanged]);
+
+  return (
+    <Dropdown
+      trigger={["click"]}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen && disabled === null) loadDisabledState();
+      }}
+      menu={{
+        items: [
+          {
+            key: "playground",
+            icon: <Play size={14} strokeWidth={1.5} />,
+            label: t("agents_page.action_playground"),
+          },
+          {
+            key: "manifest",
+            icon: <Pencil size={14} strokeWidth={1.5} />,
+            label: t("agents_page.action_edit"),
+          },
+          {
+            key: "runs",
+            icon: <Activity size={14} strokeWidth={1.5} />,
+            label: t("agents_page.action_runs"),
+          },
+          disabled
+            ? {
+                key: "enable",
+                icon: <CircleCheck size={14} strokeWidth={1.5} />,
+                label: t("agents_page.action_enable"),
+              }
+            : {
+                key: "disable",
+                icon: <Ban size={14} strokeWidth={1.5} />,
+                label: t("agents_page.action_disable"),
+              },
+          { type: "divider" as const },
+          {
+            key: "delete",
+            danger: true,
+            icon: <Trash2 size={14} strokeWidth={1.5} />,
+            label: t("agents_page.action_delete"),
+          },
+        ],
+        onClick: ({ key }) => {
+          if (key === "delete") {
+            onDeleteClick();
+            return;
+          }
+          if (key === "disable") {
+            confirmDisable();
+            return;
+          }
+          if (key === "enable") {
+            void runEnable();
+            return;
+          }
+          onNavigate(String(key));
+        },
+      }}
+    >
+      <Button
+        type="text"
+        size="small"
+        aria-label={t("agents_page.column_actions")}
+        icon={<MoreHorizontal size={16} strokeWidth={1.5} />}
+        data-testid={`agent-row-actions-${record.name}`}
+      />
+    </Dropdown>
+  );
+}
+
 export function AgentsList() {
   const { t } = useTranslation();
   const { scope, apiTenantScope } = useTenantScope();
@@ -74,6 +228,7 @@ export function AgentsList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AgentRecord | null>(null);
   const [nameFilter, setNameFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
@@ -188,43 +343,19 @@ export function AgentsList() {
         render: (_: unknown, record) => (
           // Stop the cell click bubbling to the row's navigate-to-overview.
           <span onClick={(e) => e.stopPropagation()}>
-            <Dropdown
-              trigger={["click"]}
-              menu={{
-                items: [
-                  {
-                    key: "playground",
-                    icon: <Play size={14} strokeWidth={1.5} />,
-                    label: t("agents_page.action_playground"),
-                  },
-                  {
-                    key: "manifest",
-                    icon: <Pencil size={14} strokeWidth={1.5} />,
-                    label: t("agents_page.action_edit"),
-                  },
-                  {
-                    key: "runs",
-                    icon: <Activity size={14} strokeWidth={1.5} />,
-                    label: t("agents_page.action_runs"),
-                  },
-                ],
-                onClick: ({ key }) => navigate(agentPath(record, key)),
-              }}
-            >
-              <Button
-                type="text"
-                size="small"
-                aria-label={t("agents_page.column_actions")}
-                icon={<MoreHorizontal size={16} strokeWidth={1.5} />}
-              />
-            </Dropdown>
+            <AgentRowActions
+              record={record}
+              onNavigate={(tab) => navigate(agentPath(record, tab))}
+              onDeleteClick={() => setDeleteTarget(record)}
+              onChanged={refresh}
+            />
           </span>
         ),
       },
     );
 
     return cols;
-  }, [t, statusLabel, isCrossTenant, navigate]);
+  }, [t, statusLabel, isCrossTenant, navigate, refresh]);
 
   return (
     <div>
@@ -375,6 +506,17 @@ export function AgentsList() {
           navigate(
             `/agents/${encodeURIComponent(name)}/${encodeURIComponent(version)}/overview`,
           );
+        }}
+      />
+
+      <DeleteAgentModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        name={deleteTarget?.name ?? ""}
+        version={deleteTarget?.version ?? ""}
+        onDeleted={() => {
+          setDeleteTarget(null);
+          refresh();
         }}
       />
     </div>
