@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import "../../../../i18n";
 
 import i18n from "../../../../i18n";
-import { PolicyFieldList, type FieldDef } from "../field_defs";
+import { PolicyFieldList, PolicyFieldTable, type FieldDef } from "../field_defs";
 
 // A synthetic i18n subtree, registered once for this suite, so
 // PolicyFieldList's generic behaviour (patch semantics, isDefault,
@@ -40,6 +40,7 @@ beforeAll(() => {
         mode_option_off: "Turned Off",
         labels_label: "Labels",
         labels_brief: "Free-form tags",
+        group_a_title: "Group A",
       },
     },
     true,
@@ -342,5 +343,65 @@ describe("PolicyFieldList", () => {
     expect(
       document.querySelector('[data-field-id="policies.labels"] .ant-tag'),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("PolicyFieldTable", () => {
+  it("renders one row per def, with brief and impact both visible (no collapse)", () => {
+    render(
+      <PolicyFieldTable
+        groups={[{ defs: [NUMBER_DEF, PERCENT_DEF, SWITCH_DEF] }]}
+        values={{}}
+        onPatch={vi.fn()}
+      />,
+    );
+
+    for (const def of [NUMBER_DEF, PERCENT_DEF, SWITCH_DEF]) {
+      expect(rowFor(def.fieldId)).toBeInTheDocument();
+    }
+    // brief is always visible, per def
+    expect(screen.getByText("A count of things")).toBeInTheDocument();
+    expect(screen.getByText("A ratio value")).toBeInTheDocument();
+    expect(screen.getByText("A boolean flag")).toBeInTheDocument();
+    // impact (only NUMBER_DEF's i18n subtree defines one) is visible with
+    // no click needed — no collapse control anywhere in the table.
+    expect(screen.getByText("Raising this increases X")).toBeInTheDocument();
+    expect(document.querySelector(".ant-collapse")).not.toBeInTheDocument();
+  });
+
+  it("renders a group header row when a group carries a titleKey", () => {
+    render(
+      <PolicyFieldTable
+        groups={[{ titleKey: `${NS}.group_a_title`, defs: [NUMBER_DEF] }]}
+        values={{}}
+        onPatch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Group A")).toBeInTheDocument();
+  });
+
+  it("omits the header row for a group with no titleKey", () => {
+    render(
+      <PolicyFieldTable groups={[{ defs: [NUMBER_DEF] }]} values={{}} onPatch={vi.fn()} />,
+    );
+
+    expect(screen.queryByText("Group A")).not.toBeInTheDocument();
+  });
+
+  it("clicking a switch control calls onPatch with the explicit non-default value", async () => {
+    const user = userEvent.setup();
+    const onPatch = vi.fn();
+    render(
+      <PolicyFieldTable
+        groups={[{ defs: [SWITCH_DEF] }]}
+        values={{ flag: false }}
+        onPatch={onPatch}
+      />,
+    );
+
+    await user.click(within(rowFor("policies.flag")).getByRole("switch"));
+
+    expect(onPatch).toHaveBeenCalledWith({ flag: true });
   });
 });
