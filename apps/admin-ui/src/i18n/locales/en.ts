@@ -1071,9 +1071,25 @@ export interface TranslationKeys {
     prompt_var_remove: string;
     prompt_var_add: string;
     section_output_schema: string;
-    section_output_schema_help: string;
-    output_schema_on_hint: string;
-    output_schema_off_hint: string;
+    output_schema: {
+      on_label: string;
+      hint_off: string;
+      col_name: string;
+      col_type: string;
+      col_required: string;
+      col_desc: string;
+      type_string: string;
+      type_number: string;
+      type_integer: string;
+      type_boolean: string;
+      type_array_string: string;
+      type_array_number: string;
+      add_field: string;
+      remove_field: string;
+      name_invalid: string;
+      complex_readonly: string;
+      off_confirm: string;
+    };
     inject_date_label: string;
     inject_date_hint: string;
     dynamic_context_note: string;
@@ -4024,12 +4040,27 @@ const en: TranslationKeys = {
     prompt_var_remove: "Remove",
     prompt_var_add: "Add variable",
     section_output_schema: "Structured output",
-    section_output_schema_help:
-      "Optional. Forces the agent's FINAL reply to be a JSON object that validates against a JSON Schema; intermediate tool-calling steps are never constrained.\nAuthored in the YAML view as spec.output_schema: { name, json_schema, strict }.\nExample: a json_schema requiring { \"answer\": string } makes every final reply machine-readable",
-    output_schema_on_hint:
-      "Enforced - final replies must validate against the '{{name}}' schema (spec.output_schema, editable in the YAML view).",
-    output_schema_off_hint:
-      "Not configured - final replies are free text. Add spec.output_schema in the YAML view to require a machine-readable JSON reply.",
+    output_schema: {
+      on_label: "Reply using a template",
+      hint_off:
+        "Off: free-text replies. Turn it on to have the agent reply with a fixed set of fields (e.g. a support ticket: title + severity + summary) - easier to wire up to other programs or spreadsheets.",
+      col_name: "Field name",
+      col_type: "Type",
+      col_required: "Required",
+      col_desc: "Description",
+      type_string: "Text",
+      type_number: "Number",
+      type_integer: "Integer",
+      type_boolean: "Yes/No",
+      type_array_string: "Text list",
+      type_array_number: "Number list",
+      add_field: "Add field",
+      remove_field: "Remove",
+      name_invalid:
+        "Field names must start with a letter or underscore, and contain only letters, numbers, and underscores.",
+      complex_readonly: "Configured (complex structure) - edit it in the YAML view.",
+      off_confirm: "Turning this off will clear the reply template you've defined. Continue?",
+    },
     inject_date_label: "Inject current date",
     inject_date_hint:
       "Writes today's date into the system prompt at build time (on by default, cache-stable per calendar day). When off, the agent doesn't know today's date - only suitable for agents whose behavior doesn't depend on the date.",

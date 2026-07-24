@@ -316,28 +316,38 @@ describe("FormView", () => {
     await waitFor(() => expect(catalog.loadModelCatalog).toHaveBeenCalled());
   });
 
-  // RT-1 (RT-ADR-4) — the structured-output block is YAML-authored; the
-  // prompt tab surfaces its state (configured name vs. not-configured hint).
-  it("shows the not-configured structured-output hint by default", () => {
+  // RT-1 (RT-ADR-4) / config-page redesign v2 Task 7 — the structured-output
+  // block is a flat field-list editor (OutputSchemaEditor) riding the prompt
+  // tab; its own test suite (widgets/__tests__/OutputSchemaEditor.test.tsx)
+  // covers the editor's behavior in depth — these two just confirm it's
+  // wired to the right formData/onChange here.
+  it("shows the output-schema switch off by default", () => {
     renderSection("prompt");
     const block = screen.getByTestId("af-output-schema");
-    expect(within(block).getByText(/spec\.output_schema/)).toBeInTheDocument();
+    expect(within(block).getByTestId("af-output-schema-switch")).not.toBeChecked();
   });
 
-  it("shows the schema name when output_schema is configured", () => {
+  it("shows the configured schema's fields when output_schema is set", () => {
     const seeded: AgentManifest = {
       ...SEED,
       spec: {
         ...SEED.spec,
         output_schema: {
           name: "review_verdict",
-          json_schema: { type: "object" },
+          json_schema: {
+            type: "object",
+            properties: { verdict: { type: "string" } },
+            additionalProperties: false,
+          },
         },
       },
     };
     renderSection("prompt", seeded);
     const block = screen.getByTestId("af-output-schema");
-    expect(within(block).getByText(/review_verdict/)).toBeInTheDocument();
+    expect(within(block).getByTestId("af-output-schema-switch")).toBeChecked();
+    expect(within(block).getByTestId("af-output-schema-name-0")).toHaveValue(
+      "verdict",
+    );
   });
 
   // inject_current_date (DynamicContextSpec) — default-on switch at the tail

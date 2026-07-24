@@ -1149,12 +1149,26 @@ const zhCN: TranslationKeys = {
     prompt_var_remove: "删除",
     prompt_var_add: "添加变量",
     section_output_schema: "结构化输出",
-    section_output_schema_help:
-      "可选。强制 Agent 的最终回复是符合 JSON Schema 的 JSON 对象;中间的工具调用轮次不受约束。\n在 YAML 视图里配置 spec.output_schema:{ name, json_schema, strict }。\n示例:json_schema 要求 { \"answer\": string },则每次最终回复都是机器可读的",
-    output_schema_on_hint:
-      "已启用——最终回复必须符合「{{name}}」schema(spec.output_schema,可在 YAML 视图编辑)。",
-    output_schema_off_hint:
-      "未配置——最终回复为自由文本。到 YAML 视图添加 spec.output_schema 可要求机器可读的 JSON 回复。",
+    output_schema: {
+      on_label: "按模板回复",
+      hint_off:
+        "关闭:自由文本回复。开启后可要求 Agent 按固定字段结构回复(如工单:标题+等级+摘要),对接程序或表格更方便。",
+      col_name: "字段名",
+      col_type: "类型",
+      col_required: "必填",
+      col_desc: "说明",
+      type_string: "文本",
+      type_number: "数字",
+      type_integer: "整数",
+      type_boolean: "是否",
+      type_array_string: "文本列表",
+      type_array_number: "数字列表",
+      add_field: "添加字段",
+      remove_field: "删除",
+      name_invalid: "字段名须以字母或下划线开头,只能含字母数字下划线",
+      complex_readonly: "已配置(复杂结构)——请到 YAML 视图编辑",
+      off_confirm: "关闭将清除已定义的回复模板,确定?",
+    },
     inject_date_label: "注入当前日期",
     inject_date_hint:
       "构建时把当天日期写进系统提示词(默认开,按日缓存稳定)。关闭后 Agent 不知道今天几号——仅适合与日期无关的 Agent。",

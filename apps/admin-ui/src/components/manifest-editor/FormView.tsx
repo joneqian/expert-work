@@ -37,7 +37,6 @@ import {
   readMainSupportsVision,
   readModel,
   readName,
-  readOutputSchemaName,
   readPromptJinja,
   readPromptVariables,
   readReflectionEvaluator,
@@ -60,6 +59,7 @@ import {
 } from "./form_model";
 import { FallbackChainEditor } from "./widgets/FallbackChainEditor";
 import { McpToolPicker, type McpPickerSource } from "./widgets/McpToolPicker";
+import { OutputSchemaEditor } from "./widgets/OutputSchemaEditor";
 import { PromptTemplateEditor } from "./widgets/PromptTemplateEditor";
 
 const { Text } = Typography;
@@ -147,7 +147,6 @@ export function FormView({
   }, []);
 
   const tools = readTools(formData);
-  const outputSchemaName = readOutputSchemaName(formData);
   // Stacked panes (the ``sections`` prop) already render a ``data-section-id``
   // sub-heading per section (see the final return below). Only suppress a
   // section's own ``<Heading>`` where it's a pure duplicate of that
@@ -356,23 +355,12 @@ export function FormView({
           </div>
         </section>
         <PromptVariablesEditor formData={formData} onChange={onChange} />
-        {/* Stream RT-1 (RT-ADR-4) — structured final reply. The JSON Schema
-            block is authored in the YAML view (a schema editor is out of the
-            curated form's scope); the form surfaces the state + help copy. */}
-        <section data-testid="af-output-schema" style={SECTION}>
-          <Heading>
-            {t("agent_form.section_output_schema")}
-            <FieldHelp
-              text={t("agent_form.section_output_schema_help")}
-              testId="af-output-schema"
-            />
-          </Heading>
-          <Text type="secondary">
-            {outputSchemaName
-              ? t("agent_form.output_schema_on_hint", { name: outputSchemaName })
-              : t("agent_form.output_schema_off_hint")}
-          </Text>
-        </section>
+        {/* Stream RT-1 (RT-ADR-4) — structured final reply. config-page
+            redesign v2 Task 7 replaced the former state-only hint block with
+            a flat field-list editor (falls back to a read-only notice for
+            hand-authored non-flat schemas — see OutputSchemaEditor's own doc
+            comment). */}
+        <OutputSchemaEditor formData={formData} onChange={onChange} />
         <div
           style={{
             display: "flex",
