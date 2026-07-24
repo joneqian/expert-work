@@ -231,7 +231,7 @@ export interface AgentManifest {
     extends?: string;
     // Stream K.K4 (Mini-ADR K-3) — per-agent LLM response cache opt-out
     // (CacheSpec). DISTINCT from ``model.cache_enabled`` (ModelFields,
-    // Anthropic prompt caching) — see ``ResponseCacheFields`` below. Backend
+    // Anthropic prompt caching) — see ``ObservabilityFields`` below. Backend
     // default_factory ⇒ absent block = defaults (enabled=true).
     cache?: { enabled?: boolean; [k: string]: unknown };
     [k: string]: unknown;
@@ -1583,37 +1583,65 @@ export function patchReflectionTuning(
   return patchSpec(m, {});
 }
 
-// ---- LLM response cache (spec.cache — Stream K.K4 / Mini-ADR K-3) ----
-// Per-agent opt-out of the orchestrator's LLM response cache (CacheSpec).
+// ---- observability group (spec.cache.enabled + policies.trajectory_recording
+// — config-page redesign v2, Task 8b erratum) ----
+// Curated "触发器与可观测" group over two independent locations: the LLM
+// response cache opt-out (CacheSpec, ``spec.cache`` — Stream K.K4 / Mini-ADR
+// K-3), and trajectory recording (``policies.trajectory_recording`` — Stream
+// L.L7: whether a finished run's full transcript gets serialized to object
+// storage for quality evaluation and future fine-tuning; a privacy-sensitive
+// agent should set this ``False`` to keep conversation content out of
+// non-WORM storage). Task 4 removed trajectory recording's curated toggle as
+// dead-opt-in; Task 8 found the field is actually read at run time
+// (``agent_spec.py``'s ``PolicySpec.trajectory_recording`` /
+// ``agent_factory.py``'s ``trajectory_enabled``), and this task (8b) restores
+// the toggle here.
+//
 // NOTE the naming trap: ``ModelFields.cache_enabled`` (``model.cache_enabled``)
-// is a DIFFERENT, pre-existing field — Anthropic prompt caching. This block is
-// the LLM RESPONSE cache (``spec.cache.enabled``); the two live at different
-// paths, are independently toggled, and must never be confused. Like
-// ``policies.memory_consolidation`` (``patchConsolidation``), ``spec.cache``
-// has a backend ``default_factory`` (an absent block ⇒ ``enabled: True``), so
-// it follows the same standard optional-block ``mergeBlock`` idiom: absent ≡
-// defaults, and an emptied block is dropped rather than kept as ``{}``
-// (dropping is harmless here — unlike the REQUIRED ``sandbox.network`` /
-// ``sandbox.filesystem`` blocks, or the presence-semantic ``memory.long_term``
-// / ``reflection`` blocks). Reader is RAW — no default substitution.
-export interface ResponseCacheFields {
+// is a DIFFERENT, pre-existing field — Anthropic prompt caching. This block's
+// ``responseCacheEnabled`` is the LLM RESPONSE cache (``spec.cache.enabled``);
+// the two live at different paths, are independently toggled, and must never
+// be confused. Both ``spec.cache`` and ``policies.trajectory_recording`` have
+// a backend ``default_factory``/default (an absent block ⇒ ``enabled: True``;
+// an absent key ⇒ ``trajectory_recording: True``), so both fields follow the
+// standard optional-block ``mergeBlock`` idiom: absent ≡ defaults, and an
+// emptied block is dropped rather than kept as ``{}`` (dropping is harmless
+// here — unlike the REQUIRED ``sandbox.network`` / ``sandbox.filesystem``
+// blocks, or the presence-semantic ``memory.long_term`` / ``reflection``
+// blocks). Readers are RAW — no default substitution. ``patchObservability``
+// only touches the block(s) whose fields are present in ``patch``, and
+// deletes a key whose patch value is ``undefined``.
+export interface ObservabilityFields {
   responseCacheEnabled?: boolean;
+  trajectoryRecording?: boolean;
 }
 
-export const readResponseCache = (m: unknown): ResponseCacheFields => ({
+export const readObservability = (m: unknown): ObservabilityFields => ({
   responseCacheEnabled: specOf(m).cache?.enabled,
+  trajectoryRecording: specOf(m).policies?.trajectory_recording,
 });
 
-export function patchResponseCache(
+export function patchObservability(
   m: unknown,
-  patch: Partial<ResponseCacheFields>,
+  patch: Partial<ObservabilityFields>,
 ): AgentManifest {
-  if (!("responseCacheEnabled" in patch)) return patchSpec(m, {});
-  const merged = mergeBlock(
-    specOf(m).cache as Record<string, unknown> | undefined,
-    { enabled: patch.responseCacheEnabled },
-  );
-  return patchSpec(m, { cache: merged });
+  const spec = specOf(m);
+  const updates: Record<string, unknown> = {};
+
+  if ("responseCacheEnabled" in patch) {
+    updates.cache = mergeBlock(
+      spec.cache as Record<string, unknown> | undefined,
+      { enabled: patch.responseCacheEnabled },
+    );
+  }
+
+  if ("trajectoryRecording" in patch) {
+    updates.policies = mergeBlock(spec.policies ?? undefined, {
+      trajectory_recording: patch.trajectoryRecording,
+    });
+  }
+
+  return patchSpec(m, updates);
 }
 
 // ---- run profile presets (config-page redesign v2 Task 6, cont'd) ----

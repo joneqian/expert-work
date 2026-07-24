@@ -92,8 +92,8 @@ import {
   setReflectionOn,
   readReflectionTuning,
   patchReflectionTuning,
-  readResponseCache,
-  patchResponseCache,
+  readObservability,
+  patchObservability,
 } from "../form_model";
 import type { AgentManifest } from "../form_model";
 
@@ -1889,23 +1889,24 @@ describe("reflection (spec.reflection — presence-semantic block)", () => {
   });
 });
 
-// ---- LLM response cache (spec.cache — Stream K.K4, DISTINCT from
+// ---- observability group (spec.cache — Stream K.K4, DISTINCT from
 // ModelFields.cache_enabled / model.cache_enabled, which is Anthropic prompt
-// caching) ----
-describe("response cache (spec.cache — LLM response cache opt-out, K.K4)", () => {
+// caching — plus policies.trajectory_recording, Stream L.L7, restored by
+// Task 8b) ----
+describe("observability (spec.cache LLM response cache opt-out + policies.trajectory_recording)", () => {
   it("responseCacheEnabled=false round-trips through YAML", () => {
     const m: AgentManifest = { spec: {} };
-    const next = patchResponseCache(m, { responseCacheEnabled: false });
+    const next = patchObservability(m, { responseCacheEnabled: false });
     const yaml = dumpYaml(next);
     expect(yaml).toContain("cache:");
     expect(yaml).toContain("enabled: false");
     const roundTripped = parse(yaml) as AgentManifest;
-    expect(readResponseCache(roundTripped).responseCacheEnabled).toBe(false);
+    expect(readObservability(roundTripped).responseCacheEnabled).toBe(false);
   });
 
   it("explicit undefined deletes enabled, dropping the cache block entirely", () => {
     const base: AgentManifest = { spec: { cache: { enabled: false } } };
-    const cleared = patchResponseCache(base, {
+    const cleared = patchObservability(base, {
       responseCacheEnabled: undefined,
     });
     expect(cleared.spec?.cache).toBeUndefined();
@@ -1917,19 +1918,19 @@ describe("response cache (spec.cache — LLM response cache opt-out, K.K4)", () 
     const base: AgentManifest = {
       spec: { cache: { custom_flag: true } },
     };
-    const next = patchResponseCache(base, { responseCacheEnabled: true });
+    const next = patchObservability(base, { responseCacheEnabled: true });
     expect(next.spec?.cache).toEqual({ custom_flag: true, enabled: true });
   });
 
   it("does not materialize cache when absent and the patch nets out empty", () => {
     const base: AgentManifest = { spec: {} };
-    const next = patchResponseCache(base, { responseCacheEnabled: undefined });
+    const next = patchObservability(base, { responseCacheEnabled: undefined });
     expect(next.spec?.cache).toBeUndefined();
   });
 
   it("an empty patch does not materialize cache at all", () => {
     const base: AgentManifest = { spec: {} };
-    const next = patchResponseCache(base, {});
+    const next = patchObservability(base, {});
     expect(next.spec?.cache).toBeUndefined();
   });
 
@@ -1940,7 +1941,7 @@ describe("response cache (spec.cache — LLM response cache opt-out, K.K4)", () 
         model: { provider: "anthropic", name: "claude-sonnet-4-6" },
       },
     };
-    const next = patchResponseCache(base, { responseCacheEnabled: false });
+    const next = patchObservability(base, { responseCacheEnabled: false });
     expect(next.spec?.description).toBe("an agent");
     expect(next.spec?.model).toEqual({
       provider: "anthropic",
@@ -1951,17 +1952,20 @@ describe("response cache (spec.cache — LLM response cache opt-out, K.K4)", () 
   it("does not mutate the input manifest", () => {
     const m: AgentManifest = { spec: { cache: { enabled: true } } };
     const snapshot = JSON.stringify(m);
-    patchResponseCache(m, { responseCacheEnabled: false });
+    patchObservability(m, { responseCacheEnabled: false });
     expect(JSON.stringify(m)).toBe(snapshot);
   });
 
-  it("readResponseCache returns undefined on an empty manifest (RAW — no default substitution)", () => {
-    expect(readResponseCache({})).toEqual({ responseCacheEnabled: undefined });
+  it("readObservability returns undefined on an empty manifest (RAW — no default substitution)", () => {
+    expect(readObservability({})).toEqual({
+      responseCacheEnabled: undefined,
+      trajectoryRecording: undefined,
+    });
   });
 
-  it("readResponseCache is RAW: a stored enabled:true is not collapsed away", () => {
+  it("readObservability is RAW: a stored enabled:true is not collapsed away", () => {
     expect(
-      readResponseCache({ spec: { cache: { enabled: true } } })
+      readObservability({ spec: { cache: { enabled: true } } })
         .responseCacheEnabled,
     ).toBe(true);
   });
@@ -1971,16 +1975,78 @@ describe("response cache (spec.cache — LLM response cache opt-out, K.K4)", () 
       spec: { model: { provider: "anthropic", name: "claude-sonnet-4-6" } },
     };
     m = setModel(m, { cache_enabled: false });
-    m = patchResponseCache(m, { responseCacheEnabled: false });
+    m = patchObservability(m, { responseCacheEnabled: false });
 
     expect(readModel(m).cache_enabled).toBe(false);
-    expect(readResponseCache(m).responseCacheEnabled).toBe(false);
+    expect(readObservability(m).responseCacheEnabled).toBe(false);
 
     const yaml = dumpYaml(m);
     const roundTripped = parse(yaml) as AgentManifest;
     expect(readModel(roundTripped).cache_enabled).toBe(false);
-    expect(readResponseCache(roundTripped).responseCacheEnabled).toBe(false);
+    expect(readObservability(roundTripped).responseCacheEnabled).toBe(false);
     expect(roundTripped.spec?.model?.cache_enabled).toBe(false);
     expect(roundTripped.spec?.cache?.enabled).toBe(false);
+  });
+
+  // ---- policies.trajectory_recording (Stream L.L7 — restored by Task 8b) ----
+  it("trajectoryRecording=false round-trips through YAML", () => {
+    const m: AgentManifest = { spec: {} };
+    const next = patchObservability(m, { trajectoryRecording: false });
+    const yaml = dumpYaml(next);
+    expect(yaml).toContain("trajectory_recording: false");
+    const roundTripped = parse(yaml) as AgentManifest;
+    expect(readObservability(roundTripped).trajectoryRecording).toBe(false);
+  });
+
+  it("explicit undefined deletes trajectory_recording, dropping an otherwise-empty policies block", () => {
+    const base: AgentManifest = {
+      spec: { policies: { trajectory_recording: false } },
+    };
+    const cleared = patchObservability(base, {
+      trajectoryRecording: undefined,
+    });
+    expect(cleared.spec?.policies).toBeUndefined();
+    const yaml = dumpYaml(cleared);
+    expect(yaml).not.toContain("trajectory_recording");
+  });
+
+  it("preserves sibling policies keys when patching trajectory_recording", () => {
+    const base: AgentManifest = {
+      spec: { policies: { approval_timeout_s: 3600 } },
+    };
+    const next = patchObservability(base, { trajectoryRecording: false });
+    expect(next.spec?.policies).toEqual({
+      approval_timeout_s: 3600,
+      trajectory_recording: false,
+    });
+  });
+
+  it("preserves sibling policies keys when CLEARING trajectory_recording", () => {
+    const base: AgentManifest = {
+      spec: {
+        policies: { approval_timeout_s: 3600, trajectory_recording: false },
+      },
+    };
+    const cleared = patchObservability(base, { trajectoryRecording: undefined });
+    expect(cleared.spec?.policies).toEqual({ approval_timeout_s: 3600 });
+  });
+
+  it("does not mutate the input manifest when patching trajectory_recording", () => {
+    const m: AgentManifest = {
+      spec: { policies: { trajectory_recording: true } },
+    };
+    const snapshot = JSON.stringify(m);
+    patchObservability(m, { trajectoryRecording: false });
+    expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it("cache and trajectory_recording patch independently on the same manifest", () => {
+    let m: AgentManifest = { spec: {} };
+    m = patchObservability(m, { responseCacheEnabled: false });
+    m = patchObservability(m, { trajectoryRecording: false });
+    expect(readObservability(m)).toEqual({
+      responseCacheEnabled: false,
+      trajectoryRecording: false,
+    });
   });
 });

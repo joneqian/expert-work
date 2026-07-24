@@ -31,10 +31,10 @@
  *   FormView above them.
  *
  * Trajectory recording (``policies.trajectory_recording``) — previously the
- * other half of governance's "Advanced" panel — is NOT migrated here: its
- * curated toggle is removed outright (dead-opt-in — see form_model.ts's
- * read/setTrajectoryRecording removal). The raw field is still YAML-
- * authorable; there's just no form control for it anymore.
+ * other half of governance's "Advanced" panel — is NOT migrated here: Task 4
+ * removed its curated toggle as (mistaken) dead-opt-in; Task 8b restored it,
+ * but in ``ObservabilitySection`` (it's a run-archiving concern, not a
+ * security/governance one), not here.
  */
 import { Alert, Checkbox, InputNumber, Select, Switch, Tabs, Typography } from "antd";
 import { useTranslation } from "react-i18next";

@@ -875,16 +875,20 @@ export interface TranslationKeys {
     yaml_note: string;
   };
   // Task 2 (PR7) — "Triggers & Observability" group (ObservabilitySection).
-  // One live field (spec.cache.enabled, the per-agent LLM response cache
-  // opt-out) plus two note blocks: manifest ``triggers`` declared but not
-  // wired up (the trigger-management API is the real path), and
-  // trace/log_level/redact_fields (plus policies.trajectory_recording, whose
-  // curated toggle config-page redesign v2 Task 4 removed — it's now a
-  // YAML-only field) declarative-only — validated but not read at runtime.
+  // Two live fields (spec.cache.enabled, the per-agent LLM response cache
+  // opt-out; policies.trajectory_recording, whether a finished run's full
+  // transcript is archived for quality evaluation — Task 4 wrongly removed
+  // its toggle as declarative-only, Task 8b restored it) plus two note
+  // blocks: manifest ``triggers`` declared but not wired up (the
+  // trigger-management API is the real path), and trace/log_level/
+  // redact_fields declarative-only — validated but not read at runtime.
   observability_group: {
     resp_cache_label: string;
     resp_cache_brief: string;
     resp_cache_impact: string;
+    traj_rec_label: string;
+    traj_rec_brief: string;
+    traj_rec_impact: string;
     triggers_note: string;
     declarative_note: string;
   };
@@ -3758,10 +3762,14 @@ const en: TranslationKeys = {
     resp_cache_brief: "Reuses the answer to a question it's seen before",
     resp_cache_impact:
       "A repeated request reuses last time's full answer instead of calling the model again — cheaper and faster. A cache hit skips the model call entirely — no provider selection, no fallback chain, none of it.\nTurn this off for an agent whose prompt has time-sensitive content (today's date, live data, etc.), or it may hand back a stale answer.\nThis is a different thing from the Model & Routing group's 'prompt caching' (Anthropic prompt caching): that one only saves on input tokens, while this switch reuses the entire answer as-is.",
+    traj_rec_label: "Run archiving",
+    traj_rec_brief: "Archives full runs for quality review",
+    traj_rec_impact:
+      "When on, every run's full transcript — the user's messages, the agent's replies, and its tool calls — gets archived once the run finishes; the platform uses that archive for quality evaluation, and it may also feed future model improvements.\nOff = conversation content never gets archived, which fits agents that handle sensitive information.\nExample: a support agent that touches private customer data turns this off, so run content stays only in the session log and never enters the analysis archive.",
     triggers_note:
       "Manage scheduled tasks from the Triggers page.\nThe manifest's triggers field is not wired up yet — cron or webhook triggers written there have no effect; create them through trigger management (the /v1/triggers API) instead, since that's the path that actually runs.",
     declarative_note:
-      "observability's trace / log_level / redact_fields fields are currently declarative — they don't error when set, but the system never actually reads them at run time. Tracing is controlled by the platform's own configuration, the log level comes from each service's deployment environment, and PII redaction is handled entirely by the platform's defense chain — none of that depends on these fields.\nOne more thing worth knowing: trajectory recording (policies.trajectory_recording — whether a finished run gets saved for later review or training) is a real, functional field, unlike the ones above; this page just doesn't have a dedicated toggle for it yet (it defaults to on). To turn it off, edit that field directly in the YAML view.",
+      "observability's trace / log_level / redact_fields fields are currently declarative — they don't error when set, but the system never actually reads them at run time. Tracing is controlled by the platform's own configuration, the log level comes from each service's deployment environment, and PII redaction is handled entirely by the platform's defense chain — none of that depends on these fields.",
   },
   model_select: {
     provider_label: "Provider",
