@@ -1,100 +1,97 @@
-# Task 7 报告 —— retention job 三个新 pass + settings + 接线
+# Task 7 报告 —— mcp_servers 删除清密文 + oauth disconnect 真删 + 审计标签
 
 ## 做了什么
 
-1. **worktree 对齐**:执行 `git merge --ff-only fix-deletion-hygiene-pr1`,从
-   `69181a73` 快进合并到 `0edb16bb`(纯 fast-forward,无冲突),拿到波 1 T1-T6
-   打好的三个 store 地基(`MemoryStore.hard_delete_expired`、
-   `UserWorkspaceStore.list_archived_expired`/`hard_delete`/`list_pending_archive`、
-   `TenantUserStore.hard_delete_deactivated`)以及 `.superpowers/sdd/task-7-brief.md`。
+1. **worktree 对齐**:执行 `git merge --ff-only fix-deletion-hygiene-pr2`,从
+   `621c53f9` 快进合并到 `b630cf7a`(纯 fast-forward,无冲突),拿到 T2
+   `SecretStore.delete`(`LocalDevSecretStore.delete` / `AliyunKmsSecretStore.delete`
+   / `SqlEncryptedSecretStore.delete`)以及 `.superpowers/sdd/task-7-brief.md`。
 
-2. **`ObjectStore.delete` 真实行为核查**(brief 明确要求实现前先查):
-   `grep -n "async def delete" packages/expert-work-runtime/src/expert_work/runtime/storage/*.py`
-   + 读三处实现(`base.py` Protocol docstring / `memory.py` / `s3_compatible.py`)。
-   结论:**`delete()` 对缺失 key 是幂等的,从不抛异常**——`InMemoryObjectStore.delete`
-   用 `dict.pop(key, None)`,`S3CompatibleObjectStore.delete` 靠 S3 `DeleteObject`
-   本身对不存在的 key 静默成功。因此 brief 伪代码里的
-   `except (KeyError, FileNotFoundError): keys_ok += 1` 分支是死代码,按 brief
-   指示的"若它本身静默容忍缺失,去掉 KeyError 分支"删掉了这条,只保留
-   `except Exception` 兜住真实失败(权限/网络/后端错误)。
+2. **`mcp_servers.py` DELETE 端点**(`services/control-plane/src/control_plane/api/mcp_servers.py:987`):
+   - 注入 `secret_store: Annotated[SecretStore, Depends(_get_secret_store)]`(该
+     依赖已存在,POST/PATCH/GET 均用同一 accessor)。
+   - 行删除后新增 `(c2)` 步骤:遍历 `record.token_secret_ref` /
+     `record.custom_headers_ref`,存在即 `parse_secret_ref` 取名后
+     `secret_store.delete(name)`;`try/except Exception` 包裹 + `logger.warning`,
+     不阻断主删除流程(best-effort,与 disconnect 同款取舍)。该域全平台代管
+     paste-only(`CreateMcpServerRequest.token` 是 `SecretStr`,从无 ref-mode
+     外部引用),不存在"误删外部 KMS 条目"顾虑。
 
-3. **`settings.py`** 加三个 90 天 knob(`memory_hard_delete_grace_days` /
-   `workspace_archive_retention_days` / `tenant_user_hard_delete_grace_days`,
-   均 `Field(default=90, ge=1, le=3650)`),照 `artifact_retention_days` 先例。
+3. **`mcp_oauth_api.py` disconnect 端点**(`:406-449`):
+   - `put(parse_secret_ref(ref), "")` 覆写循环改为
+     `secret_store.delete(parse_secret_ref(ref))`;保留原有 `try/except + logger.warning`
+     结构,日志键从 `disconnect_secret_overwrite_failed` 改
+     `disconnect_secret_delete_failed`(语义对齐真删)。
+   - 两处 docstring/注释同步("no delete" → 已有 delete)。
 
-4. **`job.py`**:
-   - `CleanupReport` 加 6 个新字段(`memory_hard_deleted` /
-     `workspaces_hard_deleted` / `workspace_archives_removed` /
-     `workspace_archives_failed` / `workspaces_pending_archive` /
-     `tenant_users_hard_deleted`),全部默认 0。
-   - 构造参数加 `memory_store` / `memory_hard_delete_grace_days=90`、
-     `workspace_store` / `workspace_archive_retention_days=90`、
-     `tenant_user_store` / `tenant_user_hard_delete_grace_days=90`(均可选,
-     向后兼容既有调用),各自 `< 1` 时 `raise ValueError`(照
-     `artifact_hard_delete_grace_days` 先例逐条加校验)。
-   - `run_once` 依次追加 `_sweep_memory` / `_sweep_tenant_users` /
-     `_sweep_workspaces` 三个 pass,结果并入 `CleanupReport`。
-   - `_sweep_memory` / `_sweep_tenant_users`:store 未接线时 0,否则按
-     `now - grace_days` 截止时间调用对应 `hard_delete_*` 方法。
-   - `_sweep_workspaces`:`workspace_store` 或 `object_store` 缺失时
-     `(0, 0, 0, 0)`;`list_pending_archive()` 过滤出 `deleted_at < cutoff`
-     的卡住行只计入 `pending`(不碰);`list_archived_expired()` 逐行删
-     ObjectStore key(成功或"已不存在"都算 `keys_ok`,因为 `delete()` 本身
-     幂等)才 `hard_delete` 该行;真实删除异常 → `keys_failed` 计数、行保留
-     (与 image pass 取舍相反——行是找回 key 的唯一线索,留给下次夜扫重试)。
+4. **审计 `resource_type` 修正**(brief 指定的两处,`action` 枚举不动):
+   - OAuth 回调(`:375-385`):`"tenant_mcp_server"` → `"mcp_oauth_connection"`。
+   - disconnect(`:438-448`):同上。
+   - **`resource_type` 是 `Literal` 类型**(`control_plane.audit.ResourceType` +
+     protocol 侧镜像 `expert_work.protocol.audit.ResourceType`),`"mcp_oauth_connection"`
+     此前不在两个 Literal 里——brief 未提及这一步,但不加的话是类型错误(即使
+     Python 运行时 Literal 不强校验,也违反仓库
+     `[memory:audit-literal-drift]` 双侧同步约定)。已在两处 Literal 末尾各加
+     一条 `"mcp_oauth_connection"`,注释按仓库既有格式标注来源 + drift 提示。
 
-5. **`main.py`**:`SqlMemoryStore` / `SqlTenantUserStore` / `SqlUserWorkspaceStore`
-   三个无条件构造接线(照 `artifact_store` / `approval_store` 先例,均
-   metadata-only;workspace pass 自身仍靠 `object_store` 门控——`memory` 后端下
-   `object_store=None`,workspace pass 保持 no-op),knob 透传,done 日志加 6 个
-   新字段,并仿照既有 `image_object_keys_failed` 告警加了一条
-   `workspace_archives_failed` 告警(对称场景,同样值得 SRE 关注)。
+## 测试(TDD 红→绿)
 
-6. **`test_job_unit.py`** 追加(先读文件学会用 in-memory store + `model_copy`
-   回填时间戳的既有风格,复用 `test_in_memory_memory_store.py` /
-   `test_in_memory_tenant_user_store.py` / `test_in_memory_user_workspace_store.py`
-   里 Task 1/3/4/5 已验证过的 fixture 写法):
-   - 3 个新构造校验测试(三个 grace-days 参数 `<1` 报错)。
-   - `test_cleanup_report_default_is_all_zero` 补 6 个新字段断言。
-   - memory pass:100 天软删行被清 / 10 天软删行保留(同一测试断言两头) +
-     store 未接线时 0。
-   - tenant_user pass:同构断言(100 天清 / 10 天保留 / 未接线 0)。
-   - workspace pass 5 个场景:已归档过期行 key 删 + 行硬删;key 删失败
-     (mock `delete` 抛 `RuntimeError`)→ 行保留 + `keys_failed=1`;key 已不存在
-     (从不 `put` 进 object_store)→ 视为成功、行照删;未归档卡住行 → 只进
-     `pending`,行不动;`object_store` 缺失时 `(0,0,0,0)`。
+- `services/control-plane/tests/test_mcp_servers_api.py`:新增
+  `test_delete_removes_token_and_headers_secrets`——创建带 `auth_type=bearer` +
+  `token` + `custom_headers` 的 server,删除前确认两个密文都存在,删除后两个
+  `secret_store.get(...)` 均 `raises SecretNotFoundError`。无 ref 的删除路径
+  已被既有 `test_delete_succeeds_when_unreferenced`(`auth_type=none`,无 token/
+  headers)覆盖,未新增重复用例。
+- `services/control-plane/tests/test_mcp_oauth_api.py`:
+  - `test_disconnect_revokes_and_removes`:断言从 `revoked == ""`(覆写空串,锁
+    旧行为)改为 `pytest.raises(SecretNotFoundError)`(锁新行为——这正是修
+    bug);新增断言用 `app.state.audit_logger.query(AuditQuery(...), actor_id=...)`
+    过滤 `details["source"] == "oauth_disconnect"` 的条目,`resource_type ==
+    "mcp_oauth_connection"`。
+  - `test_full_oauth_roundtrip`:同样追加 callback 审计条目的 `resource_type`
+    断言(过滤 `source == "oauth_callback"`)。
+  - 两个新 import:`AuditQuery`(`expert_work.protocol`)、`SecretNotFoundError`
+    (`expert_work.runtime.secret_store`)。
+- **红态验证**:`git stash` 掉 4 个 src 文件(保留测试改动)单独跑新/改测试,
+  确认 `test_delete_removes_token_and_headers_secrets` 失败(`DID NOT RAISE
+  SecretNotFoundError`),`stash pop` 恢复实现后重跑转绿。
 
 ## 验证
 
 ```
-uv run pytest services/retention-cleanup-job/tests/test_job_unit.py -x -q
-# 26 passed(先跑纯 unit,含全部新增用例)
+uv run pytest services/control-plane/tests/test_mcp_servers_api.py \
+  services/control-plane/tests/test_mcp_oauth_api.py \
+  services/control-plane/tests/test_mcp_oauth.py \
+  services/control-plane/tests/test_audit_mcp_server_types.py -q
+# 72 passed
 
-export DOCKER_HOST=unix:///Users/mac/.docker/run/docker.sock
-uv run pytest services/retention-cleanup-job/tests -x -q
-# 31 passed(26 unit + 5 integration,integration 用例未改动,回归确认三个新
-# pass 未破坏既有 audit/event/jwt 集成测试)
+uv run pytest services/control-plane/tests/ -k "audit" -q
+# 88 passed, 1975 deselected（含 control-plane 全量 audit 相关回归，两处 Literal
+# 新增未破坏任何既有断言）
 
-uv run ruff check services/retention-cleanup-job
-# 初次报 1 个 S101(workspace pass 里的 `assert ws.archived_object_key is not None`),
-# 加 `# noqa: S101` 注释(照仓库既有 `tenant_user/sql.py:79` 等多处先例)后全绿。
+uv run pytest packages/expert-work-protocol/tests/test_audit_actions.py -q
+# 2 passed
 
-uv run ruff format --check services/retention-cleanup-job
-# 7 files already formatted
+uv run ruff check services/control-plane packages/expert-work-protocol
+# All checks passed!
 
-uv run mypy packages services/audit-backup-worker/src services/billing-rollup-job/src \
-  services/event-log-archive-job/src services/orchestrator/src services/retention-cleanup-job/src
-# Success: no issues found in 772 source files(CI 同款 mypy 范围,.github/workflows/ci.yml:75)
+uv run ruff format --check <6 个改动文件>
+# 6 files already formatted
+
+uv run mypy packages
+# Success: no issues found in 672 source files
+# （services/control-plane 不在 CI mypy 范围内，见 .github/workflows/ci.yml:75
+#   与 [memory:ci-mypy-scans-tests] 同款结论，未额外跑）
 ```
 
 ## Concerns
 
-- 无阻塞项。`ObjectStore.delete` 幂等这条核查结果与 brief 的假设分支不一致
-  (brief 伪代码写了 `except (KeyError, FileNotFoundError)`),已按 brief 自己的
-  兜底指示("若它本身静默容忍缺失,去掉 KeyError 分支,勿写死代码")删除该分支,
-  测试改用"从不 `put` 该 key 就调 `delete`"来验证"key 已不存在→视为成功"这条
-  语义,而不是 mock 抛 `KeyError`。
-- `workspace_archives_failed` 告警是新增的(brief 没有明确要求这一行日志),
-  参照对称的 `image_object_keys_failed` 告警补齐,同一 concern 级别(ObjectStore
-  失败需要 SRE 感知);如果这不在期望范围内,是唯一一处超出 brief 字面要求的
-  微小扩展,可按需去掉。
+- 无阻塞项。
+- brief 字面只列了两处 `resource_type` 字面量替换，未提及 `ResourceType`
+  Literal 定义本身需要扩容——已按仓库 `[memory:audit-literal-drift]` 约定的
+  "control-plane 侧 + protocol 侧必须同步" 规则补齐两处，属于让改动类型正确
+  的必要配套，非范围蔓延。
+- `mcp_oauth_api.py` disconnect 的密文清理与 `mcp_servers.py` 一样是
+  best-effort(`try/except Exception` + `logger.warning`），与 spec §B5/§错误处理
+  一致；未额外加 metrics/告警（brief 未要求，且该端点无先例告警可比照，不同于
+  PR1 retention job 的 `image_object_keys_failed` 场景）。

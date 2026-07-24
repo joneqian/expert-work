@@ -21,7 +21,7 @@ from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
 from expert_work.common.lifecycle import Lifecycle
 from expert_work.protocol import McpConnectorCatalogUpsert, TenantConfigPatch
-from expert_work.runtime.secret_store import parse_secret_ref
+from expert_work.runtime.secret_store import SecretNotFoundError, parse_secret_ref
 from orchestrator.tools.mcp import MCPToolDef
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -355,6 +355,46 @@ async def test_post_and_delete_invalidate_tenant_mcp_cache(
 
     assert pool_spy.invalidated.count(tenant_id) == 2
     assert rt_spy.invalidated.count(tenant_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_token_and_headers_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DELETE clears both the token and custom_headers secret-store blobs.
+
+    This domain is paste-only (no ref-mode secrets), so every ref on the row
+    is platform-managed and safe to delete outright.
+    """
+    app, admin_headers, tenant_id = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        create_resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "github",
+                "transport": "streamable_http",
+                "url": "https://mcp.example.com/mcp",
+                "auth_type": "bearer",
+                "token": "ghp_REALTOKEN",
+                "custom_headers": {"X-Org": "acme"},
+                "timeout_s": 30.0,
+            },
+            headers=admin_headers,
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        token_name = f"expert-work/tenant/{tenant_id}/mcp/github/token"
+        headers_name = f"expert-work/tenant/{tenant_id}/mcp/github/headers"
+        # Sanity: both secrets exist before delete.
+        assert await app.state.secret_store.get(token_name) == "ghp_REALTOKEN"  # type: ignore[attr-defined]
+        await app.state.secret_store.get(headers_name)  # type: ignore[attr-defined]  # does not raise
+
+        delete_resp = await client.delete("/v1/mcp-servers/github", headers=admin_headers)
+        assert delete_resp.status_code == 204
+
+    with pytest.raises(SecretNotFoundError):
+        await app.state.secret_store.get(token_name)  # type: ignore[attr-defined]
+    with pytest.raises(SecretNotFoundError):
+        await app.state.secret_store.get(headers_name)  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

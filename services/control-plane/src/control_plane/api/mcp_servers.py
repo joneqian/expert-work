@@ -993,6 +993,7 @@ def build_mcp_servers_router() -> APIRouter:
         agent_spec_store: Annotated[object, Depends(_get_agent_spec_store)],
         pool_service: Annotated[object, Depends(_get_tenant_mcp_pool_service)],
         agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
     ) -> None:
         tenant_id = principal.tenant_id
         # (a) Resolve row first so we have the UUID for the audit record and a clean 404.
@@ -1027,6 +1028,16 @@ def build_mcp_servers_router() -> APIRouter:
                 )
         # (c) Delete the row.
         await store.delete(tenant_id=tenant_id, name=name)
+        # (c2) Best-effort secret cleanup. This domain is paste-only (no ref-mode
+        # secrets — CreateMcpServerRequest.token is a SecretStr, never a caller-
+        # supplied secret:// ref), so any ref present is fully platform-managed
+        # and safe to delete outright.
+        for ref in (record.token_secret_ref, record.custom_headers_ref):
+            if ref:
+                try:
+                    await secret_store.delete(parse_secret_ref(ref))
+                except Exception:
+                    logger.warning("mcp_servers.delete_secret_failed", extra={"name": name})
         # (d) Audit with the row UUID (consistent with POST/PATCH), name in details.
         await emit(
             audit,

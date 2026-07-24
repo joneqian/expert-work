@@ -16,10 +16,12 @@ from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
 from expert_work.common.lifecycle import Lifecycle
 from expert_work.protocol import (
+    AuditQuery,
     McpConnectorAuthSchema,
     McpConnectorCatalogUpsert,
     TenantConfigPatch,
 )
+from expert_work.runtime.secret_store import SecretNotFoundError
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -177,6 +179,14 @@ async def test_full_oauth_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
         final.access_token_ref.removeprefix("secret://")
     )
     assert stored == "AT"
+    # Audit resource_type is the actual resource (mcp_oauth_connection), not
+    # the tenant_mcp_server mislabel.
+    page = await app.state.audit_logger.query(  # type: ignore[attr-defined]
+        AuditQuery(tenant_id=tenant_id, limit=1000), actor_id="test-harness"
+    )
+    callback_entries = [e for e in page.entries if e.details.get("source") == "oauth_callback"]
+    assert len(callback_entries) == 1
+    assert callback_entries[0].resource_type == "mcp_oauth_connection"
 
 
 @pytest.mark.asyncio
@@ -288,10 +298,18 @@ async def test_disconnect_revokes_and_removes(monkeypatch: pytest.MonkeyPatch) -
         tenant_id=tenant_id, user_id=user_id, catalog_id=cat_id
     )
     assert gone is None
-    # Token overwritten (best-effort revoke).
+    # Token secret is truly deleted (not overwritten with an empty string).
     assert access_ref is not None
-    revoked = await app.state.secret_store.get(access_ref.removeprefix("secret://"))  # type: ignore[attr-defined]
-    assert revoked == ""
+    with pytest.raises(SecretNotFoundError):
+        await app.state.secret_store.get(access_ref.removeprefix("secret://"))  # type: ignore[attr-defined]
+    # Audit resource_type is the actual resource (mcp_oauth_connection), not
+    # the tenant_mcp_server mislabel.
+    page = await app.state.audit_logger.query(  # type: ignore[attr-defined]
+        AuditQuery(tenant_id=tenant_id, limit=1000), actor_id="test-harness"
+    )
+    disconnect_entries = [e for e in page.entries if e.details.get("source") == "oauth_disconnect"]
+    assert len(disconnect_entries) == 1
+    assert disconnect_entries[0].resource_type == "mcp_oauth_connection"
 
 
 @pytest.mark.asyncio
