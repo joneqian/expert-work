@@ -1534,3 +1534,104 @@ async def test_sql_renew_review_none_clears_window(sql_store: SqlStoreFixture) -
         assert row.expected_valid_days is None
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# PR1 Task 1 — hard_delete_expired() retention sweep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_expired_only_reaps_old_soft_deleted(
+    sql_store: SqlStoreFixture,
+) -> None:
+    """Only rows soft-deleted before the cutoff are physically removed —
+    an active row and a recently soft-deleted row are both left alone
+    (the retention window has not closed for the latter yet)."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        active = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="active")
+        old = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="old")
+        recent = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="recent")
+        await store.write([active, old, recent])
+
+        assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=old.id)
+        assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=recent.id)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE memory_item SET deleted_at = now() - interval '100 days' WHERE id = :id"
+                ),
+                {"id": old.id},
+            )
+            await conn.execute(
+                text(
+                    "UPDATE memory_item SET deleted_at = now() - interval '10 days' WHERE id = :id"
+                ),
+                {"id": recent.id},
+            )
+
+        cutoff = datetime.now(UTC) - timedelta(days=90)
+        assert await store.hard_delete_expired(before=cutoff, limit=100) == 1
+
+        async with engine.connect() as conn:
+            remaining_ids = (
+                (
+                    await conn.execute(
+                        text("SELECT id FROM memory_item WHERE tenant_id = :t AND user_id = :u"),
+                        {"t": tenant, "u": user},
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert set(remaining_ids) == {active.id, recent.id}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_expired_respects_limit(sql_store: SqlStoreFixture) -> None:
+    """Two rows are both past the cutoff; ``limit=1`` only physically
+    removes the oldest one (``deleted_at`` ascending)."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        first = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="first")
+        second = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="second")
+        await store.write([first, second])
+        assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=first.id)
+        assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=second.id)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE memory_item SET deleted_at = now() - interval '100 days' WHERE id = :id"
+                ),
+                {"id": first.id},
+            )
+            await conn.execute(
+                text(
+                    "UPDATE memory_item SET deleted_at = now() - interval '95 days' WHERE id = :id"
+                ),
+                {"id": second.id},
+            )
+
+        cutoff = datetime.now(UTC) - timedelta(days=90)
+        assert await store.hard_delete_expired(before=cutoff, limit=1) == 1
+
+        async with engine.connect() as conn:
+            remaining_ids = (
+                (
+                    await conn.execute(
+                        text("SELECT id FROM memory_item WHERE tenant_id = :t AND user_id = :u"),
+                        {"t": tenant, "u": user},
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        # The older row (100 days) is reaped first; the 95-day row survives.
+        assert list(remaining_ids) == [second.id]
+    finally:
+        await engine.dispose()

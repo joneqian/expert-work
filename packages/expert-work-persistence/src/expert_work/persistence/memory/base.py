@@ -218,6 +218,18 @@ class MemoryStore(abc.ABC):
         or user's memories. The rows are KEPT (recoverable within the retention
         window); a later retention sweep hard-deletes them."""
 
+    @abc.abstractmethod
+    async def hard_delete_expired(self, *, before: datetime, limit: int = 1000) -> int:
+        """PR1 Task 1 — retention job: physically DELETE soft-deleted rows
+        whose ``deleted_at`` is older than ``before``.
+
+        Cross-tenant: NO ``(tenant_id, user_id)`` predicate — unlike every
+        other method on this interface, this is the platform-wide retention
+        sweep's own method (consumed by the ``retention-cleanup-job``), not
+        a per-tenant repository call. Deletes at most ``limit`` rows, oldest
+        ``deleted_at`` first, and returns the number of rows actually
+        removed. Live rows (``deleted_at IS NULL``) are never touched."""
+
     # ------------------------------------------------------------------
     # Capability Uplift Sprint #7 — MemoryConsolidator interface.
     # Mini-ADRs U-33 / U-34 / U-37 / U-40. The control-plane

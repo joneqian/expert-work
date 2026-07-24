@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, and_, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -582,6 +582,22 @@ class SqlMemoryStore(MemoryStore):
             )
             .values(deleted_at=now)
         )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def hard_delete_expired(self, *, before: datetime, limit: int = 1000) -> int:
+        subq = (
+            select(MemoryItemRow.id)
+            .where(
+                MemoryItemRow.deleted_at.is_not(None),
+                MemoryItemRow.deleted_at < before,
+            )
+            .order_by(MemoryItemRow.deleted_at.asc())
+            .limit(limit)
+        )
+        stmt = delete(MemoryItemRow).where(MemoryItemRow.id.in_(subq))
         async with self._sf() as session:
             result = await session.execute(stmt)
             await session.commit()
