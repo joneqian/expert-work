@@ -493,7 +493,6 @@ def build_tenant_users_router() -> APIRouter:
         # page revoke uses). A viewer / operator gets a 403 here.
         principal: Annotated[Principal, Depends(require("user", "write"))],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
-        members: Annotated[TenantMemberStore | None, Depends(_get_member_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         # A user belongs to one tenant — a concrete id lets a system_admin drill
         # in; the "*" cross-tenant scope is rejected (a purge is per-tenant).
@@ -510,6 +509,12 @@ def build_tenant_users_router() -> APIRouter:
         ``tenant_user`` row. Best-effort per step + idempotent — the returned
         summary carries per-store counts and any step that failed; re-running is
         a safe no-op that retries the failures.
+
+        Data-only, for *any* user in the tenant — an external end-user, an
+        employee (console member), or the caller purging themself: purging
+        never touches ``tenant_member`` / Keycloak / role bindings, so it
+        cannot revoke console access. Deleting an employee's *account* stays a
+        separate flow on the members page.
         """
         trace_id = current_trace_id_hex()
         scope = await ensure_tenant_scope(
@@ -534,25 +539,6 @@ def build_tenant_users_router() -> APIRouter:
             user = await users.get(user_id, tenant_id=target)
             if user is None:
                 raise HTTPException(status_code=404, detail="user not found")
-
-            # Refuse to purge an employee here. An employee's tenant_user is
-            # linked to a tenant_member (back-filled subject_id); this data-only
-            # entry would leave their console membership, role bindings and
-            # Keycloak account intact — a returning employee would come back with
-            # full access. Employees are purged from the members page, which
-            # revokes those too. (The members-page flow calls purge_user directly,
-            # past this endpoint-level guard.)
-            if members is not None:
-                member = await members.get_by_subject_id(tenant_id=target, subject_id=user_id)
-                if member is not None:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=(
-                            "this user is a console member (employee); purge "
-                            "employees from the members page, which also revokes "
-                            "their roles and Keycloak account"
-                        ),
-                    )
 
             summary = await purge_user(
                 tenant_id=target,

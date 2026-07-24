@@ -6,7 +6,7 @@
  * mutations threading the surrogate userId. Auth + tenant-scope contexts
  * are mocked to an admin; each pane SDK is stubbed with vi.spyOn.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "antd";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -22,9 +22,17 @@ import { UserProfile } from "../UserProfile";
 import type { MemoryItem } from "../../api/memory";
 import type { PurgeSummary } from "../../api/users";
 
+// A non-matching default — the self-purge test below points this at the
+// rendered target's subject_id ("ext-alice") to exercise the isSelf branch.
+let mockIdentitySubject = "someone-else";
 vi.mock("../../auth/AuthContext", () => ({
   useAuth: () => ({
-    identity: { isSystemAdmin: false, roles: ["admin"], serverResolved: true },
+    identity: {
+      isSystemAdmin: false,
+      roles: ["admin"],
+      serverResolved: true,
+      subject: mockIdentitySubject,
+    },
   }),
 }));
 vi.mock("../../tenant/TenantScopeContext", () => ({
@@ -96,10 +104,13 @@ const OK_SUMMARY: PurgeSummary = {
   ok: true,
 };
 
-function renderPage() {
+/** ``navState`` mirrors ``Users.tsx``'s row-click state (eg. ``isMember``). */
+function renderPage(navState?: { isMember?: boolean }) {
   return render(
     <App>
-      <MemoryRouter initialEntries={[`/users/${USER_ID}`]}>
+      <MemoryRouter
+        initialEntries={[{ pathname: `/users/${USER_ID}`, state: navState }]}
+      >
         <Routes>
           <Route path="/users/:userId" element={<UserProfile />} />
           {/* Purge navigates back here on success. */}
@@ -110,6 +121,9 @@ function renderPage() {
   );
 }
 
+beforeEach(() => {
+  mockIdentitySubject = "someone-else";
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("UserProfile", () => {
@@ -189,6 +203,8 @@ describe("UserProfile", () => {
     await user.click(screen.getByTestId("user-purge-btn"));
     const ok = await screen.findByTestId("purge-confirm-ok");
     expect(ok).toBeDisabled(); // armed only on an exact subject_id match
+    // The caller ("someone-else") isn't the target ("ext-alice") — no self warning.
+    expect(screen.queryByTestId("purge-self-warning")).not.toBeInTheDocument();
 
     const input = screen.getByTestId("purge-confirm-input");
     await user.type(input, "wrong");
@@ -224,7 +240,10 @@ describe("UserProfile", () => {
     expect(screen.getByTestId("purge-confirm-input")).toBeInTheDocument();
   });
 
-  it("blocks purging an employee and points to the members page (409)", async () => {
+  it("shows a defensive warning if the purge endpoint still returns 409 (legacy guard)", async () => {
+    // Purging is decoupled from account deletion — the backend no longer
+    // 409s for employees — but the client-side handler stays as a defensive
+    // fallback in case some other conflict ever surfaces here.
     stubCommon();
     vi.spyOn(usersSdk, "purgeUser").mockRejectedValue(
       new ApiError("member", "CONFLICT", 409),
@@ -240,5 +259,35 @@ describe("UserProfile", () => {
     // A warning modal directs the admin to the members page; no navigation.
     expect(await screen.findByText(/members page/i)).toBeInTheDocument();
     expect(screen.queryByTestId("users-roster-sentinel")).not.toBeInTheDocument();
+  });
+
+  it("enables the purge button for an employee (member) and purges their data", async () => {
+    // The disabled-button + members-page tooltip is gone: an employee's
+    // *data* is purgeable from here exactly like an external user's.
+    stubCommon();
+    const purgeSpy = vi.spyOn(usersSdk, "purgeUser").mockResolvedValue(OK_SUMMARY);
+    const user = userEvent.setup();
+    renderPage({ isMember: true });
+    await screen.findByText("Alice");
+
+    const btn = screen.getByTestId("user-purge-btn");
+    expect(btn).toBeEnabled();
+    await user.click(btn);
+    await user.type(await screen.findByTestId("purge-confirm-input"), "ext-alice");
+    await user.click(screen.getByTestId("purge-confirm-ok"));
+
+    await waitFor(() => expect(purgeSpy).toHaveBeenCalledWith(USER_ID));
+    expect(await screen.findByTestId("users-roster-sentinel")).toBeInTheDocument();
+  });
+
+  it("shows a reinforced warning when the target is the caller's own data", async () => {
+    stubCommon();
+    mockIdentitySubject = "ext-alice"; // matches the resolved target subject_id
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Alice");
+
+    await user.click(screen.getByTestId("user-purge-btn"));
+    expect(await screen.findByTestId("purge-self-warning")).toBeInTheDocument();
   });
 });

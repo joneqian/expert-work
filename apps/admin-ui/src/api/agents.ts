@@ -5,7 +5,7 @@
  * callers can pass ``"*"`` for the cross-tenant aggregate; the
  * ``cross_tenant`` flag on the response tells the UI which mode it got.
  */
-import { getJson, postJson, putJson, withTenantScope, type TenantScope } from "./client";
+import { apiClient, getJson, postJson, putJson, withTenantScope, type TenantScope } from "./client";
 
 export interface AgentRecord {
   id: string;
@@ -115,6 +115,17 @@ export async function createAgent(
   payload: ManifestPayload,
 ): Promise<AgentDetailResponse> {
   return postJson<AgentDetailResponse>("/v1/agents", payload);
+}
+
+/** DELETE /v1/agents/{name}/{version} — soft delete: flips this exact
+ *  version's status to ``DELETED`` (204, no body). Requires
+ *  ``manifest:delete``. Scoped to one version — other versions of ``name``
+ *  are untouched (unlike disable/enable, which cover the whole name) — and
+ *  there is no undelete endpoint. */
+export async function deleteAgent(name: string, version: string): Promise<void> {
+  await apiClient.delete(
+    `/v1/agents/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+  );
 }
 
 /** POST /v1/agents/{name}/disable — Stream RT-4 (RT-ADR-16). Engages the
