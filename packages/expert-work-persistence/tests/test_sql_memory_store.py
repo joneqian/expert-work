@@ -1635,3 +1635,58 @@ async def test_hard_delete_expired_respects_limit(sql_store: SqlStoreFixture) ->
         assert list(remaining_ids) == [second.id]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_expired_sweeps_across_tenants(sql_store: SqlStoreFixture) -> None:
+    """hard_delete_expired() has no tenant predicate — it is a cross-tenant
+    retention sweep. Two different tenants each have one expired soft-deleted
+    row; a single call reaps both."""
+    store, engine = sql_store
+    try:
+        cutoff = datetime.now(UTC) - timedelta(days=90)
+        # ``postgres_container`` is session-scoped and shared with sibling
+        # hard_delete_expired tests in this module, which can leave already-
+        # expired debris behind (e.g. the surviving row from the ``limit=1``
+        # test above). Flush it first so the exact-count assertion below is
+        # deterministic regardless of test order.
+        await store.hard_delete_expired(before=cutoff, limit=10_000)
+
+        tenant_a, user_a = uuid4(), uuid4()
+        tenant_b, user_b = uuid4(), uuid4()
+        item_a = _item(tenant=tenant_a, user=user_a, embedding=_vec(1.0), content="tenant-a")
+        item_b = _item(tenant=tenant_b, user=user_b, embedding=_vec(1.0), content="tenant-b")
+        await store.write([item_a, item_b])
+
+        assert await store.soft_delete(tenant_id=tenant_a, user_id=user_a, memory_id=item_a.id)
+        assert await store.soft_delete(tenant_id=tenant_b, user_id=user_b, memory_id=item_b.id)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE memory_item SET deleted_at = now() - interval '100 days' WHERE id = :id"
+                ),
+                {"id": item_a.id},
+            )
+            await conn.execute(
+                text(
+                    "UPDATE memory_item SET deleted_at = now() - interval '100 days' WHERE id = :id"
+                ),
+                {"id": item_b.id},
+            )
+
+        assert await store.hard_delete_expired(before=cutoff, limit=100) == 2
+
+        async with engine.connect() as conn:
+            remaining_ids = (
+                (
+                    await conn.execute(
+                        text("SELECT id FROM memory_item WHERE id IN (:a, :b)"),
+                        {"a": item_a.id, "b": item_b.id},
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert remaining_ids == []
+    finally:
+        await engine.dispose()

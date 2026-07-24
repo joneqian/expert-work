@@ -74,7 +74,8 @@ class MemoryItemRow(Base):
     access_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Stream K.K6 — soft-delete column. ``retrieve`` and the per-user
     # list endpoint filter out rows with ``deleted_at IS NOT NULL``;
-    # a future retention sweep hard-deletes 30+ days after.
+    # the retention sweep hard-deletes 90 days after (implemented,
+    # see ``hard_delete_expired`` / ``retention-cleanup-job``).
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Capability Uplift Sprint #6 (Mini-ADR U-5 / U-6) — keyword-search
     # vector backing hybrid retrieve. Populated app-side from

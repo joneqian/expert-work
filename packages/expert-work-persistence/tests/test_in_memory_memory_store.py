@@ -1267,3 +1267,30 @@ async def test_hard_delete_expired_respects_limit() -> None:
 
     # The older row (100 days) is reaped first; the 95-day row survives.
     assert [row.id for row in store._rows] == [second.id]
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_expired_sweeps_across_tenants() -> None:
+    """hard_delete_expired() has no tenant predicate — it is a cross-tenant
+    retention sweep. Two different tenants each have one expired soft-deleted
+    row; a single call reaps both."""
+    store = InMemoryMemoryStore()
+    tenant_a, user_a = uuid4(), uuid4()
+    tenant_b, user_b = uuid4(), uuid4()
+    item_a = _item(tenant=tenant_a, user=user_a, embedding=(1.0, 0.0), content="tenant-a")
+    item_b = _item(tenant=tenant_b, user=user_b, embedding=(1.0, 0.0), content="tenant-b")
+    await store.write([item_a, item_b])
+
+    assert await store.soft_delete(tenant_id=tenant_a, user_id=user_a, memory_id=item_a.id)
+    assert await store.soft_delete(tenant_id=tenant_b, user_id=user_b, memory_id=item_b.id)
+    now = datetime.now(UTC)
+    for idx, row in enumerate(store._rows):
+        if row.id in (item_a.id, item_b.id):
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=100)})
+
+    cutoff = now - timedelta(days=90)
+    assert await store.hard_delete_expired(before=cutoff, limit=100) == 2
+
+    remaining_ids = {row.id for row in store._rows}
+    assert item_a.id not in remaining_ids
+    assert item_b.id not in remaining_ids
