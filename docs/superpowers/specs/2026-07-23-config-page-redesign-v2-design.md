@@ -144,6 +144,7 @@
 3. 技术注脚三删一缩:删 `memory_group.reserved_note`、删 `run_budget.workflow_note`、缩 `security_gates.dict_note` 为一行;`memory_group.aux_model_note` 保留但缩短。
 4. 禁术语清单沿用 #1044(委托树/LLMStreamStaleError/routing 规则等),新增文案同样过审。
 5. i18n 键集 zh↔en 一致性守卫测试沿用。
+6. **长文案必须分段(用户 2026-07-24 追加)**:`_impact`/note/help 多句文案用 `\n` 分段(FieldRow ⓘ Popover pre-line、FieldHelp 按 \n 切行,渲染层已支持),统一「是什么 → 调大/调小(开/关) → 例:场景」三段式;`_brief` 单行。
 
 ## 不做(明确后置)
 
