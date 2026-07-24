@@ -2602,6 +2602,7 @@ export interface TranslationKeys {
     status_deleted: string;
     search_placeholder: string;
     filter_status: string;
+    filter_status_default: string;
     filter_status_all: string;
     action_playground: string;
     action_edit: string;
@@ -5722,6 +5723,7 @@ const en: TranslationKeys = {
     status_deleted: "deleted",
     search_placeholder: "Search by name",
     filter_status: "Filter by status",
+    filter_status_default: "Default (hides deleted)",
     filter_status_all: "All statuses",
     action_playground: "Playground",
     action_edit: "Edit manifest",

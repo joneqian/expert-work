@@ -150,14 +150,26 @@ function AgentRowActions({
     });
   }, [modal, message, t, record.name, onChanged]);
 
+  // A soft-deleted version can't be played/edited/disabled/re-deleted —
+  // its menu keeps only the read-only run history entry.
+  const isDeleted = record.status === "deleted";
+
   return (
     <Dropdown
       trigger={["click"]}
       onOpenChange={(nextOpen) => {
-        if (nextOpen && disabled === null) loadDisabledState();
+        if (nextOpen && !isDeleted && disabled === null) loadDisabledState();
       }}
       menu={{
-        items: [
+        items: isDeleted
+          ? [
+              {
+                key: "runs",
+                icon: <Activity size={14} strokeWidth={1.5} />,
+                label: t("agents_page.action_runs"),
+              },
+            ]
+          : [
           {
             key: "playground",
             icon: <Play size={14} strokeWidth={1.5} />,
@@ -230,7 +242,12 @@ export function AgentsList() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AgentRecord | null>(null);
   const [nameFilter, setNameFilter] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  // "default" = every status EXCEPT deleted (the everyday view — a
+  // soft-deleted version is history, not a working agent); "all" = truly
+  // everything incl. deleted. Both fetch without a server-side status
+  // param (the backend filter is single-status only) — "default" drops
+  // deleted rows client-side below.
+  const [statusFilter, setStatusFilter] = useState<string>("default");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -239,9 +256,16 @@ export function AgentsList() {
       const result = await listAgents({
         tenantScope: apiTenantScope,
         name: nameFilter.trim() || undefined,
-        status: statusFilter,
+        status:
+          statusFilter === "default" || statusFilter === "all"
+            ? undefined
+            : statusFilter,
       });
-      setData(result);
+      setData(
+        statusFilter === "default"
+          ? { ...result, items: result.items.filter((a) => a.status !== "deleted") }
+          : result,
+      );
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -382,12 +406,13 @@ export function AgentsList() {
               style={{ width: 200 }}
             />
             <Select<string>
-              value={statusFilter ?? "all"}
-              onChange={(v) => setStatusFilter(v === "all" ? undefined : v)}
-              style={{ width: 140 }}
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v)}
+              style={{ width: 160 }}
               aria-label={t("agents_page.filter_status")}
               data-testid="agents-status-filter"
               options={[
+                { value: "default", label: t("agents_page.filter_status_default") },
                 { value: "all", label: t("agents_page.filter_status_all") },
                 ...STATUS_OPTIONS.map((s) => ({ value: s, label: statusLabel(s) })),
               ]}
