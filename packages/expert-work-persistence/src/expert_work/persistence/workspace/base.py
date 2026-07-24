@@ -128,3 +128,34 @@ class UserWorkspaceStore(abc.ABC):
         list (single supervisor, single tenant block); scalable
         pagination can come with the multi-host migration (推 M1).
         """
+
+    @abc.abstractmethod
+    async def list_archived_expired(
+        self, *, before: datetime, limit: int = 100
+    ) -> list[UserWorkspace]:
+        """Return archived workspaces whose retention window has elapsed.
+
+        Equivalent SQL filter:
+        ``deleted_at IS NOT NULL AND deleted_at < before AND
+        archived_object_key IS NOT NULL``, ordered by ``deleted_at``
+        ascending. Rows still pending archive (``archived_object_key IS
+        NULL``) are excluded even if old — the retention sweep only
+        ever hard-deletes rows whose archive has already landed in
+        ObjectStore.
+
+        Phase 3b (90 天物理清除) 地基 — consumed by the retention pass
+        (Task 7).
+        """
+
+    @abc.abstractmethod
+    async def hard_delete(self, *, workspace_id: UUID) -> bool:
+        """Physically remove a ``user_workspace`` row.
+
+        Returns ``True`` if a row was deleted, ``False`` if
+        ``workspace_id`` didn't exist. Idempotent: a second call after
+        a successful delete returns ``False`` rather than raising.
+
+        Phase 3b 地基 — the retention pass calls this only after the
+        row's ``archived_object_key`` has already been confirmed
+        durable in ObjectStore (see :meth:`list_archived_expired`).
+        """

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -200,3 +200,89 @@ async def test_list_active_returns_only_undeleted_rows() -> None:
     ids = {r.id for r in rows}
     assert ids == {active.id}
     assert soft_deleted.id not in ids
+
+
+# --- Phase 3b 地基 (list_archived_expired + hard_delete) -------------------
+
+
+@pytest.mark.asyncio
+async def test_list_archived_expired_filters_correctly() -> None:
+    store = InMemoryUserWorkspaceStore()
+    tenant = uuid4()
+    now = datetime.now(UTC)
+    before = now - timedelta(days=90)
+
+    active = await store.resolve(tenant_id=tenant, user_id=uuid4())
+
+    hit = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=hit.id, now=now - timedelta(days=100))
+    await store.mark_archived(workspace_id=hit.id, archived_object_key="k-hit")
+
+    stuck = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=stuck.id, now=now - timedelta(days=100))
+    # Archive job hasn't run yet — archived_object_key still None.
+
+    recent = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=recent.id, now=now - timedelta(days=10))
+    await store.mark_archived(workspace_id=recent.id, archived_object_key="k-recent")
+
+    rows = await store.list_archived_expired(before=before)
+    ids = {r.id for r in rows}
+
+    assert ids == {hit.id}
+    assert active.id not in ids
+    assert stuck.id not in ids
+    assert recent.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_archived_expired_orders_by_deleted_at_ascending() -> None:
+    store = InMemoryUserWorkspaceStore()
+    tenant = uuid4()
+    now = datetime.now(UTC)
+
+    newer = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=newer.id, now=now - timedelta(days=100))
+    await store.mark_archived(workspace_id=newer.id, archived_object_key="k1")
+
+    older = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=older.id, now=now - timedelta(days=200))
+    await store.mark_archived(workspace_id=older.id, archived_object_key="k2")
+
+    rows = await store.list_archived_expired(before=now - timedelta(days=90))
+    assert [r.id for r in rows] == [older.id, newer.id]
+
+
+@pytest.mark.asyncio
+async def test_list_archived_expired_respects_limit() -> None:
+    store = InMemoryUserWorkspaceStore()
+    tenant = uuid4()
+    now = datetime.now(UTC)
+
+    ids_oldest_first = []
+    for days_ago in (300, 200, 100):
+        workspace = await store.resolve(tenant_id=tenant, user_id=uuid4())
+        await store.soft_delete(workspace_id=workspace.id, now=now - timedelta(days=days_ago))
+        await store.mark_archived(workspace_id=workspace.id, archived_object_key="k")
+        ids_oldest_first.append(workspace.id)
+
+    rows = await store.list_archived_expired(before=now - timedelta(days=90), limit=2)
+    assert [r.id for r in rows] == ids_oldest_first[:2]
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_removes_row_and_is_idempotent() -> None:
+    store = InMemoryUserWorkspaceStore()
+    workspace = await store.resolve(tenant_id=uuid4(), user_id=uuid4())
+
+    assert await store.hard_delete(workspace_id=workspace.id) is True
+    assert await store.get(tenant_id=workspace.tenant_id, user_id=workspace.user_id) is None
+
+    # Row is truly gone — a second delete is a no-op, not an error.
+    assert await store.hard_delete(workspace_id=workspace.id) is False
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_returns_false_for_unknown_id() -> None:
+    store = InMemoryUserWorkspaceStore()
+    assert await store.hard_delete(workspace_id=uuid4()) is False
