@@ -143,3 +143,7 @@ class InMemoryTenantMcpServerStore(TenantMcpServerStore):
             if key not in self._rows:
                 raise TenantMcpServerNotFoundError(tenant_id=tenant_id, name=name)
             del self._rows[key]
+
+    async def count_for_catalog(self, *, catalog_id: UUID) -> int:
+        async with self._lock:
+            return sum(1 for r in self._rows.values() if r.catalog_id == catalog_id)

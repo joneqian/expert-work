@@ -8,11 +8,13 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from control_plane.api.platform_config import _canonical_secret_name
 from control_plane.app import create_app
 from control_plane.auth import JWTVerifier
 from control_plane.settings import Settings
 from expert_work.common.lifecycle import Lifecycle
 from expert_work.protocol import Role
+from expert_work.runtime.secret_store import SecretNotFoundError
 from tests.auth_fixtures import make_test_jwt
 
 
@@ -440,3 +442,352 @@ async def test_multikey_delete_missing_key_404(
         headers=_headers(admin),
     )
     assert resp.status_code == 404
+
+
+# ─── canonical secret name helper + delete-side secret cleanup ────────────
+#
+# Deletion interface hygiene PR2 (Task 6): the 5 delete endpoints below now
+# best-effort purge the platform-managed secret behind a catalog row, but
+# must never touch an operator-supplied external secret:// / kms:// ref.
+
+
+def test_canonical_secret_name_matches_legacy_literals() -> None:
+    """Byte-identical regression against the pre-helper inline literals."""
+    tenant_id = uuid4()
+    assert _canonical_secret_name(provider="anthropic") == "expert-work/platform/llm/anthropic"
+    assert (
+        _canonical_secret_name(provider="anthropic", key_id="default")
+        == "expert-work/platform/llm/anthropic"
+    )
+    assert (
+        _canonical_secret_name(provider="anthropic", key_id="acct-b")
+        == "expert-work/platform/llm/anthropic/acct-b"
+    )
+    assert _canonical_secret_name(tool="web_search") == "expert-work/platform/tool/web_search"
+    assert (
+        _canonical_secret_name(tenant_id=tenant_id, provider="anthropic")
+        == f"expert-work/platform/tenant/{tenant_id}/llm/anthropic"
+    )
+    assert (
+        _canonical_secret_name(tenant_id=tenant_id, tool="web_search")
+        == f"expert-work/platform/tenant/{tenant_id}/tool/web_search"
+    )
+
+
+def _audit_details(app: object, *, action: str, resource_id: str) -> dict[str, object]:
+    store = app.state.audit_logger._store  # type: ignore[attr-defined]
+    entries = [
+        e for e in store._rows.values() if e.action.value == action and e.resource_id == resource_id
+    ]
+    assert entries, f"expected an audit row for {action} / {resource_id}"
+    return entries[-1].details
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_paste_mode_purges_managed_secret(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    app = client._transport.app  # type: ignore[attr-defined]
+    put = await client.put(
+        "/v1/platform/credentials/providers/openai",
+        json={"value": "sk-openai-REAL", "enabled": True},
+        headers=_headers(admin),
+    )
+    assert put.status_code == 200, put.text
+    assert await app.state.secret_store.get("expert-work/platform/llm/openai") == "sk-openai-REAL"
+
+    resp = await client.delete("/v1/platform/credentials/providers/openai", headers=_headers(admin))
+    assert resp.status_code == 204
+
+    with pytest.raises(SecretNotFoundError):
+        await app.state.secret_store.get("expert-work/platform/llm/openai")
+    details = _audit_details(
+        app, action="platform_credential:provider_delete", resource_id="openai"
+    )
+    assert details["secret_deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_ref_mode_leaves_external_secret(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    app = client._transport.app  # type: ignore[attr-defined]
+    await app.state.secret_store.put("external/openai-sentinel", "sentinel-value")
+    put = await client.put(
+        "/v1/platform/credentials/providers/openai",
+        json={"secret_ref": "secret://external/openai-sentinel", "enabled": True},
+        headers=_headers(admin),
+    )
+    assert put.status_code == 200, put.text
+
+    resp = await client.delete("/v1/platform/credentials/providers/openai", headers=_headers(admin))
+    assert resp.status_code == 204
+
+    assert await app.state.secret_store.get("external/openai-sentinel") == "sentinel-value"
+    details = _audit_details(
+        app, action="platform_credential:provider_delete", resource_id="openai"
+    )
+    assert details["secret_deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_key_paste_mode_purges_managed_secret(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    app = client._transport.app  # type: ignore[attr-defined]
+    await client.put(
+        "/v1/platform/credentials/providers/deepseek",
+        json={"secret_ref": "kms://deepseek/default", "enabled": True},
+        headers=_headers(admin),
+    )
+    put = await client.put(
+        "/v1/platform/credentials/providers/deepseek/keys/acct-b",
+        json={"value": "sk-deepseek-b", "enabled": True, "priority": 10},
+        headers=_headers(admin),
+    )
+    assert put.status_code == 200, put.text
+    assert (
+        await app.state.secret_store.get("expert-work/platform/llm/deepseek/acct-b")
+        == "sk-deepseek-b"
+    )
+
+    resp = await client.delete(
+        "/v1/platform/credentials/providers/deepseek/keys/acct-b", headers=_headers(admin)
+    )
+    assert resp.status_code == 204
+
+    with pytest.raises(SecretNotFoundError):
+        await app.state.secret_store.get("expert-work/platform/llm/deepseek/acct-b")
+    details = _audit_details(
+        app, action="platform_credential:provider_delete", resource_id="deepseek#acct-b"
+    )
+    assert details["secret_deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_key_ref_mode_leaves_external_secret(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    app = client._transport.app  # type: ignore[attr-defined]
+    await client.put(
+        "/v1/platform/credentials/providers/deepseek",
+        json={"secret_ref": "kms://deepseek/default", "enabled": True},
+        headers=_headers(admin),
+    )
+    await app.state.secret_store.put("external/deepseek-b-sentinel", "sentinel-value")
+    put = await client.put(
+        "/v1/platform/credentials/providers/deepseek/keys/acct-b",
+        json={
+            "secret_ref": "secret://external/deepseek-b-sentinel",
+            "enabled": True,
+            "priority": 10,
+        },
+        headers=_headers(admin),
+    )
+    assert put.status_code == 200, put.text
+
+    resp = await client.delete(
+        "/v1/platform/credentials/providers/deepseek/keys/acct-b", headers=_headers(admin)
+    )
+    assert resp.status_code == 204
+
+    assert await app.state.secret_store.get("external/deepseek-b-sentinel") == "sentinel-value"
+    details = _audit_details(
+        app, action="platform_credential:provider_delete", resource_id="deepseek#acct-b"
+    )
+    assert details["secret_deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_tool_paste_mode_purges_managed_secret(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    app = client._transport.app  # type: ignore[attr-defined]
+    put = await client.put(
+        "/v1/platform/credentials/tools/web_search",
+        json={"value": "tavily-REAL-KEY", "enabled": True},
+        headers=_headers(admin),
+    )
+    assert put.status_code == 200, put.text
+    assert (
+        await app.state.secret_store.get("expert-work/platform/tool/web_search")
+        == "tavily-REAL-KEY"
+    )
+
+    resp = await client.delete("/v1/platform/credentials/tools/web_search", headers=_headers(admin))
+    assert resp.status_code == 204
+
+    with pytest.raises(SecretNotFoundError):
+        await app.state.secret_store.get("expert-work/platform/tool/web_search")
+    details = _audit_details(
+        app, action="platform_credential:tool_delete", resource_id="web_search"
+    )
+    assert details["secret_deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_tool_ref_mode_leaves_external_secret(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    app = client._transport.app  # type: ignore[attr-defined]
+    await app.state.secret_store.put("external/tavily-sentinel", "sentinel-value")
+    put = await client.put(
+        "/v1/platform/credentials/tools/web_search",
+        json={"secret_ref": "secret://external/tavily-sentinel", "enabled": True},
+        headers=_headers(admin),
+    )
+    assert put.status_code == 200, put.text
+
+    resp = await client.delete("/v1/platform/credentials/tools/web_search", headers=_headers(admin))
+    assert resp.status_code == 204
+
+    assert await app.state.secret_store.get("external/tavily-sentinel") == "sentinel-value"
+    details = _audit_details(
+        app, action="platform_credential:tool_delete", resource_id="web_search"
+    )
+    assert details["secret_deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_tenant_provider_paste_mode_purges_managed_secret(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        put = await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            json={"value": "sk-ant-TENANT-KEY", "enabled": True},
+            headers=_headers(admin),
+        )
+        assert put.status_code == 200, put.text
+        name = f"expert-work/platform/tenant/{tenant_id}/llm/anthropic"
+        assert await app.state.secret_store.get(name) == "sk-ant-TENANT-KEY"
+
+        resp = await client.delete(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            headers=_headers(admin),
+        )
+        assert resp.status_code == 204
+
+        with pytest.raises(SecretNotFoundError):
+            await app.state.secret_store.get(name)
+        details = _audit_details(
+            app, action="platform_credential:tenant_provider_delete", resource_id="anthropic"
+        )
+        assert details["secret_deleted"] is True
+        assert details["tenant_id"] == str(tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_tenant_provider_ref_mode_leaves_external_secret(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        await app.state.secret_store.put("external/tenant-anthropic-sentinel", "sentinel-value")
+        put = await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            json={"secret_ref": "secret://external/tenant-anthropic-sentinel", "enabled": True},
+            headers=_headers(admin),
+        )
+        assert put.status_code == 200, put.text
+
+        resp = await client.delete(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            headers=_headers(admin),
+        )
+        assert resp.status_code == 204
+
+        assert (
+            await app.state.secret_store.get("external/tenant-anthropic-sentinel")
+            == "sentinel-value"
+        )
+        details = _audit_details(
+            app, action="platform_credential:tenant_provider_delete", resource_id="anthropic"
+        )
+        assert details["secret_deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_tenant_tool_paste_mode_purges_managed_secret(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        put = await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/tools/web_search",
+            json={"value": "tavily-TENANT-KEY", "enabled": True},
+            headers=_headers(admin),
+        )
+        assert put.status_code == 200, put.text
+        name = f"expert-work/platform/tenant/{tenant_id}/tool/web_search"
+        assert await app.state.secret_store.get(name) == "tavily-TENANT-KEY"
+
+        resp = await client.delete(
+            f"/v1/platform/credentials/tenants/{tenant_id}/tools/web_search",
+            headers=_headers(admin),
+        )
+        assert resp.status_code == 204
+
+        with pytest.raises(SecretNotFoundError):
+            await app.state.secret_store.get(name)
+        details = _audit_details(
+            app, action="platform_credential:tenant_tool_delete", resource_id="web_search"
+        )
+        assert details["secret_deleted"] is True
+        assert details["tenant_id"] == str(tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_tenant_tool_ref_mode_leaves_external_secret(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        await app.state.secret_store.put("external/tenant-tavily-sentinel", "sentinel-value")
+        put = await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/tools/web_search",
+            json={"secret_ref": "secret://external/tenant-tavily-sentinel", "enabled": True},
+            headers=_headers(admin),
+        )
+        assert put.status_code == 200, put.text
+
+        resp = await client.delete(
+            f"/v1/platform/credentials/tenants/{tenant_id}/tools/web_search",
+            headers=_headers(admin),
+        )
+        assert resp.status_code == 204
+
+        assert (
+            await app.state.secret_store.get("external/tenant-tavily-sentinel") == "sentinel-value"
+        )
+        details = _audit_details(
+            app, action="platform_credential:tenant_tool_delete", resource_id="web_search"
+        )
+        assert details["secret_deleted"] is False

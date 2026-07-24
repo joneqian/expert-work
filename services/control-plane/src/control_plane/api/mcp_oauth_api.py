@@ -377,7 +377,7 @@ def build_mcp_oauth_router() -> APIRouter:
             tenant_id=tenant_id,
             actor_id=user_id,
             action=AuditAction.MCP_SERVER_CREATE,
-            resource_type="tenant_mcp_server",
+            resource_type="mcp_oauth_connection",
             resource_id=str(updated.id),
             result=AuditResult.SUCCESS,
             trace_id=current_trace_id_hex(),
@@ -409,8 +409,8 @@ def build_mcp_oauth_router() -> APIRouter:
         principal: Annotated[Principal, Depends(require("mcp_oauth", "delete"))],
         request: Request,
     ) -> JSONResponse:
-        """OA-4 — disconnect: revoke the stored tokens (best-effort overwrite —
-        the secret store has no delete), drop the row, invalidate the caches."""
+        """OA-4 — disconnect: delete the stored tokens, drop the row, invalidate
+        the caches."""
         tenant_id = principal.tenant_id
         user_id = principal.subject_id
         conn_store = _conn_store(request)
@@ -425,14 +425,13 @@ def build_mcp_oauth_router() -> APIRouter:
                 status_code=404,
                 detail={"code": "MCP_OAUTH_CONNECTION_NOT_FOUND", "message": "not found"},
             )
-        # Best-effort token revocation (no SecretStore.delete): overwrite the
-        # value so the real token is no longer retrievable after disconnect.
+        # Best-effort token deletion: failures don't block the disconnect.
         for ref in (existing.access_token_ref, existing.refresh_token_ref):
             if ref:
                 try:
-                    await secret_store.put(parse_secret_ref(ref), "")
+                    await secret_store.delete(parse_secret_ref(ref))
                 except Exception:
-                    logger.warning("mcp_oauth.disconnect_secret_overwrite_failed")
+                    logger.warning("mcp_oauth.disconnect_secret_delete_failed")
         await conn_store.delete(connection_id=connection_id, tenant_id=tenant_id, user_id=user_id)
         await _invalidate_user_caches(request, tenant_id, user_id)
         await audit_emit(
@@ -440,7 +439,7 @@ def build_mcp_oauth_router() -> APIRouter:
             tenant_id=tenant_id,
             actor_id=user_id,
             action=AuditAction.MCP_SERVER_DELETE,
-            resource_type="tenant_mcp_server",
+            resource_type="mcp_oauth_connection",
             resource_id=str(connection_id),
             result=AuditResult.SUCCESS,
             trace_id=current_trace_id_hex(),

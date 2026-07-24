@@ -173,6 +173,10 @@ ResourceType = Literal[
     # Stream RT-4 — agent kill switch (AGENT_DISABLED / AGENT_ENABLED). Mirrors
     # the protocol-side ``ResourceType`` Literal per [memory:audit-literal-drift].
     "agent",
+    # Deletion-hygiene PR2 — per-user MCP OAuth connection (was mis-tagged
+    # "tenant_mcp_server"). Mirrors the protocol-side ``ResourceType`` Literal
+    # per [memory:audit-literal-drift].
+    "mcp_oauth_connection",
 ]
 
 

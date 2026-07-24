@@ -59,3 +59,22 @@ async def test_mock_secret_store_missing_raises(mock_secret_store: InMemorySecre
     """Reading an unset key raises KeyError."""
     with pytest.raises(KeyError, match="secret not found"):
         await mock_secret_store.get("/expert-work/test/missing")
+
+
+@pytest.mark.asyncio
+async def test_mock_secret_store_delete(mock_secret_store: InMemorySecretStore) -> None:
+    """delete() removes the value; a subsequent get() raises."""
+    await mock_secret_store.put("/expert-work/test/db-password", "s3cret")
+    await mock_secret_store.delete("/expert-work/test/db-password")
+    with pytest.raises(KeyError, match="secret not found"):
+        await mock_secret_store.get("/expert-work/test/db-password")
+
+
+@pytest.mark.asyncio
+async def test_mock_secret_store_delete_missing_is_idempotent(
+    mock_secret_store: InMemorySecretStore,
+) -> None:
+    """delete() on an absent name does NOT raise (idempotent)."""
+    await mock_secret_store.delete("/expert-work/test/never-existed")
+    with pytest.raises(KeyError, match="secret not found"):
+        await mock_secret_store.get("/expert-work/test/never-existed")

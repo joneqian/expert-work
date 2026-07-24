@@ -94,3 +94,17 @@ class TenantMcpServerStore(abc.ABC):
     async def delete(self, *, tenant_id: UUID, name: str) -> None:
         """Delete the row. Raises
         :class:`TenantMcpServerNotFoundError` if absent."""
+
+    @abc.abstractmethod
+    async def count_for_catalog(self, *, catalog_id: UUID) -> int:
+        """Count instantiated rows for a catalog connector, across EVERY tenant.
+
+        Platform-scope caller only (MCP catalog delete-guard order-of-operations
+        fix, Task 8 review I-1) — no ``tenant_id`` predicate by design. Lets the
+        DELETE endpoint check in-use status BEFORE any destructive action
+        (including the ``force`` OAuth-connection cascade), instead of relying
+        solely on ``McpConnectorCatalogStore.delete``'s post-hoc
+        ``IntegrityError`` mapping. No existing bypass-RLS session precedent on
+        this store, so a SQL implementation runs under the caller's ordinary
+        session; the caller must be a platform-scope path (e.g. a
+        superuser/BYPASSRLS DB connection) or RLS filters every row out."""

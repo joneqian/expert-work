@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy.exc
@@ -112,6 +112,106 @@ def tenant_mcp_server_with_catalog(
     engine = create_async_engine_from_config(DatabaseConfig(dsn=app_dsn))
     sf = build_rls_sessionmaker(create_async_session_factory(engine))
     yield SqlTenantMcpServerStore(sf), SqlMcpConnectorCatalogStore(sf), engine
+
+
+@pytest.fixture
+def tenant_mcp_server_platform_scope(
+    postgres_container: PostgresContainer,
+) -> Iterator[tuple[SqlTenantMcpServerStore, SqlMcpConnectorCatalogStore, AsyncEngine]]:
+    """Superuser-DSN session, no RLS wiring — mirrors
+    ``test_sql_mcp_oauth_connection_store.py``'s ``sql_store`` fixture. The
+    platform-scope ``count_for_catalog`` method (Task 8 review I-1) carries no
+    ``tenant_id`` predicate by design and needs a session that actually sees
+    every tenant's rows (an app-role RLS session would filter them out)."""
+    cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
+    command.upgrade(cfg, "head")
+
+    engine = create_async_engine_from_config(DatabaseConfig(dsn=_async_dsn(postgres_container)))
+    sf = create_async_session_factory(engine)
+    yield SqlTenantMcpServerStore(sf), SqlMcpConnectorCatalogStore(sf), engine
+
+
+async def _make_catalog_entry(catalog_store: SqlMcpConnectorCatalogStore, *, name: str) -> UUID:
+    entry = await catalog_store.create(
+        upsert=McpConnectorCatalogUpsert(
+            name=name,
+            display_name=name.title(),
+            transport="streamable_http",
+            url_template=f"https://mcp.example.com/{name}",
+            auth_type="none",
+        ),
+        actor_id="sysadmin",
+    )
+    return entry.id
+
+
+@pytest.mark.asyncio
+async def test_count_for_catalog_cross_tenant(
+    tenant_mcp_server_platform_scope: tuple[
+        SqlTenantMcpServerStore, SqlMcpConnectorCatalogStore, AsyncEngine
+    ],
+) -> None:
+    """Platform-scope catalog method (MCP catalog delete-guard, Task 8 review
+    I-1) counts across every tenant — no tenant_id predicate."""
+    servers, catalog, engine = tenant_mcp_server_platform_scope
+    try:
+        cat_a = await _make_catalog_entry(catalog, name=f"conn-a-{uuid4().hex[:12]}")
+        cat_b = await _make_catalog_entry(catalog, name=f"conn-b-{uuid4().hex[:12]}")
+        tid_1, tid_2 = uuid4(), uuid4()
+
+        await servers.create(
+            tenant_id=tid_1,
+            name="github",
+            transport="streamable_http",
+            url="https://mcp.example.com/a",
+            auth_type="none",
+            token_secret_ref=None,
+            timeout_s=30.0,
+            created_by="a@x",
+            catalog_id=cat_a,
+        )
+        await servers.create(
+            tenant_id=tid_2,
+            name="github",
+            transport="streamable_http",
+            url="https://mcp.example.com/a",
+            auth_type="none",
+            token_secret_ref=None,
+            timeout_s=30.0,
+            created_by="b@x",
+            catalog_id=cat_a,
+        )
+        await servers.create(
+            tenant_id=tid_1,
+            name="other",
+            transport="streamable_http",
+            url="https://mcp.example.com/b",
+            auth_type="none",
+            token_secret_ref=None,
+            timeout_s=30.0,
+            created_by="a@x",
+            catalog_id=cat_b,
+        )
+
+        assert await servers.count_for_catalog(catalog_id=cat_a) == 2
+        assert await servers.count_for_catalog(catalog_id=cat_b) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_count_for_catalog_empty(
+    tenant_mcp_server_platform_scope: tuple[
+        SqlTenantMcpServerStore, SqlMcpConnectorCatalogStore, AsyncEngine
+    ],
+) -> None:
+    servers, catalog, engine = tenant_mcp_server_platform_scope
+    try:
+        empty_cat = await _make_catalog_entry(catalog, name=f"conn-empty-{uuid4().hex[:12]}")
+        assert await servers.count_for_catalog(catalog_id=empty_cat) == 0
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture(autouse=True)

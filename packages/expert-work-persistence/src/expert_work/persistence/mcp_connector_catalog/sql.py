@@ -187,14 +187,21 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
             .returning(McpConnectorCatalogRow.id)
         )
         async with self._sf() as session:
-            deleted = (await session.execute(stmt)).scalar_one_or_none()
+            # Both FKs guarding this row (tenant_mcp_server.catalog_id,
+            # mcp_oauth_connection.catalog_id — deletion-hygiene PR2 Task 8)
+            # are ON DELETE RESTRICT, which Postgres checks immediately —
+            # non-deferrable constraints fire while the DELETE statement
+            # itself executes, not later at commit — so the guard has to
+            # wrap ``execute`` too, not just ``commit``.
+            try:
+                deleted = (await session.execute(stmt)).scalar_one_or_none()
+            except IntegrityError as exc:
+                await session.rollback()
+                raise McpConnectorCatalogInUseError(catalog_id=catalog_id) from exc
             if deleted is None:
                 # Roll back the no-op DELETE before raising NotFound.
                 await session.rollback()
                 raise McpConnectorCatalogNotFoundError(catalog_id=catalog_id)
-            # The FK from tenant_mcp_server.catalog_id is ON DELETE RESTRICT, so
-            # the constraint fires on commit (not on the DELETE statement) when a
-            # tenant has instantiated this catalog entry — surface it as InUse.
             try:
                 await session.commit()
             except IntegrityError as exc:

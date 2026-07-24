@@ -288,6 +288,7 @@ def build_members_router() -> APIRouter:
         member_id: UUID,
         principal: Annotated[Principal, Depends(require("user", "write"))],
         member_repo: Annotated[TenantMemberStore, Depends(_get_member_repo)],
+        role_binding_repo: Annotated[RoleBindingStore, Depends(_get_role_binding_repo)],
         keycloak: Annotated[KeycloakAdminClient, Depends(_get_keycloak)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> None:
@@ -328,6 +329,25 @@ def build_members_router() -> APIRouter:
                     "message": f"member is already {member.status}",
                 },
             )
+
+        # Delete-hygiene: the Keycloak account is deleted/disabled above, but
+        # the tenant-scope role binding is a separate row — without this, a
+        # still-valid JWT (issued before revoke) keeps passing ``require()``
+        # authz checks until it expires. Best-effort: a cleanup failure does
+        # not roll back the status transition already committed above.
+        removed = 0
+        cleanup_failed = False
+        if moved and member.keycloak_user_id is not None:
+            try:
+                removed = await role_binding_repo.delete_for_subject(
+                    subject_type="user",
+                    subject_id=UUID(member.keycloak_user_id),
+                    tenant_id=principal.tenant_id,
+                )
+            except Exception:
+                cleanup_failed = True
+                logger.warning("member_revoke.role_binding_cleanup_failed", exc_info=True)
+
         await emit(
             audit,
             tenant_id=principal.tenant_id,
@@ -336,7 +356,12 @@ def build_members_router() -> APIRouter:
             resource_type="tenant_member",
             resource_id=str(member.id),
             trace_id=current_trace_id_hex(),
-            details={"email": member.email, "from_status": member.status},
+            details={
+                "email": member.email,
+                "from_status": member.status,
+                "role_bindings_removed": removed,
+                "role_bindings_cleanup_failed": cleanup_failed,
+            },
         )
 
     return router

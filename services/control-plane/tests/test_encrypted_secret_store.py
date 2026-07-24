@@ -192,3 +192,36 @@ async def test_missing_secret_raises(
             await store.list_versions("expert-work/platform/llm/nope")
     finally:
         await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_delete_removes_all_versions(
+    vault: tuple[SqlEncryptedSecretStore, AsyncEngine],
+) -> None:
+    store, engine = vault
+    name = "expert-work/platform/llm/delete-me"  # distinct — shared container
+    try:
+        await store.put(name, "key-v1")
+        await store.put(name, "key-v2")
+
+        await store.delete(name)
+
+        with pytest.raises(SecretNotFoundError):
+            await store.get(name)
+        with pytest.raises(SecretNotFoundError):
+            await store.list_versions(name)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_delete_missing_secret_is_idempotent(
+    vault: tuple[SqlEncryptedSecretStore, AsyncEngine],
+) -> None:
+    store, engine = vault
+    try:
+        await store.delete("expert-work/platform/llm/never-existed")  # does NOT raise
+    finally:
+        await engine.dispose()

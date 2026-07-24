@@ -1,69 +1,117 @@
-# Task 5 报告:TenantUserStore.hard_delete_deactivated
+# Task 5 报告:members revoke/suspend 接线删授权
 
 ## 状态:完成
 
 ## 需求来源
-`.superpowers/sdd/task-5-brief.md`(注:该目录被 `.superpowers/sdd/.gitignore` 忽略,不随分支同步;worktree 起初停在
-`fix-deletion-hygiene-pr1` 的合并基点 `69181a73`,缺 Task 1 的提交与 brief 文件本身——先用
-`git merge --ff-only fix-deletion-hygiene-pr1` 快进补齐,再开始本任务)。
+`/Users/mac/src/github/jone_qian/expert-work/.superpowers/sdd/task-5-brief.md`(唯一需求源)。
+
+先执行 `git merge --ff-only fix-deletion-hygiene-pr2`(拿到波 1 的 `RoleBindingStore.delete_for_subject`,
+merge tip `b630cf7a`)——fast-forward 成功,带入 T1-T4 的既有改动(role_binding orphan cleanup、
+mcp_oauth_connection store、encrypted secret store 等)。
 
 ## 实现
 
-三处改动,均照抄 Task 1 `MemoryStore.hard_delete_expired`(`packages/expert-work-persistence/src/expert_work/persistence/memory/sql.py`)的子查询限批模式:
+**`services/control-plane/src/control_plane/api/members.py`**(`revoke` 端点,`DELETE /v1/members/{member_id}`):
 
-1. **`packages/expert-work-persistence/src/expert_work/persistence/tenant_user/base.py`**
-   `deactivate` 之后新增抽象方法 `hard_delete_deactivated(self, *, before: datetime, limit: int = 1000) -> int`,docstring 说明跨租户(无 tenant 谓词)、按 `deleted_at` 升序限批、只删已停用行、复活(re-`resolve`)的行不受影响。
-
-2. **`packages/expert-work-persistence/src/expert_work/persistence/tenant_user/sql.py`**
-   `deactivate` 之后(原 L129 附近)实现:
+1. handler 签名新增 `role_binding_repo: Annotated[RoleBindingStore, Depends(_get_role_binding_repo)]`
+   —— dep getter `_get_role_binding_repo` 该文件已有(invite/resend 端点在用),直接复用。
+2. 两分支(`invited→revoked` 删 KC 账号 / `active→suspended` 禁用账号)状态转移**成功后**(即两个
+   `if/elif` 分支跑完、`action` 已确定,emit 审计**之前**),统一执行:
    ```python
-   async def hard_delete_deactivated(self, *, before: datetime, limit: int = 1000) -> int:
-       subq = (
-           select(TenantUserRow.id)
-           .where(TenantUserRow.deleted_at.is_not(None), TenantUserRow.deleted_at < before)
-           .order_by(TenantUserRow.deleted_at.asc())
-           .limit(limit)
-       )
-       stmt = delete(TenantUserRow).where(TenantUserRow.id.in_(subq))
-       async with self._sf() as session:
-           result = await session.execute(stmt)
-           await session.commit()
-       return int(getattr(result, "rowcount", 0) or 0)
+   removed = 0
+   if member.keycloak_user_id is not None:
+       try:
+           removed = await role_binding_repo.delete_for_subject(
+               subject_type="user",
+               subject_id=UUID(member.keycloak_user_id),
+               tenant_id=principal.tenant_id,
+           )
+       except Exception:
+           logger.warning("member_revoke.role_binding_cleanup_failed", exc_info=True)
    ```
-   顶部 `sqlalchemy` import 加 `delete`。
-
-3. **`packages/expert-work-persistence/src/expert_work/persistence/tenant_user/memory.py`**
-   同构的 in-memory 实现:按 `deleted_at` 排序取前 `limit` 条已停用行,从 `self._rows` 字典删除,返回删除数。
+   `keycloak_user_id is None` 直接跳过(`removed` 留 0),不炸;删除失败仅 warning,**不回滚**已提交的状态转移
+   (与 brief 一致,和既有 KC 调用失败的 warning-only 风格对齐)。
+3. 审计 `emit(...)` 的 `details` 增加 `role_bindings_removed: removed`(原有 `email` / `from_status` 不动)。
 
 ## 测试(TDD 红→绿)
 
-先写 4 个失败测试(`AttributeError: no attribute 'hard_delete_deactivated'`),确认 RED,再实现转 GREEN。
+`services/control-plane/tests/test_members_api.py`:
 
-**`packages/expert-work-persistence/tests/test_in_memory_tenant_user_store.py`**(+4 用例):
-- `test_hard_delete_deactivated_only_reaps_old_deactivated` — 活跃行不动 / 停用满 100 天被删(`get` 返回 `None`)/ 停用仅 10 天保留
-- `test_hard_delete_deactivated_respects_limit` — 两行都过期,`limit=1` 只删最旧一条(`deleted_at` 升序)
-- `test_hard_delete_deactivated_sweeps_across_tenants` — 跨租户两行一次清 2(无 tenant 谓词验证)
-- `test_hard_delete_deactivated_revival_not_swept` — **复活场景**:`deactivate(now=100天前)` 后再 `resolve()` 同 subject 清空 `deleted_at`,扫描返回 0、行仍在
-
-**`packages/expert-work-persistence/tests/test_sql_tenant_user_store.py`**(+4 对应集成用例,针对真 Postgres):同上四个场景,直接用 `deactivate(..., now=<回拨时间>)` 参数回拨(该方法本就接受调用方传入的 `now`,无需像 Task 1 memory 测试那样另开连接 `UPDATE ... deleted_at`)。
+- 新增 `audit_store` fixture(`InMemoryAuditLogStore`),`admin_app` fixture 改为把
+  `audit_logger=build_default_audit_logger(audit_store)` 传给 `create_app(...)`(照 `test_admin_api.py`
+  的既有审计断言风格:`audit_store.query(AuditQuery(tenant_id=...))` → 按 `action` 过滤 → 断言 `.details[...]`)。
+- 3 个新用例(布在 `test_revoke_missing_member_404` 之后):
+  1. `test_revoke_invited_member_removes_role_binding` —— invite 后先用
+     `role_binding_repo.list_for_subject(...)` 断言 binding 已建(invite 流程自带),revoke 后断言
+     `list_for_subject` 为空,审计 `MEMBER_REVOKE` 一条、`role_bindings_removed == 1`。
+  2. `test_suspend_active_member_removes_role_binding` —— invite 后用
+     `tenant_member_repo.transition(..., to="active", ...)` 推进到 active(合法前驱,照
+     `transitions.py` 的状态机),revoke(走 suspend 分支)后同样断言 binding 清空、
+     `MEMBER_SUSPEND` 审计 `role_bindings_removed == 1`。
+  3. `test_revoke_member_without_keycloak_user_id_skips_cleanup` —— 直插
+     `tenant_member_repo.create(..., keycloak_user_id=None)`,revoke 不炸(200→204)、状态转 `revoked`、
+     审计 `role_bindings_removed == 0`。
+- RED 验证:临时 `git stash` 掉 `members.py` 的改动、只跑这 3 个新测试 → 3 个全部失败
+  (`KeyError: 'role_bindings_removed'`),确认测试先于实现写、且真的在验证新行为;`git stash pop`
+  恢复后转绿。
 
 ## 验证结果
 
-- `uv run pytest packages/expert-work-persistence/tests/test_in_memory_tenant_user_store.py` → 13 passed(含既有 9 + 新增 4)
-- `DOCKER_HOST=unix:///Users/mac/.docker/run/docker.sock uv run pytest packages/expert-work-persistence/tests/test_sql_tenant_user_store.py` → 10 passed(含既有 6 + 新增 4)
-- `uv run ruff check packages/expert-work-persistence` → All checks passed!
-- `uv run ruff format --check packages/expert-work-persistence` → 448 files already formatted
+- `uv run pytest services/control-plane/tests/test_members_api.py -q` → **18 passed**(既有 15 + 新增 3)
+- `uv run ruff check services/control-plane` → All checks passed!
+- `uv run ruff format --check services/control-plane` → 395 files already formatted
 
 ## 改动文件清单(仅本任务)
 
-- `packages/expert-work-persistence/src/expert_work/persistence/tenant_user/base.py`
-- `packages/expert-work-persistence/src/expert_work/persistence/tenant_user/sql.py`
-- `packages/expert-work-persistence/src/expert_work/persistence/tenant_user/memory.py`
-- `packages/expert-work-persistence/tests/test_sql_tenant_user_store.py`
-- `packages/expert-work-persistence/tests/test_in_memory_tenant_user_store.py`
+- `services/control-plane/src/control_plane/api/members.py`
+- `services/control-plane/tests/test_members_api.py`
 
 ## Concerns / 后续
 
-- `TenantUserStore` 目前只有 `SqlTenantUserStore` / `InMemoryTenantUserStore` 两个实现(已 grep 确认无第三方子类),接口新增抽象方法不会破坏其他实现。
-- 本任务不接入 retention-cleanup-job(Task 7 消费此方法),`hard_delete_deactivated` 目前无任何调用方——符合 brief 范围(仅地基)。
-- 未跑 mypy(brief 未要求);ruff check/format 均绿。
+- 删除失败(`delete_for_subject` 抛异常)只 warning、不回滚状态转移——与 brief 要求及既有 KC 调用失败的
+  处理风格一致,但意味着极端情况下(store 层异常)一次撤销后 binding 可能残留,需靠下一次撤销/人工
+  role_bindings 管理页兜底;brief 范围内未要求补偿重试,未做。
+- 未接触 `resend` 端点——resend 只对 `invited` 状态生效,不涉及撤销,binding 是"容忍重复"(`DuplicateRoleBindingError`
+  吞掉),与本任务无交集。
+- `admin_app` fixture 改动(新增 `audit_store` 参数、传入自定义 `audit_logger`)是本文件级别的改动,
+  影响该文件全部 18 个测试的 app 构造路径,但只是把默认 in-memory audit store 换成显式可查询的同款
+  store,行为等价,其余 15 个既有测试原样通过。
+
+## Review follow-up(T5 三发现修复)
+
+针对 T5 review 的 [I-1]/[可见性]/[M-1] 三条发现,在 `fix-deletion-hygiene-pr2` 分支主工作树直接修:
+
+1. **[I-1] `moved` 门禁**:`role_binding_repo.delete_for_subject` 的调用条件从
+   `if member.keycloak_user_id is not None:` 改为 `if moved and member.keycloak_user_id is not None:`,
+   与同函数 `:307`/`:318` 两处 Keycloak 调用的门禁风格对齐——`moved` 是 `member_repo.transition(...)`
+   的返回值,`False` 表示并发竞态下这次请求丢了(状态未真正转移,例如另一并发请求已先转移)。
+   门禁前:即便 `moved=False`,依然会真删 role binding、并在审计里记一条与实际状态转移不符的
+   “删除记录”(幽灵审计——binding 被删了,但这次请求并没有真的完成 revoke/suspend)。门禁后:未真正
+   转移状态的请求不再动 role binding。
+2. **[可见性] 审计失败标记**:`delete_for_subject` 的 `except Exception` 分支新增 `cleanup_failed = True`
+   (原来只有 `logger.warning(...)`),审计 `emit(...)` 的 `details` 增加 `role_bindings_cleanup_failed: bool`
+   (正常路径为 `False`)。理由:`revoked`/`suspended` 都是终态,没有针对 binding 清理失败的重跑路径,
+   操作员必须能从审计页(而非翻应用日志)发现清理失败,并去 role_bindings 管理页手动补删。
+3. **[M-1] 失败分支测试**:`test_members_api.py` 新增两例:
+   - `test_revoke_role_binding_cleanup_failure_does_not_fail_request`——`monkeypatch` 把
+     `app.state.role_binding_repo.delete_for_subject` 换成一个恒抛 `RuntimeError` 的协程,断言:
+     revoke 仍 `204`(异常不外抛)、`tenant_member_repo` 里状态已转 `revoked`(不回滚)、审计
+     `MEMBER_REVOKE` 一条,`role_bindings_removed == 0` 且 `role_bindings_cleanup_failed is True`。
+   - `test_revoke_skips_cleanup_when_transition_loses_race`——`monkeypatch` 把
+     `app.state.tenant_member_repo.transition` 换成恒返回 `False` 的协程(模拟并发竞态丢单),
+     再给 `role_binding_repo.delete_for_subject` 挂一个仅记录“是否被调用”的桩,断言 revoke 仍
+     `204`、且该桩从未被调用(`moved=False` 门禁生效,不误删 binding)。
+   - 顺带给既有 `test_revoke_invited_member_removes_role_binding`(正常路径)追加一条断言
+     `role_bindings_cleanup_failed is False`。
+
+### 验证结果(review follow-up)
+
+- `uv run pytest services/control-plane/tests/test_members_api.py -q` → **20 passed**(18 + 新增 2)
+- `uv run ruff check services/control-plane` → All checks passed!
+- `uv run ruff format --check services/control-plane` → 395 files already formatted
+
+### 改动文件清单(review follow-up)
+
+- `services/control-plane/src/control_plane/api/members.py`
+- `services/control-plane/tests/test_members_api.py`
+- `.superpowers/sdd/task-5-report.md`(本节)

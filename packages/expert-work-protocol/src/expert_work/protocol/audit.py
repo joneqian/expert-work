@@ -450,6 +450,11 @@ ResourceType = Literal[
     # services/control-plane/src/control_plane/audit.py per
     # [memory:audit-literal-drift] (both must stay in sync).
     "agent",
+    # Deletion-hygiene PR2 — per-user MCP OAuth connection (was mis-tagged
+    # "tenant_mcp_server"). Mirrors the control-plane ResourceType Literal in
+    # services/control-plane/src/control_plane/audit.py per
+    # [memory:audit-literal-drift] (both must stay in sync).
+    "mcp_oauth_connection",
 ]
 """Canonical resource type strings used in audit log entries.
 

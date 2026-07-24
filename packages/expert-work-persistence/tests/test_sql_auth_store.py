@@ -506,3 +506,59 @@ async def test_delete_platform_binding_with_tenant_none(auth_stores: AuthStores)
         assert again is False
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_role_binding_delete_for_subject(auth_stores: AuthStores) -> None:
+    """delete_for_subject wipes all non-platform-scope bindings for a subject
+    within one tenant, leaves other-tenant + platform-scope rows untouched,
+    and is idempotent (second call returns 0)."""
+    _, _, rb_store, engine = auth_stores
+    try:
+        subject = uuid4()
+        tenant = uuid4()
+        other_tenant = uuid4()
+        await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=tenant,
+            role=Role.ADMIN,
+            granted_by="root",
+        )
+        await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=tenant,
+            role=Role.OPERATOR,
+            granted_by="root",
+        )
+        other_tenant_binding = await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=other_tenant,
+            role=Role.VIEWER,
+            granted_by="root",
+        )
+        platform_binding = await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=None,
+            role=Role.SYSTEM_ADMIN,
+            platform_scope=True,
+            granted_by="root",
+        )
+
+        removed = await rb_store.delete_for_subject(
+            subject_type="user", subject_id=subject, tenant_id=tenant
+        )
+        assert removed == 2
+
+        remaining = await rb_store.list_for_subject(subject_type="user", subject_id=subject)
+        assert {b.id for b in remaining} == {other_tenant_binding.id, platform_binding.id}
+
+        again = await rb_store.delete_for_subject(
+            subject_type="user", subject_id=subject, tenant_id=tenant
+        )
+        assert again == 0
+    finally:
+        await engine.dispose()
