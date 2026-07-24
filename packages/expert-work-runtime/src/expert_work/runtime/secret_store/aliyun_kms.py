@@ -62,6 +62,12 @@ class KmsBackend(Protocol):
     async def list_versions(self, name: str) -> list[str]:
         """Return ``name``'s version identifiers, newest first."""
 
+    async def delete_secret(self, name: str) -> None:
+        """Remove every version of the secret ``name``.
+
+        Idempotent — deleting an absent name does NOT raise.
+        """
+
 
 @dataclass(frozen=True)
 class _CacheEntry:
@@ -118,3 +124,8 @@ class AliyunKmsSecretStore:
     async def list_versions(self, name: str) -> list[str]:
         """Return ``name``'s known versions — never cached."""
         return await self._backend.list_versions(name)
+
+    async def delete(self, name: str) -> None:
+        """Delete a secret, then drop every cached version of ``name``."""
+        await self._backend.delete_secret(name)
+        self._cache = {k: v for k, v in self._cache.items() if k[0] != name}

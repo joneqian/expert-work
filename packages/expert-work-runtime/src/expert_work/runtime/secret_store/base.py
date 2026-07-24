@@ -73,3 +73,9 @@ class SecretStore(Protocol):
         Backends without versioning return a single synthetic id. Raises
         :class:`SecretNotFoundError` if ``name`` is unknown.
         """
+
+    async def delete(self, name: str) -> None:
+        """Remove every version of the secret ``name``.
+
+        Idempotent — deleting an absent name does NOT raise.
+        """

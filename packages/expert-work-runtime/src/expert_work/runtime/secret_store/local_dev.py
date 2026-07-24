@@ -75,6 +75,9 @@ class LocalDevSecretStore:
             raise SecretNotFoundError(name)
         return [_DEV_VERSION]
 
+    async def delete(self, name: str) -> None:
+        self.secrets.pop(name, None)
+
 
 def _parse_env_file(text: str) -> dict[str, str]:
     """Parse ``name=value`` lines; skip blanks / ``#`` comments; unquote."""
