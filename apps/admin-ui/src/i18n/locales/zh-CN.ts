@@ -1166,6 +1166,7 @@ const zhCN: TranslationKeys = {
       add_field: "添加字段",
       remove_field: "删除",
       name_invalid: "字段名须以字母或下划线开头,只能含字母数字下划线",
+      name_duplicate: "字段名重复——上面已有同名字段",
       complex_readonly: "已配置(复杂结构)——请到 YAML 视图编辑",
       off_confirm: "关闭将清除已定义的回复模板,确定?",
     },

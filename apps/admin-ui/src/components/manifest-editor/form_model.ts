@@ -195,8 +195,10 @@ export interface AgentManifest {
     knowledge?: { knowledge_base_refs?: string[]; [k: string]: unknown } | null;
     // Stream RT-1 (RT-ADR-4) — structured final reply: a JSON Schema the
     // agent's FINAL assistant message must validate against (intermediate
-    // tool-calling turns are unaffected). Authored in the YAML view; the
-    // curated form only surfaces whether it is configured.
+    // tool-calling turns are unaffected). Flat schemas are editable in the
+    // curated form's field-list editor (config-page redesign v2 Task 7 —
+    // see the "structured output field editor" section below); non-flat
+    // schemas stay YAML-only behind a read-only notice.
     output_schema?: {
       name?: string;
       json_schema?: Record<string, unknown>;

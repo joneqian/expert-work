@@ -9,6 +9,11 @@
  *  - a resync from a genuinely new ``formData`` (not our own echo) preserves
  *    any local WIP (invalid-name) row untouched — including already-typed
  *    text in its other fields — rather than clobbering it.
+ *  - a name that duplicates an EARLIER row's is locally invalid too
+ *    (review-fixed Important #2, transient-collision data loss): the later
+ *    row is excluded from the write (duplicate-specific error message), so
+ *    typing "title2" next to an existing "title" never last-wins-overwrites
+ *    the seeded property's type/description at the "title" keystroke.
  *  - an "unrepresentable" (non-flat) schema renders read-only: the Switch is
  *    hidden, only an info Alert shows, and NOTHING in that state ever calls
  *    ``onChange`` (there is nothing interactive to click).
@@ -21,7 +26,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "antd";
-import "../../../../i18n";
+import i18n from "../../../../i18n";
 
 import { OutputSchemaEditor } from "../OutputSchemaEditor";
 import type { AgentManifest } from "../../form_model";
@@ -314,6 +319,79 @@ describe("OutputSchemaEditor", () => {
       expect(screen.getByTestId("af-output-schema-desc-1")).toHaveValue(
         "wip notes",
       );
+    });
+
+    it("a transiently duplicate name never clobbers the earlier row's property (typing title2 next to seeded title)", async () => {
+      // Review-fixed Important #2. Pre-fix repro: at the 5th keystroke of
+      // "title2" the new row's name is exactly "title" — pattern-valid — so
+      // BOTH rows entered the write; ``properties`` being a record, the
+      // later row last-wins-overwrote the seeded title (integer + "keep me"
+      // → bare {type:"string"}), and the collapsed 1-row readback no longer
+      // matched lastWrittenRef's 2 written rows, so the echo check misfired
+      // into the external-resync branch and the typing row itself vanished
+      // mid-word. Controlled harness on purpose — the echo/resync half only
+      // exists when formData feeds back.
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const seeded = {
+        spec: {
+          output_schema: {
+            json_schema: {
+              type: "object",
+              properties: { title: { type: "integer", description: "keep me" } },
+              additionalProperties: false,
+            },
+          },
+        },
+      };
+      renderControlled(seeded, onChange);
+
+      await user.click(screen.getByTestId("af-output-schema-add"));
+      const nameInput = screen.getByTestId("af-output-schema-name-1");
+      await user.type(nameInput, "title");
+
+      // Mid-collision: the later row is locally invalid — duplicate-specific
+      // message, error state, still holding the typed text.
+      expect(nameInput).toHaveValue("title");
+      expect(nameInput).toHaveAttribute("aria-invalid", "true");
+      expect(
+        screen.getByText(i18n.t("agent_form.output_schema.name_duplicate")),
+      ).toBeInTheDocument();
+      // The EARLIER row is not the one flagged (first occurrence wins).
+      expect(screen.getByTestId("af-output-schema-name-0")).toHaveAttribute(
+        "aria-invalid",
+        "false",
+      );
+
+      // EVERY write so far — add-click and each keystroke — preserved the
+      // seeded property byte-for-byte (the mutation-level core: pre-fix, the
+      // "title" keystroke's write destroyed it).
+      expect(onChange).toHaveBeenCalled();
+      for (const call of onChange.mock.calls) {
+        const m = call[0] as AgentManifest;
+        const props = m.spec?.output_schema?.json_schema?.properties as Record<
+          string,
+          unknown
+        >;
+        expect(props.title).toEqual({ type: "integer", description: "keep me" });
+      }
+
+      // Finish the word — "title2" no longer collides: both rows land.
+      await user.type(nameInput, "2");
+      expect(nameInput).toHaveAttribute("aria-invalid", "false");
+      expect(
+        screen.queryByText(i18n.t("agent_form.output_schema.name_duplicate")),
+      ).not.toBeInTheDocument();
+      const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+      expect(last.spec?.output_schema?.json_schema).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "integer", description: "keep me" },
+          title2: { type: "string" },
+        },
+        required: [],
+        additionalProperties: false,
+      });
     });
   });
 

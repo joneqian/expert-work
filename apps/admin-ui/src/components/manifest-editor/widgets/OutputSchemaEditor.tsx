@@ -17,17 +17,23 @@
  * ``name``/``strict`` never surface here — ``setOutputSchemaRows`` preserves
  * them untouched (see form_model.ts's own doc comment).
  *
- * Field-name validation (``NAME_RE``) is enforced locally, PER ROW — there is
- * no whole-table gate. Rows are held in component state as ``LocalRow[]``
+ * Field-name validation is enforced locally, PER ROW — there is no
+ * whole-table gate. Rows are held in component state as ``LocalRow[]``
  * (a ``SchemaFieldRow`` plus a locally-generated ``uid`` used as the React
  * key, never the field name — a row's name is exactly what's mid-edit and
- * transiently non-unique/invalid). Every edit (patch/add/remove) commits
- * immediately: the write to ``formData`` is ``setOutputSchemaRows`` of
- * whichever rows CURRENTLY have a valid name, in their local order. A row
- * whose name fails ``NAME_RE`` (blank, mid-edit, leading digit, …) is simply
- * excluded from that write — it stays visible locally with an error state,
- * but every OTHER row's edit still lands in the manifest on its own, so one
- * bad/blank row never blocks unrelated edits (own or sibling-field) from
+ * transiently non-unique/invalid). A row is locally invalid (``rowIssue``)
+ * when its name fails ``NAME_RE`` (blank, mid-edit, leading digit, …) OR
+ * duplicates an EARLIER row's name — the duplicate case matters because
+ * ``properties`` is a record: two same-named rows in one write would
+ * last-wins overwrite the earlier property (destroying its type/description)
+ * the moment a new name transits through an existing one ("title" while
+ * typing "title2"). Every edit (patch/add/remove) commits immediately: the
+ * write to ``formData`` is ``setOutputSchemaRows`` of whichever rows are
+ * CURRENTLY locally valid, in their local order. An invalid row is simply
+ * excluded from that write — it stays visible locally with an error state
+ * (a duplicate-specific message for the collision case), but every OTHER
+ * row's edit still lands in the manifest on its own, so one bad/blank/
+ * colliding row never blocks unrelated edits (own or sibling-field) from
  * being saved. Fixing the name re-includes the row on the next keystroke.
  *
  * Resync from outside: an effect keyed on the ``formData`` prop re-derives
@@ -35,14 +41,19 @@
  * app writes ``spec.output_schema``, so any change is one of two shapes: (a)
  * an echo of our OWN last commit (or a sibling control's edit that leaves
  * ``output_schema`` untouched) — detected by comparing against
- * ``lastWrittenRef`` (the exact valid-subset we last wrote) and skipped
- * entirely, so it can never clobber an in-progress WIP row; or (b) a genuine
- * external change (e.g. the initial mount's seed) — synced in, with any
- * local WIP (invalid-name) rows preserved and appended after the synced
- * ones rather than dropped. A WIP row IS lost across a full unmount (e.g.
- * switching config groups, or toggling the YAML view — both swap this
- * widget out of the tree rather than just changing its props) — accepted;
- * nothing survives an unmount for any widget in this editor.
+ * ``lastWrittenRef`` and skipped entirely, so it can never clobber an
+ * in-progress WIP row; or (b) a genuine external change (e.g. the initial
+ * mount's seed) — synced in, with any local WIP (locally-invalid) rows
+ * preserved and appended after the synced ones rather than dropped.
+ * ``lastWrittenRef`` holds the READBACK (``readOutputSchemaRows``) of the
+ * manifest each commit produced — not the row array we passed in — so even
+ * if a future write path ever produced a manifest whose readback differs
+ * from its input rows (e.g. a record-collapse), the echo would still be
+ * recognized as our own instead of tripping the external branch. A WIP row
+ * IS lost across a full unmount (e.g. switching config groups, or toggling
+ * the YAML view — both swap this widget out of the tree rather than just
+ * changing its props) — accepted; nothing survives an unmount for any
+ * widget in this editor.
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { App, Alert, Button, Checkbox, Input, Select, Switch, Typography } from "antd";
@@ -78,6 +89,20 @@ interface LocalRow extends SchemaFieldRow {
 function stripUid(row: LocalRow): SchemaFieldRow {
   const { name, type, required, description } = row;
   return { name, type, required, description };
+}
+
+// Per-row local validity — see the module doc comment. ``"invalid"`` = the
+// name fails NAME_RE; ``"duplicate"`` = the name matches an EARLIER row's
+// (first occurrence wins — only the later row is flagged, so an existing
+// row never turns invalid because someone below is typing through its name).
+type RowIssue = "invalid" | "duplicate" | null;
+
+function rowIssue(rows: readonly { name: string }[], i: number): RowIssue {
+  if (!NAME_RE.test(rows[i].name)) return "invalid";
+  for (let j = 0; j < i; j++) {
+    if (rows[j].name === rows[i].name) return "duplicate";
+  }
+  return null;
 }
 
 // Positional content equality (ignoring ``uid``) — used to tell an echo of
@@ -120,9 +145,9 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
   const [rows, setRowsState] = useState<LocalRow[]>(() =>
     externalRows.map((r) => ({ ...r, uid: makeUid() })),
   );
-  // The valid-subset rows this widget itself last wrote (or, at mount, the
-  // externally-seeded rows) — see the module doc comment's "resync from
-  // outside" paragraph for what this distinguishes.
+  // The readback of the manifest this widget itself last wrote (or, at
+  // mount, the externally-seeded rows) — see the module doc comment's
+  // "resync from outside" paragraph for what this distinguishes.
   const lastWrittenRef = useRef<SchemaFieldRow[]>(externalRows);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,7 +157,7 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
     lastWrittenRef.current = external;
     setRowsState((prev) => [
       ...external.map((r) => ({ ...r, uid: makeUid() })),
-      ...prev.filter((r) => !NAME_RE.test(r.name)),
+      ...prev.filter((_, i) => rowIssue(prev, i) !== null),
     ]);
   }, [formData]);
 
@@ -141,13 +166,19 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
     label: t(`agent_form.output_schema.type_${type}`),
   }));
 
-  // No whole-table gate: always writes, but only the rows whose name is
-  // CURRENTLY valid — see the module doc comment.
+  // No whole-table gate: always writes, but only the rows that are CURRENTLY
+  // locally valid (name pattern + no duplicate-of-earlier) — see the module
+  // doc comment. ``lastWrittenRef`` gets the READBACK of the produced
+  // manifest, not the input subset (echo hardening, ibid.).
   const commit = (next: LocalRow[]): void => {
     setRowsState(next);
-    const validSubset = next.filter((r) => NAME_RE.test(r.name)).map(stripUid);
-    lastWrittenRef.current = validSubset;
-    onChange(setOutputSchemaRows(formData, validSubset));
+    const validSubset = next
+      .filter((_, i) => rowIssue(next, i) === null)
+      .map(stripUid);
+    const written = setOutputSchemaRows(formData, validSubset);
+    const readback = readOutputSchemaRows(written);
+    lastWrittenRef.current = Array.isArray(readback) ? readback : validSubset;
+    onChange(written);
   };
   const patchRow = (i: number, patch: Partial<SchemaFieldRow>): void =>
     commit(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -217,7 +248,8 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
                 </span>
               </div>
               {rows.map((row, i) => {
-                const nameInvalid = !NAME_RE.test(row.name);
+                const issue = rowIssue(rows, i);
+                const nameInvalid = issue !== null;
                 return (
                   <div
                     key={row.uid}
@@ -238,7 +270,11 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
                           type="danger"
                           style={{ fontSize: 12, display: "block" }}
                         >
-                          {t("agent_form.output_schema.name_invalid")}
+                          {t(
+                            issue === "duplicate"
+                              ? "agent_form.output_schema.name_duplicate"
+                              : "agent_form.output_schema.name_invalid",
+                          )}
                         </Text>
                       )}
                     </div>

@@ -1087,6 +1087,7 @@ export interface TranslationKeys {
       add_field: string;
       remove_field: string;
       name_invalid: string;
+      name_duplicate: string;
       complex_readonly: string;
       off_confirm: string;
     };
@@ -4058,6 +4059,7 @@ const en: TranslationKeys = {
       remove_field: "Remove",
       name_invalid:
         "Field names must start with a letter or underscore, and contain only letters, numbers, and underscores.",
+      name_duplicate: "Duplicate field name - a field above already uses this name.",
       complex_readonly: "Configured (complex structure) - edit it in the YAML view.",
       off_confirm: "Turning this off will clear the reply template you've defined. Continue?",
     },
