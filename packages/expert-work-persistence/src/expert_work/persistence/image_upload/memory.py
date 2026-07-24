@@ -70,13 +70,13 @@ class InMemoryImageUploadStore(ImageUploadStore):
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows
 
-    async def list_expired(
+    async def list_reapable(
         self,
         *,
         before: datetime,
         limit: int = 1000,
     ) -> list[ImageUpload]:
-        rows = [r for r in self._rows.values() if r.created_at < before]
+        rows = [r for r in self._rows.values() if r.created_at < before or r.deleted_at is not None]
         rows.sort(key=lambda r: r.created_at)
         return rows[:limit]
 
