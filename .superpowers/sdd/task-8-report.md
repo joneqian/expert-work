@@ -139,3 +139,155 @@ uv run mypy packages services/audit-backup-worker/src services/billing-rollup-jo
 3. **task-8-report.md 文件名冲突**:本 worktree 起手时该路径已存在 PR1(#1048)遗留的"Task 8:purge_user
    补 blob/feedback/summary"报告(与本 PR2 Task 8 无关,PR1/PR2 各自独立编号 1-8/1-9,文件名恰好撞车)。
    已按指示直接覆盖为本报告;PR1 内容已在 git 历史(commit `621c53f9`)中可查,未丢失。
+
+---
+
+# 追加:T8 review 修复轮(I-1 + M-1/M-2/M-3)
+
+## 状态:完成
+
+## 分支
+
+`fix-deletion-hygiene-pr2`(主工作树直接改,非 worktree)。
+
+## I-1(顺序修复,主项)
+
+**问题**:`mcp_catalog.py` 的 DELETE 端点里,`force` 级联(删 OAuth 连接行 + 其密文)跑在
+`store.delete(catalog_id)` 的 `IntegrityError → McpConnectorCatalogInUseError` 映射**之前**。
+重叠态下(目录既被某租户 `tenant_mcp_server` 实例化,又有其他租户/用户的 OAuth 连接)——
+`?force=true` 会先把真实用户的 OAuth 连接行 + 密文销毁,然后才因为 `tenant_mcp_server` 的
+RESTRICT 约束在 `store.delete` 里炸出 409。销毁发生在 `emit(audit, ...)` 之前,所以这次真实数据
+销毁**零审计记录**。
+
+**修法**:
+
+- `TenantMcpServerStore` 新增 `count_for_catalog(*, catalog_id: UUID) -> int`——三处实现:
+  - `base.py`:抽象方法 + docstring(照 `McpOAuthConnectionStore.count_for_catalog` 先例——
+    platform-scope、跨租户、无 `tenant_id` 谓词,调用方须自带 bypass-RLS/superuser 会话)。
+  - `sql.py`:`select(func.count()).select_from(TenantMcpServerRow).where(TenantMcpServerRow.catalog_id == catalog_id)`
+    (新增 `func` import)。
+  - `memory.py`:`sum(1 for r in self._rows.values() if r.catalog_id == catalog_id)`(锁内)。
+  - 两实现谓词逐字节等价(`catalog_id ==` 单一条件),无 dedup/filter 分歧风险。
+- `mcp_catalog.py` 的 `delete_catalog_entry`:
+  - 新增 `_get_tenant_mcp_server_store` 依赖注入(照 `_get_oauth_store` 先例,读
+    `request.app.state.tenant_mcp_server_store`),端点签名加
+    `tenant_mcp_server_store: Annotated[TenantMcpServerStore, Depends(_get_tenant_mcp_server_store)]`。
+  - 顺序改为:① 404 解析既有行(不变)→ **② 新增:`bypass_rls_session()` 内
+    `tenant_mcp_server_store.count_for_catalog(catalog_id) > 0` → 立即 409 `CATALOG_IN_USE`
+    (不看 `force`,不碰任何 OAuth 数据)** → ③ OAuth 连接计数 + 未 `force` 时 409
+    `CATALOG_HAS_OAUTH_CONNECTIONS`(不变)→ ④ `force` 且有连接时才跑级联删连接/密文(不变,
+    但此时已保证 tenant_mcp_server 未实例化,级联不会白做)→ ⑤ `store.delete()` 的
+    `IntegrityError → McpConnectorCatalogInUseError` 映射保留原位,作**竞态兜底**(本次检查和
+    真正 delete 之间理论上仍可能有并发实例化插入)。
+  - 409 响应体沿用既有 `McpConnectorCatalogInUseError` 分支的同一 `code`/`message`
+    (`CATALOG_IN_USE` / "catalog entry is instantiated by one or more tenants"),前端无需区分
+    "新前置检查命中" vs "DB 兜底命中"。
+
+## M-1(`list_for_catalog` 默认 limit=1000)
+
+`force` 级联段的 `oauth_store.list_for_catalog(catalog_id=catalog_id)` 改传
+`limit=max(connection_count, 1)`——`connection_count` 已在上一步 `count_for_catalog` 拿到,
+`max(..., 1)` 避免 `limit=0`(理论上 `connection_count>0` 才会进这个分支,`max` 是防御性写法,
+不依赖分支条件的隐式保证)。这样 >1000 连接的目录 force 删除时不会有密文孤儿或
+`connections_removed`/`secrets_removed` 计数少算。
+
+## M-2(0133 迁移 FK 查名加 schema 过滤)
+
+`0133_mcp_oauth_fk_restrict.py` 的 `_FIND_FK_NAME_SQL` 加了一行
+`AND tc.table_schema = current_schema()`——原查询虽然在 `kcu`/`ccu` 的 JOIN 条件上都带了
+`tc.table_schema = kcu.table_schema` / `tc.table_schema = ccu.table_schema`,但对 `tc.table_schema`
+本身没有过滤,多 schema(如同名表存在于另一个 schema)时可能查到错误 schema 的约束名。跑
+`test_migrations_create_all_tables` 等既有迁移回归确认改动不破坏单 schema(默认 `public`)下的
+正常路径。
+
+## M-3(secrets_failed 分支变异测试)
+
+照 `test_mcp_servers_api.py`(commit `788216c0`)的 `_DeleteAlwaysFailsSecretStore` 手法,在
+`test_mcp_catalog_api.py` 新增同名 wrapper class(`get`/`put` 透传,`delete` 恒抛
+`RuntimeError`),配 `test_delete_force_secrets_failed_branch_does_not_abort`:两条 OAuth 连接
+(4 个密文引用)、`secret_store` 换成恒失败包装后 `?force=true` 删除 → 仍 204、
+`oauth_store.count_for_catalog == 0`(连接行删除不受密文失败影响)、审计
+`connections_removed == 2` / `secrets_removed == 0` / `secrets_failed == 4`。此前这个分支
+(`except Exception: secrets_failed += 1`)只是"合理但从未被覆盖"的代码路径,现在有真实
+mutation-killing 回归。
+
+## 新增/改动测试清单
+
+- `packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py`:
+  `test_count_for_catalog_cross_tenant` / `test_count_for_catalog_empty`。
+- `packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py`:新增
+  `tenant_mcp_server_platform_scope` fixture(superuser DSN、无 RLS 包裹、无 APP_ROLE 改写——
+  照 `test_sql_mcp_oauth_connection_store.py` 的 `sql_store` fixture 先例,platform-scope
+  跨租户方法需要一个真能看见所有租户行的会话)+ `_make_catalog_entry` helper +
+  `test_count_for_catalog_cross_tenant` / `test_count_for_catalog_empty`。
+- `services/control-plane/tests/test_mcp_catalog_api.py`:
+  - `test_delete_force_overlapping_instantiation_and_oauth_leaves_both_intact`(I-1 核心场景)——
+    直插一行真实 `tenant_mcp_server`(经 `ctx.app.state.tenant_mcp_server_store.create(...)`,
+    `catalog_id` 指向目标目录)+ 一条真实 OAuth 连接(`_seed_oauth_connection`),
+    `?force=true` → 断言 409 `CATALOG_IN_USE`、OAuth 连接行仍在(`count_for_catalog == 1`)、
+    两个密文仍可读取(`secret_store.get` 不抛)、审计里**没有**新增
+    `mcp_catalog:delete` 记录(端点在 `emit()` 之前就返回了)。
+  - `_DeleteAlwaysFailsSecretStore` class + `test_delete_force_secrets_failed_branch_does_not_abort`
+    (M-3,见上)。
+
+## 测试结果
+
+```
+export DOCKER_HOST=unix:///Users/mac/.docker/run/docker.sock
+
+uv run pytest services/control-plane/tests/test_mcp_catalog_api.py -q
+→ 24 passed(22 既有 + 2 新增)
+
+uv run pytest services/control-plane/tests/test_mcp_catalog_instantiation.py -q
+→ 2 passed(回归)
+
+uv run pytest packages/expert-work-persistence/tests/test_mcp_catalog_oauth_fk_restrict.py -q
+→ 1 passed(回归)
+
+uv run pytest services/control-plane/tests/test_mcp_catalog_api.py \
+  services/control-plane/tests/test_mcp_catalog_instantiation.py \
+  packages/expert-work-persistence/tests/test_mcp_catalog_oauth_fk_restrict.py -q
+→ 27 passed
+
+uv run pytest packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py \
+  packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py -q
+→ 32 passed(新 store 方法双实现测试,含既有回归)
+
+uv run pytest packages/expert-work-persistence/tests -k "catalog or mcp_oauth or tenant_mcp_server" -q
+→ 70 passed
+
+uv run pytest services/control-plane/tests/test_mcp_catalog_api.py \
+  services/control-plane/tests/test_mcp_catalog_instantiation.py \
+  services/control-plane/tests/test_mcp_servers_api.py \
+  services/control-plane/tests/test_mcp_oauth_api.py \
+  services/control-plane/tests/test_mcp_oauth.py -q
+→ 97 passed(mcp 相关面全量回归)
+
+uv run pytest packages/expert-work-persistence/tests -q
+→ 907 passed, 1 failed, 3 errors —— 失败/错误项(test_rls_detect.py 一例、
+  test_pgbouncer_integration.py 三例)与本次改动前基线(上一轮报告记录的 903 passed / 同样
+  1 failed 3 errors)一致,只是新增的 4 个 store 方法测试把总数从 903 抬到 907;失败项本身与
+  catalog/oauth/tenant_mcp_server 无关,非本轮改动引入。
+
+uv run ruff check services/control-plane packages/expert-work-persistence
+→ All checks passed!
+
+uv run ruff format --check services/control-plane packages/expert-work-persistence
+→ 852 files already formatted(初次 mcp_catalog.py 需重排,ruff format 就地修正后复跑全绿)
+```
+
+## Concerns
+
+1. **mypy**(未列入本轮验收命令,仅信息记录):`uv run mypy packages/expert-work-persistence
+   services/control-plane/src` 报 81 处既有错误(`platform_config.py`/`runs.py`/`app.py` 等一堆
+   与本次改动无关的既有告警,以及 `mcp_catalog.py`/`mcp_servers.py`/`mcp_oauth_api.py` 里一批
+   `Unused "type: ignore" comment`)。用 `git stash` 交叉验证:`mcp_catalog.py` 的两处
+   unused-ignore 在改动前就存在(行号从 70/74 平移到 75/79,内容是 `_get_catalog_store`/
+   `_get_oauth_store` 既有的 `# type: ignore[no-any-return]`,不是本轮新增的
+   `_get_tenant_mcp_server_store` 那一处)。照上一轮报告记录的先例,CI mypy 范围本就不含
+   `services/control-plane`(只扫 `packages` + 几个 job 服务),这批告警与本轮改动无关,未修。
+2. **I-1 修复后 `force` 的语义收紧**:`force=true` 现在只能级联清理 OAuth 连接,永远不能绕过
+   `tenant_mcp_server` 实例化(修复前的实现在"重叠态"下技术上也做不到真正绕过——最终仍是 409——
+   但会在拒绝前先销毁数据;修复后是"先判无实例化,才谈 force 级联"),这与 brief 的既定语义
+   ("`force` 只级联清理 OAuth 连接,从不绕过 tenant_mcp_server 的 RESTRICT 闸")完全一致,只是本轮
+   把"从不绕过"落实到了"从不哪怕短暂地销毁数据后再拒绝"。

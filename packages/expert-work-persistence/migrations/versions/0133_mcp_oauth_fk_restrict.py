@@ -48,6 +48,7 @@ _FIND_FK_NAME_SQL = """
       ON tc.constraint_name = ccu.constraint_name
      AND tc.table_schema = ccu.table_schema
     WHERE tc.table_name = :table
+      AND tc.table_schema = current_schema()
       AND tc.constraint_type = 'FOREIGN KEY'
       AND kcu.column_name = :column
       AND ccu.table_name = :referenced_table

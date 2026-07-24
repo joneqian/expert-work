@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -199,3 +199,16 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
             await session.commit()
         if deleted is None:
             raise TenantMcpServerNotFoundError(tenant_id=tenant_id, name=name)
+
+    async def count_for_catalog(self, *, catalog_id: UUID) -> int:
+        # Platform-scope, cross-tenant by design — no tenant_id predicate.
+        # No bypass-RLS session precedent on this store; the caller must run
+        # on a platform-scope session (superuser/BYPASSRLS) or RLS filters
+        # every row out. See base.py docstring.
+        stmt = (
+            select(func.count())
+            .select_from(TenantMcpServerRow)
+            .where(TenantMcpServerRow.catalog_id == catalog_id)
+        )
+        async with self._sf() as session:
+            return int((await session.execute(stmt)).scalar_one())

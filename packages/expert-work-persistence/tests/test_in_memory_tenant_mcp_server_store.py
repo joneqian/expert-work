@@ -247,3 +247,25 @@ async def test_update_replaces_custom_headers() -> None:
     )
     assert updated.custom_header_names == ["X-New", "X-API-Key"]
     assert updated.sse_read_timeout_s == 90.0
+
+
+@pytest.mark.asyncio
+async def test_count_for_catalog_cross_tenant() -> None:
+    """Platform-scope catalog method (MCP catalog delete-guard, Task 8 review
+    I-1) counts across every tenant — no tenant_id predicate."""
+    store = InMemoryTenantMcpServerStore()
+    tid_1, tid_2 = uuid4(), uuid4()
+    cat_a, cat_b = uuid4(), uuid4()
+
+    await _make(store, tid_1, name="github", catalog_id=cat_a)
+    await _make(store, tid_2, name="github", catalog_id=cat_a)
+    await _make(store, tid_1, name="linear", catalog_id=cat_b)
+
+    assert await store.count_for_catalog(catalog_id=cat_a) == 2
+    assert await store.count_for_catalog(catalog_id=cat_b) == 1
+
+
+@pytest.mark.asyncio
+async def test_count_for_catalog_empty() -> None:
+    store = InMemoryTenantMcpServerStore()
+    assert await store.count_for_catalog(catalog_id=uuid4()) == 0

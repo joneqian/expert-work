@@ -34,6 +34,7 @@ from expert_work.persistence import (
     McpConnectorCatalogNotFoundError,
     McpConnectorCatalogStore,
     McpOAuthConnectionStore,
+    TenantMcpServerStore,
 )
 from expert_work.protocol import (
     AuditAction,
@@ -57,6 +58,10 @@ def _get_catalog_store(request: Request) -> McpConnectorCatalogStore:
 
 def _get_oauth_store(request: Request) -> McpOAuthConnectionStore:
     return request.app.state.mcp_oauth_connection_store  # type: ignore[no-any-return]
+
+
+def _get_tenant_mcp_server_store(request: Request) -> TenantMcpServerStore:
+    return request.app.state.tenant_mcp_server_store  # type: ignore[no-any-return]
 
 
 def _get_secret_store(request: Request) -> SecretStore:
@@ -413,6 +418,9 @@ def build_mcp_catalog_router() -> APIRouter:
         principal: Annotated[Principal, Depends(require("mcp_catalog", "delete"))],
         store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
         oauth_store: Annotated[McpOAuthConnectionStore, Depends(_get_oauth_store)],
+        tenant_mcp_server_store: Annotated[
+            TenantMcpServerStore, Depends(_get_tenant_mcp_server_store)
+        ],
         secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         pool_service: Annotated[object, Depends(_get_platform_mcp_pool_service)],
@@ -429,8 +437,30 @@ def build_mcp_catalog_router() -> APIRouter:
                 detail={"code": "CATALOG_NOT_FOUND", "message": "not found"},
             )
 
+        # Instance check FIRST — before any destructive action, including the
+        # force OAuth-connection cascade below (Task 8 review I-1). A tenant
+        # that has instantiated this catalog entry into tenant_mcp_server blocks
+        # deletion unconditionally (``force`` never bypasses this — only the
+        # OAuth-connection cascade is force-able). Without this order-first
+        # check, an overlapping state (instantiated AND holding OAuth
+        # connections) would let ``force=true`` destroy real user connections
+        # and secrets before ``store.delete``'s RESTRICT-triggered
+        # IntegrityError mapping ever got a chance to say no — the IntegrityError
+        # mapping below stays in place as a defense-in-depth fallback (e.g. a
+        # race between this check and the delete).
+        async with bypass_rls_session():
+            instance_count = await tenant_mcp_server_store.count_for_catalog(catalog_id=catalog_id)
+        if instance_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CATALOG_IN_USE",
+                    "message": "catalog entry is instantiated by one or more tenants",
+                },
+            )
+
         # Users may still hold live OAuth connections to this connector — the
-        # tenant_mcp_server RESTRICT guard below never fires for oauth2
+        # tenant_mcp_server RESTRICT guard above never fires for oauth2
         # connectors (no tenant_mcp_server row is ever created for them), so
         # this is the only app-level protection. Default: 409 with the count
         # so the admin sees the blast radius; ``?force=true`` opts into the
@@ -455,8 +485,14 @@ def build_mcp_catalog_router() -> APIRouter:
         secrets_removed = 0
         secrets_failed = 0
         if force and connection_count > 0:
+            # ``list_for_catalog`` defaults to limit=1000 — pass the count we
+            # already have (M-1) so a connector with >1000 connections doesn't
+            # silently orphan secrets past the default cap and undercount the
+            # audit totals below.
             async with bypass_rls_session():
-                connections = await oauth_store.list_for_catalog(catalog_id=catalog_id)
+                connections = await oauth_store.list_for_catalog(
+                    catalog_id=catalog_id, limit=max(connection_count, 1)
+                )
             for connection in connections:
                 for ref in (connection.access_token_ref, connection.refresh_token_ref):
                     if not ref:
