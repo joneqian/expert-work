@@ -57,6 +57,11 @@ class RetentionCleanupSettings(BaseSettings):
     # (K.K6 memory forget, J.15 workspace archive, Phase 3a purge_user)
     # flows. No per-tenant override in M0 — same rationale as the image
     # retention knob above.
+    #
+    # NOTE: these knobs also bound the ``purge_user`` "recoverable for 90
+    # days" window (spec 2026-07-24 D1/D4) — purged users' memory and the
+    # tenant_user row are recoverable only until the respective sweep
+    # fires. Do not lower below the recovery SLA promised to operators.
     memory_hard_delete_grace_days: int = Field(default=90, ge=1, le=3650)
     workspace_archive_retention_days: int = Field(default=90, ge=1, le=3650)
     tenant_user_hard_delete_grace_days: int = Field(default=90, ge=1, le=3650)
