@@ -385,7 +385,7 @@ const RUN_PROFILES: Record<RunProfile, RunProfileValues> = {
   },
 };
 
-const RUN_PROFILE_IDS: readonly RunProfile[] = ["balanced", "cost", "capability"];
+export const RUN_PROFILE_IDS: readonly RunProfile[] = ["balanced", "cost", "capability"];
 
 function asObj(v: unknown): AgentManifest {
   return v !== null && typeof v === "object" && !Array.isArray(v)

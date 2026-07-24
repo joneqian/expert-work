@@ -35,6 +35,7 @@ import {
   applyRunProfile,
   countProfileDiff,
   inferRunProfile,
+  RUN_PROFILE_IDS,
   type RunProfile,
 } from "../form_model";
 
@@ -44,8 +45,6 @@ interface BasicSectionProps {
   formData: unknown;
   onChange: (data: unknown) => void;
 }
-
-const RUN_PROFILES: readonly RunProfile[] = ["balanced", "cost", "capability"];
 
 function RunProfileCard({ formData, onChange }: BasicSectionProps) {
   const { t } = useTranslation();
@@ -83,7 +82,7 @@ function RunProfileCard({ formData, onChange }: BasicSectionProps) {
         onChange={(e) => pick(e.target.value as RunProfile)}
         style={{ display: "flex", flexDirection: "column", gap: 8 }}
       >
-        {RUN_PROFILES.map((profile) => (
+        {RUN_PROFILE_IDS.map((profile) => (
           <Radio
             key={profile}
             value={profile}
