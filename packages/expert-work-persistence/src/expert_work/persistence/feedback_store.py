@@ -101,6 +101,12 @@ class FeedbackStore(abc.ABC):
         a user's threads are purged. Scoped by both tenant and thread id
         so another tenant's row sharing the same thread id is untouched.
         An empty ``thread_ids`` deletes nothing and returns ``0``.
+
+        A *write* — expected to run inside a tenant-scoped RLS session;
+        the ``tenant_id`` argument must agree with the session's GUC
+        (mismatched values delete zero rows rather than another
+        tenant's data, since RLS clamps the row set before the
+        explicit ``WHERE`` even applies).
         """
 
 
