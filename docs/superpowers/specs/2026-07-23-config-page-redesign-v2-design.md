@@ -61,7 +61,7 @@
 | **人工审批** | 审批工具勾选(7 个 GATEABLE_TOOLS)+ 审批超时(approval_timeout,从「高级」Collapse 提出来) |
 | **子任务与网络** | 临时小助手开关(dynamic_workers)· 网络出网 3 项(egress/allowlist/denylist)· 工具强制(tool_use_enforcement) |
 
-- **轨迹录制(policies.trajectory_recording)从表单移除**(用户拍板 2026-07-23):运行时不读的声明性死字段,不给非技术人员摆假开关;归入声明性注脚一行,YAML 写了无害。
+- ~~轨迹录制从表单移除~~ **勘误(2026-07-24,T8 实证推翻)**:PR7 注脚错了——`policies.trajectory_recording` 是**活字段**(agent_factory.py:1092 真读,5 调用点传 `trajectory_enabled`;L.L7:完成的 run 序列化成 ShareGPT JSONL 存对象存储,供评测/微调;默认开;**隐私开关**——敏感 Agent 须可关)。原「死字段移除」决定前提失效 → **开关恢复**,落「触发器与可观测」组(FieldDef switch,默认 true),文案照真语义(存档用途 + 关=对话内容不落存档)。
 
 - 「高级」「①网络出网」「②工具强制」Collapse 全拆。
 - `security_gates.dict_note` 缩成一行:「限流、隐私脱敏、安全策略等高级项请在 YAML 视图配置」。
@@ -83,7 +83,7 @@
 
 ### 沙箱与资源 / 触发器与可观测
 
-- 行样式与文案统一到 v2,不动结构(字段少)。persistent_workspace 文案须讲透:「关:运行结束文件不保留(产物另存不受影响);要跨会话续用文件再打开。开 = 每个使用者一块跨会话磁盘,不会自动回收」。
+- 行样式与文案统一到 v2,不动结构(字段少)。~~persistent_workspace 文案「关=文件不保留」~~ **勘误(2026-07-24,T8 对照 agent_spec.py:308-316 实证)**:user 运行的工作区卷**恒自动挂载**,文件持久与此开关无关;开关只控 **CM-0 计划投影**(PLAN.md/TODO.md/MEMORY.md 轮末写入工作区、开跑时读回)。文案照真语义写(T8 已落)。
 
 ## ②′ 工具默认姿态变更(2026-07-23 用户拍板)
 
