@@ -1037,7 +1037,13 @@ def build_mcp_servers_router() -> APIRouter:
                 try:
                     await secret_store.delete(parse_secret_ref(ref))
                 except Exception:
-                    logger.warning("mcp_servers.delete_secret_failed", extra={"server_name": name})
+                    # ``name`` is request-derived (CodeQL py/log-injection);
+                    # the row UUID identifies the server just as well.
+                    logger.warning(
+                        "mcp_servers: failed to delete secret for server %s",
+                        record.id,
+                        exc_info=True,
+                    )
         # (d) Audit with the row UUID (consistent with POST/PATCH), name in details.
         await emit(
             audit,

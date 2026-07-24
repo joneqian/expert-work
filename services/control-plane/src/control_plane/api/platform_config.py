@@ -218,9 +218,9 @@ async def _delete_managed_secret(
     try:
         await secret_store.delete(canonical)
     except Exception:
-        logger.warning(
-            "platform_config: failed to delete managed secret %r", canonical, exc_info=True
-        )
+        # The slot name is request-derived (CodeQL py/log-injection) — the
+        # audit trail's ``secret_deleted: false`` carries the exact resource.
+        logger.warning("platform_config: failed to delete managed secret", exc_info=True)
         return False
     return True
 
