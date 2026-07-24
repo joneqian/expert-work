@@ -17,16 +17,34 @@
  * ``name``/``strict`` never surface here — ``setOutputSchemaRows`` preserves
  * them untouched (see form_model.ts's own doc comment).
  *
- * Field-name validation (``NAME_RE``) is enforced locally: rows are held in
- * component state (not read directly off ``formData`` on every keystroke) so
- * an in-progress, momentarily-invalid name can still be typed and shown with
- * an error state WITHOUT ever reaching ``onChange`` — the manifest never
- * gains a property whose key fails the pattern. A commit (write to
- * ``formData``) only happens once every row's name is valid; other edits
- * (type/required/description, add, remove) go through the same gate so a
- * blank in-progress row never leaks into the manifest either.
+ * Field-name validation (``NAME_RE``) is enforced locally, PER ROW — there is
+ * no whole-table gate. Rows are held in component state as ``LocalRow[]``
+ * (a ``SchemaFieldRow`` plus a locally-generated ``uid`` used as the React
+ * key, never the field name — a row's name is exactly what's mid-edit and
+ * transiently non-unique/invalid). Every edit (patch/add/remove) commits
+ * immediately: the write to ``formData`` is ``setOutputSchemaRows`` of
+ * whichever rows CURRENTLY have a valid name, in their local order. A row
+ * whose name fails ``NAME_RE`` (blank, mid-edit, leading digit, …) is simply
+ * excluded from that write — it stays visible locally with an error state,
+ * but every OTHER row's edit still lands in the manifest on its own, so one
+ * bad/blank row never blocks unrelated edits (own or sibling-field) from
+ * being saved. Fixing the name re-includes the row on the next keystroke.
+ *
+ * Resync from outside: an effect keyed on the ``formData`` prop re-derives
+ * rows via ``readOutputSchemaRows`` whenever it changes. Nothing else in the
+ * app writes ``spec.output_schema``, so any change is one of two shapes: (a)
+ * an echo of our OWN last commit (or a sibling control's edit that leaves
+ * ``output_schema`` untouched) — detected by comparing against
+ * ``lastWrittenRef`` (the exact valid-subset we last wrote) and skipped
+ * entirely, so it can never clobber an in-progress WIP row; or (b) a genuine
+ * external change (e.g. the initial mount's seed) — synced in, with any
+ * local WIP (invalid-name) rows preserved and appended after the synced
+ * ones rather than dropped. A WIP row IS lost across a full unmount (e.g.
+ * switching config groups, or toggling the YAML view — both swap this
+ * widget out of the tree rather than just changing its props) — accepted;
+ * nothing survives an unmount for any widget in this editor.
  */
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { App, Alert, Button, Checkbox, Input, Select, Switch, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -50,6 +68,34 @@ const FIELD_TYPES: SchemaFieldType[] = [
   "array_number",
 ];
 
+// A row plus a locally-generated identity, stable across re-renders and
+// independent of ``name`` (which is exactly the field that's transiently
+// invalid/non-unique while being typed).
+interface LocalRow extends SchemaFieldRow {
+  uid: string;
+}
+
+function stripUid(row: LocalRow): SchemaFieldRow {
+  const { name, type, required, description } = row;
+  return { name, type, required, description };
+}
+
+// Positional content equality (ignoring ``uid``) — used to tell an echo of
+// our own commit (or a sibling-field edit that leaves this block untouched)
+// apart from a genuine external change to ``output_schema`` itself.
+function sameRows(a: SchemaFieldRow[], b: SchemaFieldRow[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (r, i) =>
+        r.name === b[i].name &&
+        r.type === b[i].type &&
+        r.required === b[i].required &&
+        r.description === b[i].description,
+    )
+  );
+}
+
 function Heading({ children }: { children: ReactNode }) {
   return <h3 style={{ fontSize: 15, margin: "0 0 12px" }}>{children}</h3>;
 }
@@ -68,15 +114,26 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
   const on = external !== undefined;
   const externalRows = Array.isArray(external) ? external : [];
 
-  const [rows, setRowsState] = useState<SchemaFieldRow[]>(externalRows);
-  // Resync from the manifest whenever it changes from the outside (incl. our
-  // own successful commits, a harmless no-op since local state already
-  // equals what we just wrote). A BLOCKED edit (invalid name — see the
-  // module doc comment) never calls ``onChange``, so ``formData`` doesn't
-  // change and this effect doesn't clobber the in-progress local edit.
+  const nextUidRef = useRef(0);
+  const makeUid = (): string => `row-${nextUidRef.current++}`;
+
+  const [rows, setRowsState] = useState<LocalRow[]>(() =>
+    externalRows.map((r) => ({ ...r, uid: makeUid() })),
+  );
+  // The valid-subset rows this widget itself last wrote (or, at mount, the
+  // externally-seeded rows) — see the module doc comment's "resync from
+  // outside" paragraph for what this distinguishes.
+  const lastWrittenRef = useRef<SchemaFieldRow[]>(externalRows);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (Array.isArray(external)) setRowsState(external);
+    if (!Array.isArray(external)) return;
+    if (sameRows(external, lastWrittenRef.current)) return;
+    lastWrittenRef.current = external;
+    setRowsState((prev) => [
+      ...external.map((r) => ({ ...r, uid: makeUid() })),
+      ...prev.filter((r) => !NAME_RE.test(r.name)),
+    ]);
   }, [formData]);
 
   const typeOptions = FIELD_TYPES.map((type) => ({
@@ -84,16 +141,21 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
     label: t(`agent_form.output_schema.type_${type}`),
   }));
 
-  const commit = (next: SchemaFieldRow[]): void => {
+  // No whole-table gate: always writes, but only the rows whose name is
+  // CURRENTLY valid — see the module doc comment.
+  const commit = (next: LocalRow[]): void => {
     setRowsState(next);
-    if (next.every((r) => NAME_RE.test(r.name))) {
-      onChange(setOutputSchemaRows(formData, next));
-    }
+    const validSubset = next.filter((r) => NAME_RE.test(r.name)).map(stripUid);
+    lastWrittenRef.current = validSubset;
+    onChange(setOutputSchemaRows(formData, validSubset));
   };
   const patchRow = (i: number, patch: Partial<SchemaFieldRow>): void =>
     commit(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const addRow = (): void =>
-    commit([...rows, { name: "", type: "string", required: false, description: "" }]);
+    commit([
+      ...rows,
+      { name: "", type: "string", required: false, description: "", uid: makeUid() },
+    ]);
   const removeRow = (i: number): void =>
     commit(rows.filter((_, idx) => idx !== i));
 
@@ -158,7 +220,7 @@ export function OutputSchemaEditor({ formData, onChange }: OutputSchemaEditorPro
                 const nameInvalid = !NAME_RE.test(row.name);
                 return (
                   <div
-                    key={i}
+                    key={row.uid}
                     data-testid={`af-output-schema-row-${i}`}
                     style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}
                   >

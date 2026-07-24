@@ -2,9 +2,13 @@
  * OutputSchemaEditor — config-page redesign v2 Task 7. Contract under test:
  *  - off by default, on writes the empty-object default schema.
  *  - editing rows emits the exact ``setOutputSchemaRows``-shaped manifest.
- *  - an invalid field name blocks the commit (no ``onChange``) and shows an
- *    error state on the Input — the mutation-proof case for "非法名不写入
- *    manifest".
+ *  - PER-ROW commit, no whole-table gate (review-fixed Important): a row
+ *    whose name is currently invalid is excluded from the write and shown
+ *    with an error state, but every OTHER row's own edit still lands in the
+ *    manifest immediately — one bad/blank row never blocks unrelated edits.
+ *  - a resync from a genuinely new ``formData`` (not our own echo) preserves
+ *    any local WIP (invalid-name) row untouched — including already-typed
+ *    text in its other fields — rather than clobbering it.
  *  - an "unrepresentable" (non-flat) schema renders read-only: the Switch is
  *    hidden, only an info Alert shows, and NOTHING in that state ever calls
  *    ``onChange`` (there is nothing interactive to click).
@@ -127,7 +131,13 @@ describe("OutputSchemaEditor", () => {
     });
   });
 
-  it("an invalid field name blocks the commit and shows an error state", async () => {
+  it("an invalid field name is excluded from the write and shows an error state (review-fixed: no whole-table gate)", async () => {
+    // Contract change from the pre-fix version: that gated the ENTIRE
+    // commit (no onChange at all) on every row's name being valid, which is
+    // exactly the Important bug this test now documents the fix for — one
+    // invalid row (here, the ONLY row) must not block a write; it's simply
+    // excluded, so the manifest's `properties` reflects "no valid rows"
+    // rather than going stale/frozen.
     const user = userEvent.setup();
     const onChange = vi.fn();
     const seeded = {
@@ -146,7 +156,14 @@ describe("OutputSchemaEditor", () => {
     await user.clear(nameInput);
     onChange.mockClear();
     await user.type(nameInput, "1bad");
-    expect(onChange).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalled();
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.output_schema?.json_schema).toEqual({
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    });
+    expect(nameInput).toHaveValue("1bad");
     expect(nameInput).toHaveAttribute("aria-invalid", "true");
   });
 
@@ -174,6 +191,129 @@ describe("OutputSchemaEditor", () => {
       type: "object",
       properties: {},
       additionalProperties: false,
+    });
+  });
+
+  describe("per-row commit (review-fixed Important: no whole-table gate + no clobber-on-resync)", () => {
+    it("editing a valid row while another row's name is invalid commits immediately with just the valid subset", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      // Seeded directly with a structurally-valid-but-locally-invalid-name
+      // property ("1bad") — readOutputSchemaRows doesn't enforce NAME_RE (only
+      // structural representability), so this is a legitimate way to start
+      // the widget already showing one invalid row alongside one valid row.
+      const seeded = {
+        spec: {
+          output_schema: {
+            json_schema: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                "1bad": { type: "string" },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      };
+      renderEditor(seeded, onChange);
+      expect(screen.getByTestId("af-output-schema-name-1")).toHaveAttribute(
+        "aria-invalid",
+        "true",
+      );
+
+      await user.type(screen.getByTestId("af-output-schema-desc-0"), "hi");
+
+      const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+      // Only "title" (the valid row) made it into the write; "1bad" is
+      // excluded — the bug this fixes was that "1bad" being invalid used to
+      // block "title"'s edit from committing AT ALL.
+      expect(last.spec?.output_schema?.json_schema).toEqual({
+        type: "object",
+        properties: { title: { type: "string", description: "hi" } },
+        required: [],
+        additionalProperties: false,
+      });
+    });
+
+    it("adding a field (blank row) does not block other rows' edits from committing", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const seeded = {
+        spec: {
+          output_schema: {
+            json_schema: {
+              type: "object",
+              properties: { title: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        },
+      };
+      renderEditor(seeded, onChange);
+      await user.click(screen.getByTestId("af-output-schema-add"));
+      expect(screen.getByTestId("af-output-schema-name-1")).toHaveValue("");
+
+      onChange.mockClear();
+      await user.click(screen.getByTestId("af-output-schema-required-0"));
+
+      expect(onChange).toHaveBeenCalled();
+      const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+      // The freshly-added blank row (index 1, name "") is excluded — but
+      // "title"'s own edit still landed, immediately.
+      expect(last.spec?.output_schema?.json_schema).toEqual({
+        type: "object",
+        properties: { title: { type: "string" } },
+        required: ["title"],
+        additionalProperties: false,
+      });
+    });
+
+    it("a sibling field's edit (new formData reference, unchanged output_schema) preserves an in-progress WIP row untouched", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const seeded = {
+        spec: {
+          description: "v1",
+          output_schema: {
+            json_schema: {
+              type: "object",
+              properties: { title: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        },
+      };
+      const { rerender } = renderEditor(seeded, onChange);
+
+      // Add a blank row and type into its description — its name stays ""
+      // (invalid), so this row never reaches the manifest; it only lives in
+      // local overlay state.
+      await user.click(screen.getByTestId("af-output-schema-add"));
+      await user.type(screen.getByTestId("af-output-schema-desc-1"), "wip notes");
+      expect(screen.getByTestId("af-output-schema-name-1")).toHaveValue("");
+
+      // Simulate a SIBLING control (e.g. the system-prompt textarea in the
+      // same FormView section) producing a brand-new formData object whose
+      // output_schema content is byte-identical to what's already synced —
+      // exactly the "any formData change" trigger that used to blow away
+      // local state wholesale.
+      const siblingEdited = {
+        ...seeded,
+        spec: { ...seeded.spec, description: "v2" },
+      };
+      rerender(
+        <App>
+          <OutputSchemaEditor formData={siblingEdited} onChange={onChange} />
+        </App>,
+      );
+
+      // The WIP row and its already-typed text survive the resync.
+      expect(screen.getByTestId("af-output-schema-row-1")).toBeInTheDocument();
+      expect(screen.getByTestId("af-output-schema-name-1")).toHaveValue("");
+      expect(screen.getByTestId("af-output-schema-desc-1")).toHaveValue(
+        "wip notes",
+      );
     });
   });
 
