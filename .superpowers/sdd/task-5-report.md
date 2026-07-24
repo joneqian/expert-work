@@ -76,3 +76,42 @@ mcp_oauth_connection store、encrypted secret store 等)。
 - `admin_app` fixture 改动(新增 `audit_store` 参数、传入自定义 `audit_logger`)是本文件级别的改动,
   影响该文件全部 18 个测试的 app 构造路径,但只是把默认 in-memory audit store 换成显式可查询的同款
   store,行为等价,其余 15 个既有测试原样通过。
+
+## Review follow-up(T5 三发现修复)
+
+针对 T5 review 的 [I-1]/[可见性]/[M-1] 三条发现,在 `fix-deletion-hygiene-pr2` 分支主工作树直接修:
+
+1. **[I-1] `moved` 门禁**:`role_binding_repo.delete_for_subject` 的调用条件从
+   `if member.keycloak_user_id is not None:` 改为 `if moved and member.keycloak_user_id is not None:`,
+   与同函数 `:307`/`:318` 两处 Keycloak 调用的门禁风格对齐——`moved` 是 `member_repo.transition(...)`
+   的返回值,`False` 表示并发竞态下这次请求丢了(状态未真正转移,例如另一并发请求已先转移)。
+   门禁前:即便 `moved=False`,依然会真删 role binding、并在审计里记一条与实际状态转移不符的
+   “删除记录”(幽灵审计——binding 被删了,但这次请求并没有真的完成 revoke/suspend)。门禁后:未真正
+   转移状态的请求不再动 role binding。
+2. **[可见性] 审计失败标记**:`delete_for_subject` 的 `except Exception` 分支新增 `cleanup_failed = True`
+   (原来只有 `logger.warning(...)`),审计 `emit(...)` 的 `details` 增加 `role_bindings_cleanup_failed: bool`
+   (正常路径为 `False`)。理由:`revoked`/`suspended` 都是终态,没有针对 binding 清理失败的重跑路径,
+   操作员必须能从审计页(而非翻应用日志)发现清理失败,并去 role_bindings 管理页手动补删。
+3. **[M-1] 失败分支测试**:`test_members_api.py` 新增两例:
+   - `test_revoke_role_binding_cleanup_failure_does_not_fail_request`——`monkeypatch` 把
+     `app.state.role_binding_repo.delete_for_subject` 换成一个恒抛 `RuntimeError` 的协程,断言:
+     revoke 仍 `204`(异常不外抛)、`tenant_member_repo` 里状态已转 `revoked`(不回滚)、审计
+     `MEMBER_REVOKE` 一条,`role_bindings_removed == 0` 且 `role_bindings_cleanup_failed is True`。
+   - `test_revoke_skips_cleanup_when_transition_loses_race`——`monkeypatch` 把
+     `app.state.tenant_member_repo.transition` 换成恒返回 `False` 的协程(模拟并发竞态丢单),
+     再给 `role_binding_repo.delete_for_subject` 挂一个仅记录“是否被调用”的桩,断言 revoke 仍
+     `204`、且该桩从未被调用(`moved=False` 门禁生效,不误删 binding)。
+   - 顺带给既有 `test_revoke_invited_member_removes_role_binding`(正常路径)追加一条断言
+     `role_bindings_cleanup_failed is False`。
+
+### 验证结果(review follow-up)
+
+- `uv run pytest services/control-plane/tests/test_members_api.py -q` → **20 passed**(18 + 新增 2)
+- `uv run ruff check services/control-plane` → All checks passed!
+- `uv run ruff format --check services/control-plane` → 395 files already formatted
+
+### 改动文件清单(review follow-up)
+
+- `services/control-plane/src/control_plane/api/members.py`
+- `services/control-plane/tests/test_members_api.py`
+- `.superpowers/sdd/task-5-report.md`(本节)

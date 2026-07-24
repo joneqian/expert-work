@@ -336,7 +336,8 @@ def build_members_router() -> APIRouter:
         # authz checks until it expires. Best-effort: a cleanup failure does
         # not roll back the status transition already committed above.
         removed = 0
-        if member.keycloak_user_id is not None:
+        cleanup_failed = False
+        if moved and member.keycloak_user_id is not None:
             try:
                 removed = await role_binding_repo.delete_for_subject(
                     subject_type="user",
@@ -344,6 +345,7 @@ def build_members_router() -> APIRouter:
                     tenant_id=principal.tenant_id,
                 )
             except Exception:
+                cleanup_failed = True
                 logger.warning("member_revoke.role_binding_cleanup_failed", exc_info=True)
 
         await emit(
@@ -358,6 +360,7 @@ def build_members_router() -> APIRouter:
                 "email": member.email,
                 "from_status": member.status,
                 "role_bindings_removed": removed,
+                "role_bindings_cleanup_failed": cleanup_failed,
             },
         )
 

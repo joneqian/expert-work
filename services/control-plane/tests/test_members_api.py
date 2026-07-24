@@ -204,6 +204,7 @@ async def test_revoke_invited_member_removes_role_binding(
     revoke_rows = [r for r in page.entries if r.action is AuditAction.MEMBER_REVOKE]
     assert len(revoke_rows) == 1
     assert revoke_rows[0].details["role_bindings_removed"] == 1
+    assert revoke_rows[0].details["role_bindings_cleanup_failed"] is False
 
 
 @pytest.mark.asyncio
@@ -271,6 +272,79 @@ async def test_revoke_member_without_keycloak_user_id_skips_cleanup(
     revoke_rows = [r for r in page.entries if r.action is AuditAction.MEMBER_REVOKE]
     assert len(revoke_rows) == 1
     assert revoke_rows[0].details["role_bindings_removed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_revoke_role_binding_cleanup_failure_does_not_fail_request(
+    admin_app: tuple[AsyncClient, UUID, object, FakeKeycloakAdminClient],
+    audit_store: InMemoryAuditLogStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``delete_for_subject`` failure must not roll back the status transition,
+    must not raise past the endpoint, and must be flagged in the audit details
+    so an operator can find + hand-clean the orphaned binding."""
+    from expert_work.protocol import AuditAction, AuditQuery
+
+    client, tenant_id, app, _kc = admin_app
+    inv = await client.post(
+        "/v1/members/invite",
+        json={"invitations": [{"email": "a@co.com", "role": "viewer"}]},
+        headers=_admin_headers(tenant_id),
+    )
+    member_id = UUID(inv.json()["data"]["results"][0]["member_id"])
+
+    async def _boom(**_kwargs: object) -> int:
+        raise RuntimeError("role binding store unavailable")
+
+    monkeypatch.setattr(app.state.role_binding_repo, "delete_for_subject", _boom)
+
+    resp = await client.delete(f"/v1/members/{member_id}", headers=_admin_headers(tenant_id))
+    assert resp.status_code == 204  # cleanup failure does not surface as a request error
+
+    member = await app.state.tenant_member_repo.get(tenant_id=tenant_id, member_id=member_id)
+    assert member is not None and member.status == "revoked"  # transition already committed
+
+    page = await audit_store.query(AuditQuery(tenant_id=tenant_id))
+    revoke_rows = [r for r in page.entries if r.action is AuditAction.MEMBER_REVOKE]
+    assert len(revoke_rows) == 1
+    assert revoke_rows[0].details["role_bindings_removed"] == 0
+    assert revoke_rows[0].details["role_bindings_cleanup_failed"] is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_skips_cleanup_when_transition_loses_race(
+    admin_app: tuple[AsyncClient, UUID, object, FakeKeycloakAdminClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``transition`` reports ``moved=False`` (lost a concurrent race — e.g.
+    another request already revoked/suspended the member first), the role
+    binding must be left alone: no cleanup call, no ghost audit of a deletion
+    that didn't happen."""
+    client, tenant_id, app, _kc = admin_app
+    inv = await client.post(
+        "/v1/members/invite",
+        json={"invitations": [{"email": "a@co.com", "role": "viewer"}]},
+        headers=_admin_headers(tenant_id),
+    )
+    member_id = UUID(inv.json()["data"]["results"][0]["member_id"])
+
+    async def _not_moved(**_kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(app.state.tenant_member_repo, "transition", _not_moved)
+
+    called = False
+
+    async def _delete_for_subject(**_kwargs: object) -> int:
+        nonlocal called
+        called = True
+        return 0
+
+    monkeypatch.setattr(app.state.role_binding_repo, "delete_for_subject", _delete_for_subject)
+
+    resp = await client.delete(f"/v1/members/{member_id}", headers=_admin_headers(tenant_id))
+    assert resp.status_code == 204
+    assert called is False
 
 
 @pytest.mark.asyncio
