@@ -5,10 +5,12 @@
  * the reflection-evaluator model picker, vision fallback) — this component
  * embeds that FormView FIRST, unchanged, then adds the one curated panel the
  * group didn't have a home for before: reflection self-assessment
- * (``spec.reflection`` — Stream J.11's reflect-node config). The panel
- * starts collapsed (mirrors every sibling curated pane's "don't fatigue"
- * rule — the embedded FormView section remains the group's primary
- * content).
+ * (``spec.reflection`` — Stream J.11's reflect-node config). config-page
+ * redesign v2 Task 5 flattened this panel from a collapsible ``Collapse``
+ * into a plain heading + always-visible switch — every sibling curated pane
+ * that used to fold optional content behind a click now shows it directly
+ * (FieldRow v2's "don't hide the knob" convention; the collapse's own
+ * "don't fatigue" job is now just not having many rows to begin with).
  *
  * Unlike the two tuning fields inside it, the activation switch is hand-wired
  * directly against ``FieldRow`` rather than folded into a ``FieldDef``:
@@ -27,7 +29,7 @@
  * the ``routing.rules`` planning rule, ``vision.fallbacks``, the
  * base_url/azure_* connection fields, and the deprecated ``api_key_ref``.
  */
-import { Collapse, Switch, Typography } from "antd";
+import { Switch, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { FieldRow } from "../FieldRow";
@@ -94,43 +96,29 @@ export function ModelRoutingSection({
         onChange={onChange}
         sections={["model"]}
       />
-      <Collapse
-        defaultActiveKey={[]}
-        style={{ marginTop: 24 }}
-        items={[
-          {
-            key: "reflection",
-            label: t("model_group.panel_reflection"),
-            forceRender: true,
-            children: (
-              <>
-                <FieldRow
-                  fieldId="reflection"
-                  label={t("model_group.rf_enable_label")}
-                  brief={t("model_group.rf_enable_brief")}
-                  impact={t("model_group.rf_enable_impact")}
-                  isDefault={!reflectionOn}
-                >
-                  <Switch
-                    checked={reflectionOn}
-                    aria-label={t("model_group.rf_enable_label")}
-                    onChange={(on) =>
-                      onChange(setReflectionOn(formData, on))
-                    }
-                  />
-                </FieldRow>
-                {reflectionOn && (
-                  <PolicyFieldList
-                    defs={TUNING_DEFS}
-                    values={tuningValues}
-                    onPatch={handleTuningPatch}
-                  />
-                )}
-              </>
-            ),
-          },
-        ]}
-      />
+      <Text strong style={{ display: "block", marginTop: 24, marginBottom: 12 }}>
+        {t("model_group.panel_reflection")}
+      </Text>
+      <FieldRow
+        fieldId="reflection"
+        label={t("model_group.rf_enable_label")}
+        brief={t("model_group.rf_enable_brief")}
+        help={t("model_group.rf_enable_impact")}
+        isDefault={!reflectionOn}
+      >
+        <Switch
+          checked={reflectionOn}
+          aria-label={t("model_group.rf_enable_label")}
+          onChange={(on) => onChange(setReflectionOn(formData, on))}
+        />
+      </FieldRow>
+      {reflectionOn && (
+        <PolicyFieldList
+          defs={TUNING_DEFS}
+          values={tuningValues}
+          onPatch={handleTuningPatch}
+        />
+      )}
       <Text
         type="secondary"
         data-testid="model-yaml-note"

@@ -1,20 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../../../i18n";
 
 import { SecuritySection } from "../SecuritySection";
 import type { AgentManifest } from "../../form_model";
 
-// The four new curated fields (sandbox egress + tool-use enforcement) —
-// mirrors ``SecurityFields`` in form_model.ts.
-const FIELD_IDS = [
+const DEFENSES_FIELD_IDS = [
+  "defenses.prompt_injection",
+  "defenses.output_screen",
+  "defenses.output_judge",
+  "defenses.output_dlp",
+  "defenses.action_screen",
+];
+
+const NETWORK_FIELD_IDS = [
+  "dynamic_workers.enabled",
   "sandbox.network.egress",
   "sandbox.network.allowlist",
   "sandbox.network.denylist",
@@ -32,18 +33,11 @@ function rowFor(fieldId: string): HTMLElement {
   return document.querySelector(`[data-field-id="${fieldId}"]`) as HTMLElement;
 }
 
-// Fields in a collapsed panel are mounted (``forceRender``) but not in the
-// accessibility tree, so ``getByRole`` can't reach them until the panel is
-// opened — matches how a real user would interact with the section (mirrors
-// ``ContextGatesSection.test.tsx``'s helper of the same shape).
-async function openPanel(
+async function openTab(
   user: ReturnType<typeof userEvent.setup>,
   label: string,
 ): Promise<void> {
-  const header = within(document.body)
-    .getByText(label, { selector: ".ant-collapse-header-text" })
-    .closest(".ant-collapse-header") as HTMLElement;
-  await user.click(header);
+  await user.click(screen.getByRole("tab", { name: label }));
 }
 
 /**
@@ -77,38 +71,169 @@ function pressKey(el: HTMLElement, key: "Enter" | "Backspace"): void {
 }
 
 describe("SecuritySection", () => {
-  it("embeds the existing defenses/governance FormView sections", () => {
+  it("renders three sub-tabs (defenses/approval/network), defenses active by default", () => {
     renderSection();
-    expect(screen.getByTestId("af-defenses-output-screen")).toBeInTheDocument();
-    expect(screen.getByTestId("af-approval")).toBeInTheDocument();
+    expect(screen.getByTestId("security-tab-defenses")).toBeInTheDocument();
+    const approvalTab = screen.getByRole("tab", { name: "Human approval" });
+    const networkTab = screen.getByRole("tab", {
+      name: "Subtasks & network",
+    });
+    expect(approvalTab).toBeInTheDocument();
+    expect(networkTab).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Defenses" }),
+    ).toHaveAttribute("aria-selected", "true");
   });
 
-  it("renders all four new FieldRows (network egress + tool-use enforcement)", () => {
+  it("renders all 5 defenses FieldRows with zero clicks (defenses is the default tab)", () => {
     renderSection();
-    for (const id of FIELD_IDS) {
+    for (const id of DEFENSES_FIELD_IDS) {
       expect(rowFor(id)).toBeInTheDocument();
     }
   });
 
-  it("both new panels start collapsed", () => {
-    const { container } = renderSection();
-    const outer = container.querySelector(
-      '[data-testid="security-section"] > .ant-collapse',
-    ) as HTMLElement;
-    const panelItems = Array.from(outer.children).filter((el) =>
-      el.classList.contains("ant-collapse-item"),
-    );
-    expect(panelItems).toHaveLength(2);
-    const headers = panelItems.map((item) => item.children[0]);
-    expect(headers[0]).toHaveAttribute("aria-expanded", "false");
-    expect(headers[1]).toHaveAttribute("aria-expanded", "false");
-  });
-
-  it("choosing egress=none writes spec.sandbox.network.egress", async () => {
+  it("output_screen is on by default; toggling it off writes defenses.output_screen and shows the warning", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
-    await openPanel(user, "① Network egress");
+    const sw = within(rowFor("defenses.output_screen")).getByRole("switch");
+    expect(sw).toBeChecked();
+    await user.click(sw);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.defenses?.output_screen).toBe("off");
+  });
+
+  it("shows the output_screen off-warning only when it's off", () => {
+    renderSection();
+    expect(
+      screen.queryByText(/no longer blocked/),
+    ).not.toBeInTheDocument();
+    const off: AgentManifest = { spec: { defenses: { output_screen: "off" } } };
+    renderSection(off);
+    expect(screen.getByText(/no longer blocked/)).toBeInTheDocument();
+  });
+
+  it("turning prompt_injection off writes defenses.prompt_injection=off", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+    const sw = within(rowFor("defenses.prompt_injection")).getByRole(
+      "switch",
+    );
+    expect(sw).toBeChecked(); // spotlight default = on
+    await user.click(sw);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.defenses?.prompt_injection).toBe("off");
+  });
+
+  it("enabling the judge writes defenses.output_judge=block and reveals the on-error select", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+    expect(
+      screen.queryByTestId("af-defenses-output-judge-on-error"),
+    ).not.toBeInTheDocument();
+    const sw = within(rowFor("defenses.output_judge")).getByRole("switch");
+    await user.click(sw);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.defenses?.output_judge).toBe("block");
+
+    const judged: AgentManifest = { spec: { defenses: { output_judge: "block" } } };
+    renderSection(judged);
+    expect(
+      screen.getByTestId("af-defenses-output-judge-on-error"),
+    ).toBeInTheDocument();
+  });
+
+  it("enabling DLP writes defenses.output_dlp=redact and shows the redaction note", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+    const sw = within(rowFor("defenses.output_dlp")).getByRole("switch");
+    await user.click(sw);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.defenses?.output_dlp).toBe("redact");
+
+    const redacting: AgentManifest = { spec: { defenses: { output_dlp: "redact" } } };
+    renderSection(redacting);
+    expect(screen.getByText(/rewrites legitimate replies/i)).toBeInTheDocument();
+  });
+
+  it("shows the action_screen on-error select only when action_screen != off", () => {
+    renderSection(); // action_screen off by default
+    expect(
+      screen.queryByTestId("af-defenses-action-screen-on-error"),
+    ).not.toBeInTheDocument();
+    const withAction: AgentManifest = {
+      spec: { defenses: { action_screen: "block" } },
+    };
+    renderSection(withAction);
+    expect(
+      screen.getByTestId("af-defenses-action-screen-on-error"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the extends note only when spec.extends is set", () => {
+    renderSection();
+    expect(
+      screen.queryByTestId("af-defenses-extends-note"),
+    ).not.toBeInTheDocument();
+    const withExtends: AgentManifest = { spec: { extends: "secure-template" } };
+    renderSection(withExtends);
+    expect(screen.getByTestId("af-defenses-extends-note")).toBeInTheDocument();
+  });
+
+  it("approval tab: checking bash adds it to policies.approval_required_tools", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+    await openTab(user, "Human approval");
+    await user.click(screen.getByTestId("af-approval-bash"));
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.policies?.approval_required_tools).toEqual(["bash"]);
+  });
+
+  it("approval tab: approval_timeout defaults to 86400 and editing it writes approval_timeout_s", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+    await openTab(user, "Human approval");
+    const input = within(rowFor("policies.approval_timeout_s")).getByRole(
+      "spinbutton",
+    );
+    expect(input).toHaveValue("86400");
+    await user.clear(input);
+    await user.type(input, "3600");
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.policies?.approval_timeout_s).toBe(3600);
+  });
+
+  it("network tab: renders all 5 FieldRows once its tab is active", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await openTab(user, "Subtasks & network");
+    for (const id of NETWORK_FIELD_IDS) {
+      expect(rowFor(id)).toBeInTheDocument();
+    }
+  });
+
+  it("network tab: turning dynamic workers off writes dynamic_workers.enabled=false", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+    await openTab(user, "Subtasks & network");
+    const sw = within(rowFor("dynamic_workers.enabled")).getByRole("switch");
+    expect(sw).toBeChecked(); // default on
+    await user.click(sw);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.dynamic_workers?.enabled).toBe(false);
+  });
+
+  it("network tab: choosing egress=none writes spec.sandbox.network.egress", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSection({}, onChange);
+    await openTab(user, "Subtasks & network");
 
     const combobox = within(rowFor("sandbox.network.egress")).getByRole(
       "combobox",
@@ -119,14 +244,14 @@ describe("SecuritySection", () => {
     expect(last.spec?.sandbox?.network?.egress).toBe("none");
   });
 
-  it("choosing the egress option matching the default deletes the key", async () => {
+  it("network tab: choosing the egress option matching the default deletes the key", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const seed: AgentManifest = {
       spec: { sandbox: { network: { egress: "none" } } },
     };
     renderSection(seed, onChange);
-    await openPanel(user, "① Network egress");
+    await openTab(user, "Subtasks & network");
 
     const combobox = within(rowFor("sandbox.network.egress")).getByRole(
       "combobox",
@@ -137,11 +262,11 @@ describe("SecuritySection", () => {
     expect(last.spec?.sandbox?.network?.egress).toBeUndefined();
   });
 
-  it("typing two domains into the allowlist writes a string array", async () => {
+  it("network tab: typing two domains into the allowlist writes a string array", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const { rerender } = renderSection({}, onChange);
-    await openPanel(user, "① Network egress");
+    await openTab(user, "Subtasks & network");
 
     const combobox = within(rowFor("sandbox.network.allowlist")).getByRole(
       "combobox",
@@ -155,9 +280,7 @@ describe("SecuritySection", () => {
 
     // Controlled Select — feed the first patch back into formData before
     // typing the second entry (mirrors field_defs.test.tsx's tags round trip).
-    rerender(
-      <SecuritySection formData={last} onChange={onChange} />,
-    );
+    rerender(<SecuritySection formData={last} onChange={onChange} />);
     await user.keyboard("b.example.com");
     const opt = await screen.findByText(optionContent("b.example.com"));
     await user.click(opt);
@@ -169,14 +292,14 @@ describe("SecuritySection", () => {
     ]);
   });
 
-  it("clearing the denylist back to empty deletes the key", async () => {
+  it("network tab: clearing the denylist back to empty deletes the key", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const seed: AgentManifest = {
       spec: { sandbox: { network: { denylist: ["bad.example.com"] } } },
     };
     renderSection(seed, onChange);
-    await openPanel(user, "① Network egress");
+    await openTab(user, "Subtasks & network");
 
     const combobox = within(rowFor("sandbox.network.denylist")).getByRole(
       "combobox",
@@ -188,11 +311,11 @@ describe("SecuritySection", () => {
     expect(last.spec?.sandbox?.network?.denylist).toBeUndefined();
   });
 
-  it("choosing tool_use_enforcement=on writes policies.tool_use_enforcement", async () => {
+  it("network tab: choosing tool_use_enforcement=on writes policies.tool_use_enforcement", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
-    await openPanel(user, "② Tool-use enforcement");
+    await openTab(user, "Subtasks & network");
 
     const combobox = within(
       rowFor("policies.tool_use_enforcement"),
@@ -203,37 +326,17 @@ describe("SecuritySection", () => {
     expect(last.spec?.policies?.tool_use_enforcement).toBe("on");
   });
 
-  it("the deleted af-tool-budget control no longer exists in the embedded governance section", () => {
-    renderSection();
-    expect(screen.queryByTestId("af-tool-budget")).not.toBeInTheDocument();
-  });
-
-  it("renders the closing dict-note", () => {
+  it("renders the shortened closing dict-note", () => {
     renderSection();
     expect(screen.getByTestId("security-gates-dict-note")).toHaveTextContent(
-      "Rate limiting / PII / security policy are still a free-form dict",
+      "Rate limiting, PII redaction, and security policy are advanced items",
     );
   });
 
-  // Task 2 (PR7) — trajectory_recording's hint copy was corrected to state
-  // it's not wired up (recording is decided by the deployment's ObjectStore
-  // config, not this manifest switch). It lives in the embedded "governance"
-  // FormView section's collapsed "Advanced" panel.
-  it("renders the corrected trajectory-recording hint inside the governance Advanced panel", async () => {
-    const user = userEvent.setup();
+  it("no longer renders a trajectory-recording control anywhere", () => {
     renderSection();
-    const header = within(document.body)
-      .getByText("Advanced", { selector: ".ant-collapse-header-text" })
-      .closest(".ant-collapse-header") as HTMLElement;
-    await user.click(header);
-
-    fireEvent.mouseEnter(
-      screen.getByTestId("field-help-af-trajectory-recording"),
-    );
-    await waitFor(() => {
-      expect(
-        screen.getByText(/no longer recorded as trajectories/),
-      ).toBeInTheDocument();
-    });
+    expect(
+      screen.queryByTestId("af-trajectory-recording"),
+    ).not.toBeInTheDocument();
   });
 });

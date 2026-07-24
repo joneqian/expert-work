@@ -593,13 +593,34 @@ export interface TranslationKeys {
     group_sandbox: string;
     group_observability: string;
     field_impact_label: string;
-    field_default_badge: string;
+    field_customized_badge: string;
+    field_reset: string;
+    field_reset_hint: string;
+  };
+  // config-page redesign v2 Task 6 — RunProfileCard, the "basic" group's
+  // one-click preset over 18 fields scattered across memory/budget/context
+  // (form_model.ts's RUN_PROFILES). ``{balanced,cost,capability}``/
+  // ``{...}_desc`` are the three preset cards' label + one-line blurb;
+  // ``custom`` is the "no preset matches" tag.
+  run_profile: {
+    title: string;
+    hint: string;
+    balanced: string;
+    balanced_desc: string;
+    cost: string;
+    cost_desc: string;
+    capability: string;
+    capability_desc: string;
+    custom: string;
+    confirm_title: string;
+    confirm_body: string;
   };
   // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Six
   // FieldRow-rendered knobs living in three manifest locations
   // (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
   // top-level spec.stream_deadline_s+idle_timeout_s).
   run_budget: {
+    subhead_steps: string;
     max_iterations_label: string;
     max_iterations_brief: string;
     max_iterations_impact: string;
@@ -611,11 +632,11 @@ export interface TranslationKeys {
     wf_type_opt_react: string;
     wf_type_opt_plan_execute: string;
     wf_type_opt_custom: string;
-    workflow_note: string;
     max_no_progress_label: string;
     max_no_progress_brief: string;
     max_no_progress_impact: string;
     max_no_progress_default: string;
+    subhead_time: string;
     run_deadline_label: string;
     run_deadline_brief: string;
     run_deadline_impact: string;
@@ -643,7 +664,6 @@ export interface TranslationKeys {
     panel_tool_result_prune: string;
     panel_working_memory: string;
     panel_context_compression: string;
-    panel_tool_output_budget: string;
     pr_enabled_label: string;
     pr_enabled_brief: string;
     pr_enabled_impact: string;
@@ -725,7 +745,9 @@ export interface TranslationKeys {
   // prefixes mirror SecurityFields' value keys (egress/allowlist/denylist/
   // enforce ~ toolUseEnforcement).
   security_gates: {
-    group_intro: string;
+    tab_defenses: string;
+    tab_approval: string;
+    tab_network: string;
     panel_network: string;
     panel_enforce: string;
     egress_label: string;
@@ -765,17 +787,53 @@ export interface TranslationKeys {
     platform_note_body: string;
     declarative_note: string;
   };
-  // Task 2 (PR5) — "Memory" group (MemorySection), embedded after the
-  // existing "memory" FormView section (the on/off toggle + retrieve_top_k
-  // + write-back/advanced knobs). Two default-collapsed panels: ① injection
-  // budgets (spec.memory.long_term.injection_token_budget /
+  // "Memory" group (MemorySection) — config-page redesign v2 Task 2 moved
+  // every memory field here as three sub-tabs (basic/retrieval/budget); the
+  // "memory" FormView section it used to embed is gone. ``on_*`` is the
+  // long-term-memory on/off switch (presence-semantic — see form_model.ts's
+  // readMemoryOn/setMemoryOn); the other 8 fields (top_k/write_back on
+  // "basic", the 6 read/write tuning knobs on "retrieval") each get the
+  // usual ``_label``/``_brief``/``_impact`` triple. The "budget" tab keeps
+  // its two pre-existing panels: ① injection budgets
+  // (spec.memory.long_term.injection_token_budget /
   // correction_token_budget — only rendered while memory is on, since a
   // budget is meaningless with no long_term block to inject from) and ②
   // background consolidation (policies.memory_consolidation.enabled — a
   // control-plane job, not on the run path, so it stays available even with
-  // memory off). A closing note flags memory.short_term / dynamic_context
-  // .inject_memory as reserved (schema-valid, runtime no-op) fields.
+  // memory off).
   memory_group: {
+    tab_basic: string;
+    tab_retrieval: string;
+    tab_budget: string;
+    on_label: string;
+    on_brief: string;
+    on_impact: string;
+    topk_label: string;
+    topk_brief: string;
+    topk_impact: string;
+    write_back_label: string;
+    write_back_brief: string;
+    write_back_impact: string;
+    verify_reads_label: string;
+    verify_reads_brief: string;
+    verify_reads_impact: string;
+    write_min_importance_label: string;
+    write_min_importance_brief: string;
+    write_min_importance_impact: string;
+    reconcile_writes_label: string;
+    reconcile_writes_brief: string;
+    reconcile_writes_impact: string;
+    recall_mode_label: string;
+    recall_mode_brief: string;
+    recall_mode_impact: string;
+    recall_mode_per_session: string;
+    recall_mode_per_turn: string;
+    rewrite_reads_label: string;
+    rewrite_reads_brief: string;
+    rewrite_reads_impact: string;
+    abstain_threshold_label: string;
+    abstain_threshold_brief: string;
+    abstain_threshold_impact: string;
     panel_injection: string;
     panel_consolidation: string;
     inj_budget_label: string;
@@ -790,7 +848,6 @@ export interface TranslationKeys {
     consolidation_brief: string;
     consolidation_impact: string;
     aux_model_note: string;
-    reserved_note: string;
   };
   // Task 3 (PR6) — "Model & Routing" group (ModelRoutingSection), embedded
   // after the existing "model" FormView section (provider/model picker,
@@ -818,16 +875,20 @@ export interface TranslationKeys {
     yaml_note: string;
   };
   // Task 2 (PR7) — "Triggers & Observability" group (ObservabilitySection).
-  // One live field (spec.cache.enabled, the per-agent LLM response cache
-  // opt-out) plus two note blocks: manifest ``triggers`` declared but not
-  // wired up (the trigger-management API is the real path), and
-  // trace/log_level/redact_fields (plus trajectory_recording, whose hint
-  // copy is corrected in ``agent_form`` below) declarative-only — validated
-  // but not read at runtime.
+  // Two live fields (spec.cache.enabled, the per-agent LLM response cache
+  // opt-out; policies.trajectory_recording, whether a finished run's full
+  // transcript is archived for quality evaluation — Task 4 wrongly removed
+  // its toggle as declarative-only, Task 8b restored it) plus two note
+  // blocks: manifest ``triggers`` declared but not wired up (the
+  // trigger-management API is the real path), and trace/log_level/
+  // redact_fields declarative-only — validated but not read at runtime.
   observability_group: {
     resp_cache_label: string;
     resp_cache_brief: string;
     resp_cache_impact: string;
+    traj_rec_label: string;
+    traj_rec_brief: string;
+    traj_rec_impact: string;
     triggers_note: string;
     declarative_note: string;
   };
@@ -863,9 +924,6 @@ export interface TranslationKeys {
     section_model: string;
     section_prompt: string;
     field_prompt_placeholder: string;
-    section_memory: string;
-    memory_hint: string;
-    memory_topk: string;
     section_tools: string;
     tool_web_search: string;
     tool_http: string;
@@ -912,8 +970,6 @@ export interface TranslationKeys {
     field_description_help: string;
     section_model_help: string;
     section_prompt_help: string;
-    section_memory_help: string;
-    memory_topk_help: string;
     section_reflection_evaluator_help: string;
     section_defenses: string;
     section_defenses_help: string;
@@ -922,19 +978,24 @@ export interface TranslationKeys {
     defenses_group_output: string;
     defenses_group_action: string;
     defenses_prompt_injection: string;
+    defenses_prompt_injection_brief: string;
     defenses_prompt_injection_help: string;
     defenses_prompt_injection_off_warn: string;
     defenses_output_screen: string;
+    defenses_output_screen_brief: string;
     defenses_output_screen_help: string;
     defenses_output_screen_off_warn: string;
     defenses_output_judge: string;
+    defenses_output_judge_brief: string;
     defenses_output_judge_help: string;
     defenses_output_judge_on_warn: string;
     defenses_output_judge_on_error: string;
     defenses_output_dlp: string;
+    defenses_output_dlp_brief: string;
     defenses_output_dlp_help: string;
     defenses_output_dlp_on_note: string;
     defenses_action_screen: string;
+    defenses_action_screen_brief: string;
     defenses_action_screen_help: string;
     defenses_action_screen_off: string;
     defenses_action_screen_block: string;
@@ -974,27 +1035,9 @@ export interface TranslationKeys {
     section_dynamic_workers: string;
     section_dynamic_workers_help: string;
     dynamic_workers_hint: string;
-    section_advanced: string;
-    memory_write_back: string;
-    memory_write_back_help: string;
-    memory_verify_reads: string;
-    memory_verify_reads_help: string;
-    memory_write_min_importance: string;
-    memory_write_min_importance_help: string;
-    memory_reconcile_writes: string;
-    memory_reconcile_writes_help: string;
-    memory_recall_mode: string;
-    memory_recall_mode_help: string;
-    memory_recall_per_session: string;
-    memory_recall_per_turn: string;
-    memory_rewrite_reads: string;
-    memory_rewrite_reads_help: string;
-    memory_abstain_threshold: string;
-    memory_abstain_threshold_help: string;
     approval_timeout: string;
+    approval_timeout_brief: string;
     approval_timeout_help: string;
-    trajectory_recording: string;
-    trajectory_recording_help: string;
     section_knowledge: string;
     section_knowledge_help: string;
     knowledge_hint: string;
@@ -1032,9 +1075,26 @@ export interface TranslationKeys {
     prompt_var_remove: string;
     prompt_var_add: string;
     section_output_schema: string;
-    section_output_schema_help: string;
-    output_schema_on_hint: string;
-    output_schema_off_hint: string;
+    output_schema: {
+      on_label: string;
+      hint_off: string;
+      col_name: string;
+      col_type: string;
+      col_required: string;
+      col_desc: string;
+      type_string: string;
+      type_number: string;
+      type_integer: string;
+      type_boolean: string;
+      type_array_string: string;
+      type_array_number: string;
+      add_field: string;
+      remove_field: string;
+      name_invalid: string;
+      name_duplicate: string;
+      complex_readonly: string;
+      off_confirm: string;
+    };
     inject_date_label: string;
     inject_date_hint: string;
     dynamic_context_note: string;
@@ -3426,277 +3486,304 @@ const en: TranslationKeys = {
     group_sandbox: "Sandbox & Resources",
     group_observability: "Triggers & Observability",
     field_impact_label: "Impact",
-    field_default_badge: "Default {{value}}",
+    field_customized_badge: "Customized",
+    field_reset: "Reset to default",
+    field_reset_hint: "Reset to default: {{value}}",
+  },
+  run_profile: {
+    title: "Run profile",
+    hint: "Pick a profile to auto-configure memory, steps, and compression — every group below can still be fine-tuned field by field.",
+    balanced: "Balanced (recommended)",
+    balanced_desc: "Solid for everyday use at moderate cost (default).",
+    cost: "Cost-saving",
+    cost_desc:
+      "Saves tokens: remembers and thinks less, compresses sooner — cheaper on long conversations.",
+    capability: "High-capability",
+    capability_desc:
+      "Remembers and thinks more: double the steps, fuller memory, steadier on hard tasks — costs more.",
+    custom: "Custom",
+    confirm_title: 'Apply "{{name}}"?',
+    confirm_body:
+      "This will change {{count}} settings; you can still adjust any of them afterward.",
   },
   run_budget: {
+    subhead_steps: "Steps & flow",
     max_iterations_label: "Max steps",
-    max_iterations_brief:
-      "How many 'think, then act' cycles a single run may go through at most",
+    max_iterations_brief: "How many steps this run can take at most",
     max_iterations_impact:
-      "Once the budget runs out, the agent is forced to wrap up right away — no more tool calls, just a summary — so the answer may be incomplete. Raise it for research-heavy agents that need many lookups (40-60 is a common range for heavy tasks); lower it to keep costs down. If this run spins up helper sub-tasks along the way, each helper's own step budget is capped at whichever is smaller: this value, or the platform's worker ceiling.",
+      "A 'step' is one think-then-act cycle — the model thinks, then does one thing (like a tool call). This caps how many of those cycles a single run may go through. Once the budget runs out, the agent is forced to wrap up right away — no more tool calls, just a summary — so the answer may be incomplete.\nRaise it for research-heavy agents that need many lookups (40-60 is a common range for heavy tasks); lower it to keep costs down.\nIf this run spins up helper sub-tasks along the way, each helper's own step budget is capped at whichever is smaller: this value, or the platform's worker ceiling.\nExample: an agent researching an industry across a dozen websites will get cut off early and give an incomplete answer if this is set too low.",
     max_iterations_default: "30",
     wf_type_label: "Workflow type",
-    wf_type_brief:
-      "react = the classic think-then-act loop; plan_execute = a planning model writes a full plan up front, then execution follows it step by step",
+    wf_type_brief: "Think-and-act as it goes, or plan first then execute",
     wf_type_impact:
-      "react (recommended): the agent thinks as it goes — simple requests get answered directly, and only complex ones get a step-by-step plan first. This covers most cases. plan_execute: every task gets a full plan up front no matter how simple, then runs it step by step; this is more reliable for long, sequential jobs like writing a report, but even trivial requests pay the planning cost — slower and pricier, since it's one extra model call. The model that does the planning is set by a rule in the Model & Routing group; if none is set, the main model handles it. custom is deprecated — picking it behaves exactly like react.",
+      "react (recommended): the agent thinks as it goes — simple requests get answered directly, and only complex ones get a step-by-step plan first. This covers most cases. plan_execute: every task gets a full plan up front no matter how simple, then runs it step by step.\nplan_execute is more reliable for long, sequential jobs like writing a report, but even trivial requests pay the planning cost — slower and pricier, since it's one extra model call.\nThe model that does the planning is set by a rule in the Model & Routing group; if none is set, the main model handles it. custom is deprecated — picking it behaves exactly like react.",
     wf_type_default: "react",
     wf_type_opt_react: "react (think, then act)",
     wf_type_opt_plan_execute: "plan_execute (plan, then execute)",
     wf_type_opt_custom: "custom (deprecated — same as react)",
-    workflow_note:
-      "workflow still accepts early_stop and builder, but they're dead: setting them doesn't error, but they no longer do anything — harmless to leave in the YAML.",
     max_no_progress_label: "No-progress stop",
-    max_no_progress_brief:
-      "Stop early after N consecutive steps with no real progress; 0 = off",
+    max_no_progress_brief: "Stop early once it's stuck making no progress",
     max_no_progress_impact:
-      "Keeps the agent from spinning in place and burning through steps for nothing (e.g. calling the same tool over and over without getting anywhere useful). Set it too low, though, and it may cut off a legitimate retry — 3-5 is a reasonable starting point.",
+      "Stop early after N consecutive steps with no real progress at all, so the agent doesn't burn through steps for nothing; 0 = turns this check off.\nRaise it to tolerate legitimate retries without cutting them off; lower it to kill a stuck loop faster — but too low may cut off a normal retry, so 3-5 is a reasonable starting point.\nExample: the agent keeps calling the same tool over and over without getting anywhere useful — this setting stops it early instead of letting it spin in place.",
     max_no_progress_default: "0 (off)",
+    subhead_time: "Time & spend",
     run_deadline_label: "Max run time",
-    run_deadline_brief:
-      "The most seconds this run (including any sub-agents it spawns) may take; 0 = falls back to the platform default (currently 1h)",
+    run_deadline_brief: "The longest this run may take",
     run_deadline_impact:
-      "The longest this run may take, in seconds, including any sub-agents it spawns along the way; once exceeded, the run is force-stopped, so a stuck run can't quietly run up the bill. 0 doesn't mean unlimited — it just falls back to the platform's own default cap (currently 3600 seconds / 1 hour, set by ops). Set an explicit number here for a longer run or tighter control.",
+      "The longest this run may take, in seconds, including any sub-agents it spawns along the way; once exceeded, the run is force-stopped, so a stuck run can't quietly run up the bill.\n0 doesn't mean unlimited — it just falls back to the platform's own default cap (currently 3600 seconds / 1 hour, set by ops). Set an explicit number here for a longer run or tighter control.\nExample: a task doing live web lookups gets stuck in a loop — this cap force-kills it instead of letting it burn on forever.",
     run_deadline_default: "0 (platform default, 1h)",
     stream_deadline_label: "First-token timeout",
-    stream_deadline_brief:
-      "The longest wait, in seconds, from calling the model to its first word back; 0 = no limit",
+    stream_deadline_brief: "The longest wait for the model to start replying",
     stream_deadline_impact:
-      "How long this may wait, from calling the model, until its first word comes back. Wait too long — the model may be stuck — and it automatically switches to a backup model instead of leaving the whole run hanging. Defaults to 180 seconds, enough for slow jobs like long report generation. This is different from the inter-token idle timeout below, which only starts counting after the first word arrives. 0 = no limit (only recommended for development or long batch jobs).",
+      "How long this may wait, from calling the model, until its first word comes back. Defaults to 180 seconds, enough for slow jobs like long report generation. This is different from the inter-token idle timeout below, which only starts counting after the first word arrives.\n0 = no limit (only recommended for development or long batch jobs).\nExample: the model provider occasionally hangs and never starts replying — once this timeout passes, the system automatically switches to a backup model instead of leaving the whole run hanging.",
     stream_deadline_default: "180",
     idle_timeout_label: "Inter-token idle timeout",
-    idle_timeout_brief:
-      "The longest gap, in seconds, allowed between words once the model starts answering; 0 = no limit",
+    idle_timeout_brief: "The longest pause allowed mid-answer",
     idle_timeout_impact:
-      "Once the model starts answering, if the gap between two words grows longer than this, it's treated as the model going silent mid-answer (stuck, or it just stopped) — the run ends that turn early and keeps whatever was generated so far. Different from the first-token timeout above: that one covers the wait before the answer starts, this one covers pauses after it's already started. 0 = no limit (only recommended for development or long batch jobs); providers that don't stream ignore this.",
+      "Once the model starts answering, if the gap between two words grows longer than this, it's treated as the model going silent mid-answer (stuck, or it just stopped). Different from the first-token timeout above: that one covers the wait before the answer starts, this one covers pauses after it's already started.\n0 = no limit (only recommended for development or long batch jobs); providers that don't stream ignore this.\nExample: a support agent's answer is half-typed when the model hangs — once this gap passes with no new words, the run ends that turn early and keeps whatever was generated so far, instead of leaving the user staring at a frozen answer.",
     idle_timeout_default: "45",
     token_budget_label: "Token budget",
-    token_budget_brief:
-      "The total token spending cap for this run, including every sub-task it kicks off.",
+    token_budget_brief: "The total token spend cap for this run",
     token_budget_impact:
-      "Sets a spending cap for this run, counted in tokens (covers every sub-task it kicks off too). At 80% of the cap, the model gets nudged to wrap up soon; once it's used up, the model is forced to give its best answer from what it already has, without calling any more tools. 0 = no cap.",
+      "Sets a spending cap for this run, counted in tokens (covers every sub-task it kicks off too). At 80% of the cap, the model gets nudged to wrap up soon; once it's used up, the model is forced to give its best answer from what it already has, without calling any more tools.\n0 = no cap.\nExample: set the cap to 200,000 tokens — at 160,000 the model gets nudged to wrap up, and at 200,000 it must answer from what it already has.",
     token_budget_default: "0 (disabled)",
   },
   context_gates: {
     group_intro:
-      "Whenever the estimated content sent to the model goes over 'context window × threshold', three steps kick in, in order: ① old tool results get squashed into a one-line reference first (cheapest, barely touches quality) → ② if that's not enough, older turns get trimmed, keeping only the most recent ones (no extra model call, free) → ③ if it's still too much, a model summarizes a big chunk of the middle into a short paragraph (the last resort). Most overflows get solved by the first two steps alone. 'Window' here means the model's real capacity, as listed in the model catalog.",
+      "When there's too much content to fit, it falls back on three steps in order: ① prune old tool results → ② keep only the most recent conversation → ③ have the model summarize the middle. Most of the time the first two steps are enough. Window size depends on whichever model is selected.",
     panel_tool_result_prune: "① Tool-result prune",
     panel_working_memory: "② Sliding window",
     panel_context_compression: "③ Context compression",
-    panel_tool_output_budget: "④ Tool-output budget",
     pr_enabled_label: "Enable tool-result prune",
-    pr_enabled_brief:
-      "Above the threshold, squash old tool results into a one-line reference",
+    pr_enabled_brief: "Over the limit, squash old tool results to one line",
     pr_enabled_impact:
-      "The cheapest and least lossy of the three steps: the full conversation and all reasoning stay intact — only older tool results get swapped for a one-line reference (and only ones already saved to the workspace, so they're always recoverable). This only affects what's sent this one time; the real history is never rewritten. Turn it off and mild overflows fall to the next two steps (trimming, then summarizing) sooner.",
+      "The cheapest and least lossy of the three steps: the full conversation and all reasoning stay intact — only older tool results get swapped for a one-line reference (and only ones already saved to the workspace, so they're always recoverable). This only affects what's sent this one time; the real history is never rewritten.\nTurn it off and mild overflows fall to the next two steps (trimming, then summarizing) sooner.\nExample: a tool call returns a few thousand lines of logs — after pruning, the model just sees 'ran xxx, see the workspace for details', keeping the prompt clean while the raw log stays retrievable if needed.",
     pr_enabled_default: "true",
     pr_threshold_pct_label: "Trigger threshold (% of window)",
-    pr_threshold_pct_brief:
-      "Prune only once the estimated content reaches window × this value; below it, nothing changes",
+    pr_threshold_pct_brief: "Only prunes once content hits this % of window",
     pr_threshold_pct_impact:
-      "Uses the same ratio setup as the sliding window and context compression below, but each is configured independently. Lower = prunes earlier, cheaper; higher = keeps more original content but leans more on the two later steps. Range 0.05–1.",
+      "Uses the same ratio setup as the sliding window and context compression below, but each is configured independently.\nLower = prunes earlier, cheaper; higher = keeps more original content but leans more on the two later steps. Range 0.05–1.\nExample: a 100k-token window with this set to 0.7 means pruning only kicks in once the estimated content passes 70k tokens.",
     pr_threshold_pct_default: "0.7",
     pr_recent_kept_label: "Recent tool results kept",
-    pr_recent_kept_brief:
-      "The most recent N tool results stay intact; older ones get squashed",
+    pr_recent_kept_brief: "The most recent few results stay intact",
     pr_recent_kept_impact:
-      "Higher = the model sees more intact results, at the cost of a bigger prompt; 0 = once over the threshold, every tool result gets squashed, none kept in full.",
+      "Over the limit, this many of the most recent tool results stay intact; older ones get squashed.\nHigher = the model sees more intact results, at the cost of a bigger prompt; 0 = once over the threshold, every tool result gets squashed, none kept in full.\nExample: set to 4 — when over the limit, the 4 most recent tool results stay intact and everything older gets squashed to a one-line reference.",
     pr_recent_kept_default: "4",
     wm_enabled_label: "Enable sliding window",
-    wm_enabled_brief:
-      "Above the threshold, keep only the first turn plus the most recent few, with no extra model call",
+    wm_enabled_brief: "Over the limit, keep only the first turn plus recent ones",
     wm_enabled_impact:
-      "Only ever cuts at a user-message boundary — never splits a tool call from its result. Most mild overflows are solved right here, saving the cost of the summarization step below. This only affects what's sent this one turn; the next turn re-trims from the full history again.",
+      "Only ever cuts at a user-message boundary — never splits a tool call from its result. This only affects what's sent this one turn; the next turn re-trims from the full history again.\nOn = most mild overflows are solved right here, saving the cost of the summarization step below; off = overflows fall through to context compression sooner instead.\nExample: a 30-turn conversation goes over the limit — the sliding window automatically sends the model only turn 1 plus the most recent handful, leaving the middle out for now (the full history is still intact).",
     wm_enabled_default: "true",
     wm_threshold_pct_label: "Trigger threshold (% of window)",
-    wm_threshold_pct_brief:
-      "Trim only once the estimated content reaches window × this value; below it, nothing changes",
+    wm_threshold_pct_brief: "Only trims once content hits this % of window",
     wm_threshold_pct_impact:
-      "Uses the same ratio setup as tool-result prune above and context compression below, but each is configured independently. Lower = trims earlier, cheaper; higher = keeps more of the conversation but leans more on context compression to catch the rest. Range 0.05–1.",
+      "Uses the same ratio setup as tool-result prune above and context compression below, but each is configured independently.\nLower = trims earlier, cheaper; higher = keeps more of the conversation but leans more on context compression to catch the rest. Range 0.05–1.\nExample: a 100k-token window with this set to 0.7 means trimming only kicks in once content passes 70k tokens.",
     wm_threshold_pct_default: "0.7",
     wm_max_recent_turns_label: "Recent turns kept",
     wm_max_recent_turns_brief:
       "How many of the most recent turns the window keeps",
     wm_max_recent_turns_impact:
-      "Lower = cheaper, but drops more of the middle of the conversation (the dropped part isn't summarized anywhere — that's context compression's job). For long, many-turn conversations, 10 or more is a reasonable floor.",
+      "Lower = cheaper, but drops more of the middle of the conversation (the dropped part isn't summarized anywhere — that's context compression's job); for long, many-turn conversations, 10 or more is a reasonable floor.\nExample: a 20-turn Q&A conversation with this set to 10 — once over the limit, only the most recent 10 turns get sent and the earlier 10 get trimmed.",
     wm_max_recent_turns_default: "20",
     wm_keep_first_turn_label: "Keep first turn",
-    wm_keep_first_turn_brief:
-      "Always keep the very first turn when trimming (it anchors the original task)",
+    wm_keep_first_turn_brief: "Always keeps the very first turn when trimming",
     wm_keep_first_turn_impact:
-      "Turn it off and a long conversation can lose the original task description — generally not recommended.",
+      "Anchors the originally-stated task so later trimming can't sweep it away.\nTurn it off and a long conversation can lose the original task description — generally not recommended.\nExample: the opening turn says 'answer only in Chinese' — if the turn holding that instruction got trimmed away, the model might forget it downstream; keeping the first turn prevents exactly that.",
     wm_keep_first_turn_default: "true",
     cc_enabled_label: "Enable context compression",
-    cc_enabled_brief:
-      "Above the threshold, use a model to summarize the middle of the conversation into one background note",
+    cc_enabled_brief: "Over the limit, have a model summarize the middle",
     cc_enabled_impact:
-      "The last of the three steps: keeps the first N and last M messages untouched, and replaces everything in between with a single 〈context-summary〉 note; before anything is dropped, if long-term memory is on, the key points get saved there first. If this is off and the first two steps aren't enough, an oversized conversation just fails outright — there's nothing left to fall back on.",
+      "The last of the three steps: keeps the first N and last M messages untouched, and replaces everything in between with a single 〈context-summary〉 note; before anything is dropped, if long-term memory is on, the key points get saved there first.\nTurn it off and, if the first two steps aren't enough, an oversized conversation just fails outright — there's nothing left to fall back on.\nExample: a long, multi-turn troubleshooting thread — the opening messages and the most recent ones stay as-is, while dozens of turns in the middle get folded into one summary paragraph; the model still knows the gist, just not the verbatim detail.",
     cc_enabled_default: "true",
     cc_threshold_pct_label: "Trigger threshold (% of window)",
-    cc_threshold_pct_brief:
-      "Compress only once the estimated content reaches window × this value; below it, nothing changes",
+    cc_threshold_pct_brief: "Only compresses once content hits this % of window",
     cc_threshold_pct_impact:
-      "Uses the same ratio setup as tool-result prune and the sliding window above, but each is configured independently. Lower = compresses earlier, cheaper; higher = keeps more of the original text but is riskier, since this is the last step — nothing catches an overflow after this. Range 0.05–1.",
+      "Uses the same ratio setup as tool-result prune and the sliding window above, but each is configured independently.\nLower = compresses earlier, cheaper; higher = keeps more of the original text but is riskier, since this is the last step — nothing catches an overflow after this. Range 0.05–1.\nExample: a 100k-token window with this set to 0.7 means compression only kicks in once content passes 70k tokens.",
     cc_threshold_pct_default: "0.7",
     cc_head_keep_label: "Head entries kept",
-    cc_head_keep_brief:
-      "Keep the first N non-system messages untouched when summarizing",
+    cc_head_keep_brief: "Keeps the first N messages untouched",
     cc_head_keep_impact:
-      "Includes wherever memory content gets injected; if this is set to 0 while memory injection is on, the runtime automatically bumps it to 1 (it never actually runs at 0).",
+      "Includes wherever memory content gets injected; if this is set to 0 while memory injection is on, the runtime automatically bumps it to 1 (it never actually runs at 0).\nExample: set to 4 — when summarizing, the first 4 messages (typically the system setup and the original task) stay untouched instead of getting folded into the summary.",
     cc_head_keep_default: "4",
     cc_tail_keep_label: "Tail entries kept",
-    cc_tail_keep_brief:
-      "Keep the most recent M entries untouched when summarizing",
+    cc_tail_keep_brief: "Keeps the most recent M messages untouched",
     cc_tail_keep_impact:
-      "The tail is whatever's currently being worked on — set it too low and recent details get lost.",
+      "The tail is whatever's currently being worked on — set it too low and recent details get lost.\nExample: set to 6 — when summarizing, the 6 most recent messages stay untouched, so the model doesn't lose track of what just happened.",
     cc_tail_keep_default: "6",
     cc_flush_before_compaction_label: "Flush to memory before compacting",
-    cc_flush_before_compaction_brief:
-      "Before the dropped middle is discarded, save its key points to long-term memory first",
+    cc_flush_before_compaction_brief: "Saves key points before dropping them",
     cc_flush_before_compaction_impact:
-      "Only actually does anything when 'Learn (remember new info)' is on — otherwise this switch is a no-op. Keeps important decisions from being lost after repeated compressions.",
+      "Keeps important decisions from being lost after repeated compressions.\nOnly actually does anything when 'Learn (remember new info)' is on — otherwise this switch is a no-op.\nExample: the user confirmed an important decision somewhere in the middle of the conversation — before that stretch gets summarized away, the key point gets saved to long-term memory first, so it's still findable later.",
     cc_flush_before_compaction_default: "true",
     cc_max_passes_label: "Max compression passes",
-    cc_max_passes_brief:
-      "If still over the threshold after compressing, retry at most N more times",
+    cc_max_passes_brief: "Still over the limit? Retry at most N more times",
     cc_max_passes_impact:
-      "Still over the threshold after using up these retries? The run just fails outright (a context-overflow error, not a silent workaround). A one-off failure in the summarization model just skips that pass and retries; only 3 failures in a row actually fails the run.",
+      "A one-off failure in the summarization model just skips that pass and retries; only 3 failures in a row actually fails the run.\nStill over the threshold after using up these retries? The run just fails outright (a context-overflow error, not a silent workaround).\nExample: set to 3 — if it's still over the threshold after one compression pass, it tries again, up to 3 total; if 3 passes still aren't enough, the run fails.",
     cc_max_passes_default: "3",
     cc_max_turns_label: "Hard turn cap (legacy)",
-    cc_max_turns_brief:
-      "Every call gets hard-cut to the most recent N turns; empty = off",
+    cc_max_turns_brief: "Hard-cuts every call to the most recent N turns",
     cc_max_turns_impact:
-      "An older mechanism from before the three-step pipeline existed, off (empty) by default. Once set, every call gets cut unconditionally — usually unnecessary; the ratio-based steps above are almost always the better choice.",
+      "An older mechanism from before the three-step pipeline existed, off (empty) by default.\nOnce set, every call gets cut unconditionally — whether or not content is actually over any limit; usually unnecessary, since the ratio-based steps above are almost always the better choice.\nExample: set to 20 — every call sends only the most recent 20 turns regardless of size.",
     cc_max_turns_default: "Empty (off)",
     cc_max_tokens_label: "Hard token cap (legacy)",
-    cc_max_tokens_brief: "Same idea, but cut by token count instead; empty = off",
+    cc_max_tokens_brief: "Same idea, but cuts by token count instead",
     cc_max_tokens_impact:
-      "Same as the turn cap above — once set, it applies unconditionally, so it's usually best left empty.",
+      "Same as the turn cap above — once set, it applies unconditionally, whether or not content is actually over any limit.\nEmpty = this legacy mechanism is off, which is usually the better choice.\nExample: set to 50000 — every call gets cut to at most 50,000 tokens.",
     cc_max_tokens_default: "Empty (off)",
     cc_pressure_feedback_label: "Pressure-feedback nudge",
-    cc_pressure_feedback_brief:
-      "As usage nears the window limit, add a budget reminder for the model",
+    cc_pressure_feedback_brief: "Nudges the model to trim down near the limit",
     cc_pressure_feedback_impact:
-      "Once usage hits window × warn %, a reminder gets tacked onto the last message so the model knows to wrap up (it never touches the system prompt, so prompt caching stays intact). Below that percentage, nothing is added.",
+      "Once usage hits window × warn %, a reminder gets tacked onto the last message so the model knows to wrap up (it never touches the system prompt, so prompt caching stays intact).\nBelow that percentage, nothing is added.\nExample: usage just crosses the warn line — the model starts trimming its own explanations and wrapping up sooner, instead of waiting to get hard-trimmed once it's actually over the limit.",
     cc_pressure_feedback_default: "true",
     cc_pressure_warn_pct_label: "Pressure warn %",
     cc_pressure_warn_pct_brief:
       "The window percentage that triggers the budget reminder",
     cc_pressure_warn_pct_impact:
-      "Should, in theory, be lower than the compression threshold for the reminder to actually give a head start — but by default the warning is 0.75 and compression is 0.7, meaning compression currently fires BEFORE the warning does. Lower this value if you want the reminder to actually come first.",
+      "Should, in theory, be lower than the compression threshold for the reminder to actually give a head start.\nBut by default the warning is 0.75 and compression is 0.7, meaning compression currently fires BEFORE the warning does — lower this value if you want the reminder to actually come first.",
     cc_pressure_warn_pct_default: "0.75",
     budget_enabled_label: "Enable tool-output budget",
-    budget_enabled_brief:
-      "This agent's master switch for handling oversized tool output — whether to move it elsewhere, keep it, or trim it",
+    budget_enabled_brief: "Master switch for handling oversized tool output",
     budget_enabled_impact:
-      "Only takes effect when both switches are on: the platform-wide one and this one (if the platform switch is off, turning this on does nothing). Once off, oversized tool results no longer get saved to the workspace — anything too long just gets truncated instead. This doesn't affect the separate, older overflow-handling built into bash/exec/http/mcp, which keeps working regardless.",
+      "Only takes effect when both switches are on: the platform-wide one and this one (if the platform switch is off, turning this on does nothing). This doesn't affect the separate, older overflow-handling built into bash/exec/http/mcp, which keeps working regardless.\nOn = oversized tool results get moved to the workspace, and the model just sees a reference; off = oversized tool results no longer get saved to the workspace at all, and anything too long just gets truncated, losing whatever falls past the cut.\nExample: a web scrape returns a few hundred thousand characters of raw HTML — with this on, it gets moved to the workspace and the model just sees a reference to it.",
     budget_enabled_default: "true",
   },
   security_gates: {
-    group_intro:
-      "The sandbox's outbound network policy for code and tools running inside it — checked in order: egress mode (the master switch) → denylist (checked first) → allowlist.",
+    tab_defenses: "Defenses",
+    tab_approval: "Human approval",
+    tab_network: "Subtasks & network",
     panel_network: "① Network egress",
     panel_enforce: "② Tool-use enforcement",
     egress_label: "Egress mode",
-    egress_brief:
-      "The sandbox's master switch for reaching the outside world: proxy = through the credentialed proxy (default, recommended) / direct = connect directly, no proxy / none = no network at all",
+    egress_brief: "The sandbox's master switch for reaching the outside world",
     egress_impact:
-      "Choose none and the sandbox can't reach the outside world at all — every request fails. Choose direct and traffic goes straight out with no proxy, so there's no automatic credential injection and no centralized audit trail — generally not recommended. Choose proxy (the default) and everything goes through the credentialed proxy, fully audited.",
+      "proxy (default, recommended) = everything goes through the credentialed proxy, fully audited; direct = traffic goes straight out with no proxy, so there's no automatic credential injection and no centralized audit trail — generally not recommended; none = the sandbox can't reach the outside world at all, every request fails.\nExample: an agent that only needs to read and write your own database can be set to none to rule out any outbound access entirely.",
     egress_default: "proxy",
     egress_opt_proxy: "Proxy (default)",
     egress_opt_direct: "Direct",
     egress_opt_none: "None (blocked)",
     allowlist_label: "Domain allowlist",
-    allowlist_brief:
-      "Non-empty = only these domains are reachable; empty = the whole public internet is open (spoofed requests and internal-network probing are still blocked, and everything is audited)",
+    allowlist_brief: "Restricts which domains can be reached",
     allowlist_impact:
-      "Matches an exact domain or its subdomains. Wildcards like ['*'] aren't allowed — submitting one gets rejected outright. If both an allowlist and a denylist are set, the denylist wins.",
+      "Non-empty = only these domains are reachable; empty = the whole public internet is open (spoofed requests and internal-network probing are still blocked, and everything is audited). Matches an exact domain or its subdomains, and wildcards like ['*'] aren't allowed — submitting one gets rejected outright.\nIf both an allowlist and a denylist are set, the denylist wins.\nExample: list only api.weather.com and this agent can reach nothing but that weather API — every other address gets blocked.",
     allowlist_default: "Empty (open to the public internet)",
     denylist_label: "Domain denylist",
-    denylist_brief:
-      "Regardless of the allowlist or the default-open behavior, these domains are always blocked",
+    denylist_brief: "Always blocks the domains listed here",
     denylist_impact:
-      "Takes priority over the allowlist, and matches the same way — exact domain or subdomain. Good for 'leave everything open, just block these few.'",
+      "Regardless of the allowlist or the default-open behavior, these domains are always blocked. Takes priority over the allowlist, and matches the same way — exact domain or subdomain.\nExample: keep the public internet open overall but explicitly ban a competitor's domain or a known phishing domain — good for 'leave everything open, just block these few.'",
     denylist_default: "Empty",
     enforce_label: "Tool-use enforcement",
-    enforce_brief:
-      "Adds a hard requirement to the system prompt: for anything needing real-time facts, actually call a tool, act right away, and never make up a tool result",
+    enforce_brief: "Forces the model to actually check, not make things up",
     enforce_impact:
-      "auto (default) = turned on for every model except the families — Claude, GPT, etc. — that are already reliable about calling tools on their own; a newly onboarded weak model gets this safety net for free, no config change needed. on/off = force it on or off regardless of which model is in use.",
+      "Adds a hard requirement to the system prompt: for anything needing real-time facts, actually call a tool, act right away, and never make up a tool result.\nauto (default) = turned on for every model except the families — Claude, GPT, etc. — that are already reliable about calling tools on their own; on/off = force it on or off regardless of which model is in use.\nExample: a newly onboarded weak model gets this safety net for free under auto, no config change needed.",
     enforce_default: "auto",
     enforce_opt_auto: "Auto (default)",
     enforce_opt_on: "Always on",
     enforce_opt_off: "Always off",
     dict_note:
-      "Rate limiting / PII / security policy are still a free-form dict (the backend schema isn't finalized yet) — edit them in the YAML view.",
+      "Rate limiting, PII redaction, and security policy are advanced items — configure them in the YAML view.",
   },
   sandbox_group: {
     pw_label: "Project plan to workspace",
-    pw_brief:
-      "At the end of each turn, write PLAN.md / TODO.md / MEMORY.md into the user's workspace, and read them back when the next run starts — so progress is visible both inside and outside the sandbox",
+    pw_brief: "Syncs plan/progress files into the workspace",
     pw_impact:
-      "This switch only controls whether plan/progress files get written — it has nothing to do with whether files stick around. A run with a user_id already auto-mounts that user's own persistent workspace regardless (restored automatically next time, even after an idle cleanup); a system run with no user_id always gets a throwaway workspace — neither case depends on this switch. It also needs the deployment to have the sandbox supervisor wired up to actually take effect.",
+      "At the end of each turn, write PLAN.md / TODO.md / MEMORY.md into the user's workspace, and read them back when the next run starts — so progress is visible both inside and outside the sandbox. It also needs the deployment to have the sandbox supervisor wired up to actually take effect.\nThis switch only controls whether that file sync happens — it has nothing to do with whether files stick around. A run tied to a user identity already keeps its workspace files regardless (restored automatically next time, even after an idle cleanup); a system run with no user identity always gets a throwaway workspace — neither case depends on this switch.\nExample: a long research task gets interrupted midway — with this on, the next run can pick up right where PLAN.md left off; with this off, the agent still knows the plan, it just doesn't write these files to sync it.",
     platform_note_title: "Platform-effective values",
     platform_note_body:
-      "How much the sandbox can actually use, and what image it runs, is decided by the platform deployment — the manifest has no say, no matter what's written here: the image is always the platform's shared one (Python plus the usual office / data / media libraries); resources (default 1 CPU, 1024 MB memory, up to 128 processes) come from the deployment environment; a single command gets 30 seconds by default, a tool call can ask for more, capped at 300 seconds; the sandbox's root filesystem is always read-only, and the only writable paths are always /workspace and /tmp; which container tech runs it (gVisor or runc) is set by a deployment environment variable.",
+      "How much the sandbox can actually use, and what image it runs, is decided by the platform deployment — the manifest has no say, no matter what's written here.\nThe image is always the platform's shared one (Python plus the usual office / data / media libraries); resources (default 1 CPU, 1024 MB memory, up to 128 processes) come from the deployment environment; a single command gets 30 seconds by default, a tool call can ask for more, capped at 300 seconds.\nThe sandbox's root filesystem is always read-only, and the only writable paths are always /workspace and /tmp; which container tech runs it (gVisor or runc) is set by a deployment environment variable.",
     declarative_note:
-      "The manifest's runtime / image / image_build / resources / readonly_root / writable / mounts fields, and the whole code block, are currently just for show (the technical term is 'declarative'): writing them doesn't error, but the system never actually reads them at run time — harmless to leave them in the YAML. To actually change the resource limits, edit the platform deployment config instead (the sandbox-supervisor environment variables).",
+      "The manifest's runtime / image / image_build / resources / readonly_root / writable / mounts fields, and the whole code block, are currently just for show (the technical term is 'declarative'): writing them doesn't error, but the system never actually reads them at run time — harmless to leave them in the YAML.\nTo actually change the resource limits, edit the platform deployment config instead (the sandbox-supervisor environment variables).",
   },
   memory_group: {
+    tab_basic: "Basic",
+    tab_retrieval: "Retrieval details",
+    tab_budget: "Budget & housekeeping",
+    on_label: "Long-term memory",
+    on_brief: "Remembers you across chats",
+    on_impact:
+      "When on, the agent remembers user info and past interactions across sessions and recalls them automatically;\noff = every chat starts from scratch.\nNeeds a platform embedding model configured, or turning this on won't actually do anything.\nExample: on, recall 5",
+    topk_label: "Memories recalled per run",
+    topk_brief: "How many memories it recalls each turn",
+    topk_impact:
+      "How many of the most relevant memories to pull in per chat.\nToo many crowd the context; too few miss info.\nExample: 5",
+    write_back_label: "Learn (remember new info)",
+    write_back_brief: "Automatically remembers new info from the chat",
+    write_back_impact:
+      "When on, each conversation ends by saving what it learned, recalled automatically next time.\nOff = only use existing memories, never add.\nExample: on",
+    verify_reads_label: "Check memories before answering",
+    verify_reads_brief: "Double-checks memories first — slower but more accurate",
+    verify_reads_impact:
+      "After pulling memories and before using them, the model screens them and drops anything irrelevant, stale, or contradictory, so old memories don't skew the answer.\nCosts one extra model call; if it errors, nothing is blocked.\nOn by default.\nExample: on",
+    write_min_importance_label: "Importance filter",
+    write_min_importance_brief: "Skips memories below this importance score",
+    write_min_importance_impact:
+      "Each thing worth remembering gets an importance score (0–1); anything below this isn't saved, so small talk doesn't get stored.\n0.3: drop the clearly trivial; 0: keep everything.\nExample: 0.3",
+    reconcile_writes_label: "Tidy up (dedup/merge)",
+    reconcile_writes_brief: "Auto-merges duplicate memories before saving",
+    reconcile_writes_impact:
+      "Before saving new info, compare it with similar existing memories and merge, update, or delete as needed, avoiding pile-ups and contradictions.\nOff = just append.\nOn by default.\nExample: on",
+    recall_mode_label: "Where memories are inserted",
+    recall_mode_brief: "Controls how often memories get re-inserted",
+    recall_mode_impact:
+      "Where memories go in the conversation.\nPer session: inserted once for the whole session — cheaper and faster (default).\nPer turn: re-inserted every turn — for agents that edit their own memory mid-conversation.\nExample: per session",
+    recall_mode_per_session: "Per session (cheaper, faster)",
+    recall_mode_per_turn: "Per turn",
+    rewrite_reads_label: "Rewrite question for recall",
+    rewrite_reads_brief: "Rewrites your question before searching memories",
+    rewrite_reads_impact:
+      "Before searching memories, rewrite the user's latest message into a short standalone search query — stripping instructions and trimming long messages so they don't skew what's recalled.\nCosts one extra model call; if it errors, the original message is used.\nOff by default (opt-in).\nExample: off",
+    abstain_threshold_label: "Skip weak matches (threshold)",
+    abstain_threshold_brief: "Skips memories that don't match well enough",
+    abstain_threshold_impact:
+      "After searching, if the best memory's similarity to the question is below this, inject nothing instead of a weak match — avoids dragging loosely-related memories into the answer.\n0 = never skip (default); ~0.2–0.3 = skip clearly weak matches.\nExample: 0",
     panel_injection: "① Injection budget",
     panel_consolidation: "② Background memory consolidation",
     inj_budget_label: "Memory injection token budget",
-    inj_budget_brief:
-      "The most tokens recalled memories may take up in the prompt — packed in from most to least relevant until this fills up",
+    inj_budget_brief: "The most tokens memories may take up in the prompt",
     inj_budget_impact:
-      "How many memories get recalled is capped by 'memories recalled per run', but a single unusually long memory can still blow up the space it takes — this budget is the backstop (whichever entry lands on the boundary gets truncated and flagged). Raise it for more memory context at a higher per-turn cost; lower it to save tokens, at the risk of cutting off long memories.",
+      "The most tokens recalled memories may take up in the prompt — packed in from most to least relevant until this fills up.\nRaise it for more memory context at a higher per-turn cost; lower it to save tokens, at the risk of cutting off long memories.\nHow many memories get recalled is capped by 'memories recalled per run', but a single unusually long memory can still blow up the space it takes — this budget is the backstop (whichever entry lands on the boundary gets truncated and flagged).",
     inj_budget_default: "2000",
     corr_budget_label: "User-correction reserve budget",
-    corr_budget_brief:
-      "A dedicated token allowance that explicit user corrections (the kind the system treats as 100% certain) get first claim on",
+    corr_budget_brief: "Reserved budget for corrections the user made",
     corr_budget_impact:
-      "Makes sure ordinary memories can't crowd out a user's explicit corrections: correction memories get first claim on up to this many tokens, and ordinary memories only get what's left. Set it to 0 to skip this protection.",
+      "A dedicated token allowance that explicit user corrections (the kind the system treats as 100% certain) get first claim on, so ordinary memories can't crowd them out: correction memories get first claim on up to this many tokens, and ordinary memories only get what's left.\nSet it to 0 to skip this protection.",
     corr_budget_default: "500",
     consolidation_label: "Background memory consolidation",
-    consolidation_brief:
-      "Runs in the background on a schedule (every 4 hours by default), merging similar short-term memories and clearing out noisy ones — it's a background job, so it never slows down the conversation",
+    consolidation_brief: "Tidies memory in the background, without slowing chats",
     consolidation_impact:
-      "Turn it off and this agent's long-term memory stops auto-deduplicating, distilling, and cleaning itself up — short-term memories just keep piling up. The cleanup runs on the auxiliary model and is billed separately under 'memory consolidation'; what counts as 'similar enough to merge' is a tenant-level setting, not something this manifest controls.",
+      "Runs in the background on a schedule (every 4 hours by default), merging similar short-term memories and clearing out noisy ones — it's a background job, so it never slows down the conversation.\nTurn it off and this agent's long-term memory stops auto-deduplicating, distilling, and cleaning itself up — short-term memories just keep piling up.\nThe cleanup runs on the auxiliary model and is billed separately under 'memory consolidation'; what counts as 'similar enough to merge' is a tenant-level setting, not something this manifest controls.",
     aux_model_note:
-      "The model that does the cleanup defaults to the platform-wide setting (claude-sonnet-4-6); to pick a different one just for this agent, edit policies.memory_consolidation.aux_model in the YAML view (it needs a full model config block).",
-    reserved_note:
-      "memory.short_term and dynamic_context.inject_memory are currently reserved fields — placeholders that don't error when set, but that the system never actually reads. Whether memory is on comes down to one thing only: whether memory.long_term is declared (the toggle above).",
+      "The model that does the cleanup defaults to the platform-wide setting (claude-sonnet-4-6).\nTo pick a different one for just this agent, edit policies.memory_consolidation.aux_model in the YAML view.",
   },
   model_group: {
     panel_reflection: "Reflection self-assessment",
     rf_enable_label: "Reflection self-assessment",
-    rf_enable_brief:
-      "Before answering, have a judge model score and critique the draft answer, retrying automatically if it falls short",
+    rf_enable_brief: "Has a judge model score the answer before it's sent",
     rf_enable_impact:
-      "Each extra round of reflection is one more model call: better quality, but slower and pricier. Which model judges is set by the 'reflection evaluator model' setting below; if it's unset, the main model judges its own answer.",
+      "Before an answer is final, a judge model scores it and flags problems, and automatically sends it back for another pass if it falls short — repeating until it passes or the retry cap runs out. Which model judges is set by the 'reflection evaluator model' setting below; if it's unset, the main model judges its own answer.\nEach extra round of reflection is one more model call: better quality, but slower and pricier.\nExample: a support agent's answer is missing the refund process — the judge catches it and sends it back for a redo before the user ever sees it.",
     rf_budget_label: "Reflection retry cap",
-    rf_budget_brief:
-      "The most reflection rounds a single run may use before it just accepts the current answer",
+    rf_budget_brief: "The most reflection rounds before it just ships",
     rf_budget_impact:
-      "Raise it for more rounds of self-improvement — cost and time scale up roughly in step; 1 = judged once, no retries.",
+      "The most reflection rounds a single run may use — once it hits this cap, it accepts the current answer regardless of whether it passed, instead of looping forever.\nRaise it for more rounds of self-improvement — cost and time scale up roughly in step; 1 = judged once, no retries.\nExample: set to 2 — the judge flags the first answer, one improved pass is made, and whatever comes out of that second pass ships, pass or not.",
     rf_budget_default: "2",
     rf_deadline_label: "Per-reflection time limit (seconds)",
-    rf_deadline_brief:
-      "The most seconds a single reflection round may take before the current answer is accepted as-is",
+    rf_deadline_brief: "The most seconds a single reflection round may take",
     rf_deadline_impact:
-      "Keeps a stuck judge model from dragging down the whole run. Raise it to tolerate a slow model; lower it to keep things responsive. Capped at 600 seconds.",
+      "The most seconds a single reflection round may take before the current answer is accepted as-is instead of waiting on the judge any longer — keeps a stuck judge model from dragging down the whole run.\nRaise it to tolerate a slow model; lower it to keep things responsive. Capped at 600 seconds.\nExample: the judge model slows down and is still scoring past the timeout — that round is simply abandoned and the existing answer moves forward.",
     rf_deadline_default: "30",
     yaml_note:
-      "The following are still YAML-only for now: the planning rule under routing.rules (only used when the workflow type is plan_execute), vision.fallbacks (the fallback chain for the vision model), and the base_url / azure_deployment / azure_api_version connection settings for Azure or self-hosted models. Also, api_key_ref is deprecated: setting it in the manifest gets ignored, with a warning.",
+      "Advanced items like the planning-model routing rule (routing.rules, used when the workflow type is plan_execute), the vision-model fallback chain, and connection settings (base_url, Azure deployment, etc.) still need the YAML view.\napi_key_ref is deprecated: setting it in the manifest gets ignored, with a warning.",
   },
   observability_group: {
     resp_cache_label: "LLM response cache",
-    resp_cache_brief:
-      "A repeated request reuses last time's full answer instead of calling the model again — cheaper and faster",
+    resp_cache_brief: "Reuses the answer to a question it's seen before",
     resp_cache_impact:
-      "A cache hit skips the model call entirely — no provider selection, no fallback chain, none of it. Turn this off for an agent whose prompt has time-sensitive content (today's date, live data, etc.), or it may hand back a stale answer. This is a different thing from the Model & Routing group's 'prompt caching' (Anthropic prompt caching): that one only saves on input tokens, while this switch reuses the entire answer as-is.",
+      "A repeated request reuses last time's full answer instead of calling the model again — cheaper and faster. A cache hit skips the model call entirely — no provider selection, no fallback chain, none of it.\nTurn this off for an agent whose prompt has time-sensitive content (today's date, live data, etc.), or it may hand back a stale answer.\nThis is a different thing from the Model & Routing group's 'prompt caching' (Anthropic prompt caching): that one only saves on input tokens, while this switch reuses the entire answer as-is.",
+    traj_rec_label: "Run archiving",
+    traj_rec_brief: "Archives full runs for quality review",
+    traj_rec_impact:
+      "When on, every run's full transcript — the user's messages, the agent's replies, and its tool calls — gets archived once the run finishes; the platform uses that archive for quality evaluation, and it may also feed future model improvements.\nOff = conversation content never gets archived, which fits agents that handle sensitive information.\nExample: a support agent that touches private customer data turns this off, so run content stays only in the session log and never enters the analysis archive.",
     triggers_note:
-      "The manifest can declare a triggers field, but it's currently not wired up: cron or webhook triggers written into the manifest have no effect. To set up scheduled or webhook automation, create it through trigger management (the /v1/triggers API) instead — that's the path that actually runs.",
+      "Manage scheduled tasks from the Triggers page.\nThe manifest's triggers field is not wired up yet — cron or webhook triggers written there have no effect; create them through trigger management (the /v1/triggers API) instead, since that's the path that actually runs.",
     declarative_note:
       "observability's trace / log_level / redact_fields fields are currently declarative — they don't error when set, but the system never actually reads them at run time. Tracing is controlled by the platform's own configuration, the log level comes from each service's deployment environment, and PII redaction is handled entirely by the platform's defense chain — none of that depends on these fields.",
   },
@@ -3736,13 +3823,10 @@ const en: TranslationKeys = {
     field_name_placeholder: "my-agent",
     field_description: "Description",
     basic_yaml_note:
-      "extends (template inheritance) is edited in the YAML view. tenant_config's compliance_pack / isolation_level / data_residency are reserved fields: they pass validation but aren't read at runtime (sandbox isolation is currently always shared); audit_retention_days is decided by a platform-wide global default for now.",
+      "Advanced items like template inheritance (extends) and tenant compliance tags (compliance_pack, etc.) need the YAML view.\nThe latter three (compliance_pack / isolation_level / data_residency) currently just pass format validation and aren't read at runtime (sandbox isolation is always shared for now); the audit retention period is set platform-wide for now.",
     section_model: "Model",
     section_prompt: "System prompt",
     field_prompt_placeholder: "You are a helpful assistant.",
-    section_memory: "Long-term memory",
-    memory_hint: "Remembers across sessions; needs a platform embedding.",
-    memory_topk: "Memories recalled per run",
     section_tools: "Tools",
     tool_web_search: "Web search",
     tool_http: "HTTP tool",
@@ -3801,12 +3885,8 @@ const en: TranslationKeys = {
       "The LLM powering the agent's main conversation.\nPick the provider, then the model; higher temperature = more varied.\nExample: anthropic / claude-sonnet-4-5, temperature 0.2",
     section_prompt_help:
       "System prompt — defines the agent's role, tone, and rules. The core of its persona.\nExample: You are a senior Python engineer; answer concisely with runnable code",
-    section_memory_help:
-      "When on, the agent remembers user info and past interactions across sessions and recalls them automatically;\noff = every chat starts from scratch.\nExample: on, recall 5",
-    memory_topk_help:
-      "How many of the most relevant memories to pull in per chat.\nToo many crowd the context; too few miss info.\nExample: 5",
     section_reflection_evaluator_help:
-      "Specifies which model judges reflection self-assessment (a routing rule). Only takes effect once \"Reflection self-assessment\" above is turned on; when unset, reflection reuses the main model.",
+      "Specifies which model judges reflection self-assessment. Only takes effect once \"Reflection self-assessment\" above is turned on; when unset, reflection reuses the main model.",
     section_defenses: "Defenses",
     section_defenses_help:
       "Configure this agent's safety posture: input injection defense, output screening/redaction, and tool-action review.",
@@ -3816,27 +3896,33 @@ const en: TranslationKeys = {
     defenses_group_output: "Output defense",
     defenses_group_action: "Tool-action defense",
     defenses_prompt_injection: "Injection spotlighting",
+    defenses_prompt_injection_brief:
+      "Flags outside content so it can't fool the model",
     defenses_prompt_injection_help:
       "Marks content from untrusted sources (retrieved data, tool output) to reduce prompt-injection hijack risk. On by default.",
     defenses_prompt_injection_off_warn:
       "Off: untrusted content is no longer marked, weakening injection defense.",
     defenses_output_screen: "Output rule screen",
+    defenses_output_screen_brief: "Blocks replies that look like a leak",
     defenses_output_screen_help:
       "Rule-based blocking of replies that look like credential leaks / exfiltration. On by default; recommended.",
     defenses_output_screen_off_warn:
       "Off: credential-leak / exfil-shaped replies are no longer blocked (on by default; not recommended).",
     defenses_output_judge: "Model-backed output judge",
+    defenses_output_judge_brief: "Has a model double-check each reply",
     defenses_output_judge_help:
       "Uses a model to judge each reply for alignment / leakage — a backstop above the rule screen.",
     defenses_output_judge_on_warn:
       "Adds one extra LLM call per reply (higher latency and cost); and disables token-by-token streaming for this agent (the reply is returned all at once). The judge model is configured in Platform Settings.",
     defenses_output_judge_on_error: "When the judge fails",
     defenses_output_dlp: "Output PII redaction",
+    defenses_output_dlp_brief: "Hides personal info in replies",
     defenses_output_dlp_help:
       "Replaces PII (email / phone / national ID / card number) in replies with [redacted].",
     defenses_output_dlp_on_note:
       "Rewrites legitimate replies containing PII, e.g. \"your email is a@b.com\" → \"your email is [redacted]\".",
     defenses_action_screen: "Tool-call review",
+    defenses_action_screen_brief: "Checks each tool call before it runs",
     defenses_action_screen_help:
       "Judges each tool call for alignment before it runs: off / block / route to human approval.",
     defenses_action_screen_off: "Off",
@@ -3853,9 +3939,9 @@ const en: TranslationKeys = {
     section_mcp_help:
       "Connect the agent to MCP servers (sources of external tools).\nPick servers, and optionally narrow to specific tools.\nExample: connect a maps service for location lookups",
     tool_web_search_help:
-      "Let the agent search the web for fresh info (via the platform's search service).\nExample: needed for 'today's news' questions",
+      "Let the agent search the web for fresh info — works out of the box (the platform's own free search service, no setup needed).\nExample: handy for 'what's in today's news' questions",
     tool_http_help:
-      "Let the agent call external APIs (through the audited egress proxy).\nExample: weather, internal services",
+      "Let the agent visit external URLs and call third-party APIs (every request is logged for audit).\nExample: checking the weather, calling your own internal services",
     tool_mcp_help:
       "Let the agent use tools provided by MCP servers (databases, business systems).\nOnce checked, pick the specific servers and tools below.\nExample: connect your company's CRM",
     tool_exec_python: "Run Python code",
@@ -3869,15 +3955,16 @@ const en: TranslationKeys = {
       "Let the agent create scheduled tasks for the user from within the conversation (e.g. \"search news every day at 9am\") — it runs automatically at the scheduled time and the result comes back to the conversation.",
     tool_author_skill: "Create skills",
     tool_author_skill_help:
-      "Let the agent turn a reusable approach into a saved \"skill\" that it — or other agents — can use directly later.",
+      "Let the agent save a reusable approach as a \"skill\" that it — or other agents — can use directly later.\nExample: save the fixed steps for \"compiling the weekly report\" as a skill, then trigger it with one line next time.",
     tool_refine_skill: "Refine skills",
-    tool_refine_skill_help: "Let the agent improve the content of an existing skill.",
+    tool_refine_skill_help:
+      "Let the agent improve the content of an existing skill.\nExample: a skill's steps are out of date, so let the agent update it itself.",
     tool_fork_skill: "Fork skills",
     tool_fork_skill_help:
-      "Let the agent copy an existing skill and modify the copy, leaving the original untouched.",
+      "Let the agent copy an existing skill and modify the copy, leaving the original untouched.\nExample: base a new \"daily report\" skill on the existing \"weekly report\" one.",
     tool_propose_skill: "Propose skill to team",
     tool_propose_skill_help:
-      "Let the agent submit its own skill for team-wide sharing (requires approval).",
+      "Let the agent submit a skill it worked out for team-wide sharing (needs human approval).\nExample: the agent found a good approach and wants other agents on the team to use it too.",
     tool_note_behavior_patch: "Record behavior corrections",
     tool_note_behavior_patch_help:
       "Let the agent jot down small corrections — \"next time, handle this situation like so\" — to gradually improve its own performance.",
@@ -3885,7 +3972,7 @@ const en: TranslationKeys = {
     tool_clarify_tool_usage_help:
       "Let the agent record the correct way to use a tool after misusing it, so it doesn't repeat the mistake.",
     tools_config_note:
-      "The switches above only control whether a tool is on or off. To fine-tune a specific tool's own settings (e.g. which search engine web_search uses, how many results it returns), edit that tool's tools[].config in the YAML view.",
+      "File read/write, saving artifacts, and asking for human approval are on by default and not listed here — edit the YAML view to change them. Web search works out of the box (the platform's own free search service).",
     section_approval: "Human approval",
     section_approval_help:
       "For the tools you check, execution pauses every time and waits for a human to approve — whether it's a base capability that's always on, or one you turned on yourself above in Tools.\nExample: add approval for exec_python, http",
@@ -3895,36 +3982,10 @@ const en: TranslationKeys = {
       "When on (the default), the agent can pull in a few temporary helpers mid-task to handle subtasks in parallel.\nTurn off when you need strictly one worker.\nExample: on for a research agent, off for a simple FAQ bot",
     dynamic_workers_hint:
       "Let the agent create temporary helpers at run time to share the load (on by default).",
-    section_advanced: "Advanced",
-    memory_write_back: "Learn (remember new info)",
-    memory_write_back_help:
-      "When on, each conversation ends by saving what it learned, recalled automatically next time.\nOff = only use existing memories, never add.\nExample: on",
-    memory_verify_reads: "Check memories before answering",
-    memory_verify_reads_help:
-      "After pulling memories and before using them, the model screens them and drops anything irrelevant, stale, or contradictory, so old memories don't skew the answer.\nCosts one extra model call; if it errors, nothing is blocked.\nOn by default.\nExample: on",
-    memory_write_min_importance: "Importance filter",
-    memory_write_min_importance_help:
-      "Each thing worth remembering gets an importance score (0–1); anything below this isn't saved, so small talk doesn't get stored.\n0.3: drop the clearly trivial; 0: keep everything.\nExample: 0.3",
-    memory_reconcile_writes: "Tidy up (dedup/merge)",
-    memory_reconcile_writes_help:
-      "Before saving new info, compare it with similar existing memories and merge, update, or delete as needed, avoiding pile-ups and contradictions.\nOff = just append.\nOn by default.\nExample: on",
-    memory_recall_mode: "Where memories are inserted",
-    memory_recall_mode_help:
-      "Where memories go in the conversation.\nPer session: inserted once for the whole session — cheaper and faster (default).\nPer turn: re-inserted every turn — for agents that edit their own memory mid-conversation.\nExample: per session",
-    memory_recall_per_session: "Per session (cheaper, faster)",
-    memory_recall_per_turn: "Per turn",
-    memory_rewrite_reads: "Rewrite question for recall",
-    memory_rewrite_reads_help:
-      "Before searching memories, rewrite the user's latest message into a short standalone search query — stripping instructions and trimming long messages so they don't skew what's recalled.\nCosts one extra model call; if it errors, the original message is used.\nOff by default (opt-in).\nExample: off",
-    memory_abstain_threshold: "Skip weak matches (threshold)",
-    memory_abstain_threshold_help:
-      "After searching, if the best memory's similarity to the question is below this, inject nothing instead of a weak match — avoids dragging loosely-related memories into the answer.\n0 = never skip (default); ~0.2–0.3 = skip clearly weak matches.\nExample: 0",
     approval_timeout: "Approval wait limit (seconds)",
+    approval_timeout_brief: "Auto-rejects if no one responds in time",
     approval_timeout_help:
       "How long a pending approval may wait (seconds) before it is auto-rejected, so it doesn't tie up resources.\nDefault 24h (86400).\nExample: 86400",
-    trajectory_recording: "Keep a record of conversations",
-    trajectory_recording_help:
-      "When off, this agent's runs are no longer recorded as trajectories (ShareGPT format, used for curation and evals). If the platform has no object store configured, nothing is recorded regardless of this switch.",
     section_knowledge: "Knowledge bases (RAG)",
     section_knowledge_help:
       "Knowledge bases the agent can search to back up its answers.\nPick existing bases, or type a name.\nExample: hr-policies, eng-handbook",
@@ -3970,17 +4031,33 @@ const en: TranslationKeys = {
     prompt_var_remove: "Remove",
     prompt_var_add: "Add variable",
     section_output_schema: "Structured output",
-    section_output_schema_help:
-      "Optional. Forces the agent's FINAL reply to be a JSON object that validates against a JSON Schema; intermediate tool-calling steps are never constrained.\nAuthored in the YAML view as spec.output_schema: { name, json_schema, strict }.\nExample: a json_schema requiring { \"answer\": string } makes every final reply machine-readable",
-    output_schema_on_hint:
-      "Enforced - final replies must validate against the '{{name}}' schema (spec.output_schema, editable in the YAML view).",
-    output_schema_off_hint:
-      "Not configured - final replies are free text. Add spec.output_schema in the YAML view to require a machine-readable JSON reply.",
+    output_schema: {
+      on_label: "Reply using a template",
+      hint_off:
+        "Off: free-text replies. Turn it on to have the agent reply with a fixed set of fields (e.g. a support ticket: title + severity + summary) - easier to wire up to other programs or spreadsheets.",
+      col_name: "Field name",
+      col_type: "Type",
+      col_required: "Required",
+      col_desc: "Description",
+      type_string: "Text",
+      type_number: "Number",
+      type_integer: "Integer",
+      type_boolean: "Yes/No",
+      type_array_string: "Text list",
+      type_array_number: "Number list",
+      add_field: "Add field",
+      remove_field: "Remove",
+      name_invalid:
+        "Field names must start with a letter or underscore, and contain only letters, numbers, and underscores.",
+      name_duplicate: "Duplicate field name - a field above already uses this name.",
+      complex_readonly: "Configured (complex structure) - edit it in the YAML view.",
+      off_confirm: "Turning this off will clear the reply template you've defined. Continue?",
+    },
     inject_date_label: "Inject current date",
     inject_date_hint:
       "Writes today's date into the system prompt at build time (on by default, cache-stable per calendar day). When off, the agent doesn't know today's date - only suitable for agents whose behavior doesn't depend on the date.",
     dynamic_context_note:
-      "Custom reminders (dynamic_context.custom_reminders) need to be written as a list in a specific format - edit them in the YAML view.",
+      "Advanced items like custom reminders (dynamic_context.custom_reminders) need the YAML view.",
   },
   playground: {
     session_label: "Session",

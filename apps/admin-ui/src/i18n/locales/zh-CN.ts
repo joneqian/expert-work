@@ -607,259 +607,301 @@ const zhCN: TranslationKeys = {
     group_sandbox: "沙箱与资源",
     group_observability: "触发器与可观测",
     field_impact_label: "影响说明",
-    field_default_badge: "默认 {{value}}",
+    field_customized_badge: "已自定义",
+    field_reset: "恢复默认",
+    field_reset_hint: "恢复默认:{{value}}",
+  },
+  run_profile: {
+    title: "运行策略",
+    hint: "选一档,记忆、步数、压缩等参数自动配好;下面各组仍可逐项微调。",
+    balanced: "均衡推荐",
+    balanced_desc: "日常够用,费用适中(默认)",
+    cost: "成本优先",
+    cost_desc: "省 token:少记少想、更早压缩,长对话更省钱",
+    capability: "能力优先",
+    capability_desc: "多记多想:步数翻倍、记忆更全,复杂任务更稳,费用更高",
+    custom: "自定义",
+    confirm_title: "应用「{{name}}」?",
+    confirm_body: "将调整 {{count}} 项配置;每一项之后仍可单独修改。",
   },
   run_budget: {
+    subhead_steps: "步数与流程",
     max_iterations_label: "最大步数",
-    max_iterations_brief: "这次运行最多能走多少个「想一步、做一步」的循环",
+    max_iterations_brief: "这次最多能循环几步",
     max_iterations_impact:
-      "步数用完后,Agent 会被要求马上收尾:不再调用任何工具,直接给出总结,答案可能不完整。研究类、要连续查很多资料的 Agent 建议调大(经验值 40-60 步);想控制花费就调小。如果这次运行中途还叫了别的小助手分担任务,小助手自己能走的步数不会超过这里设的数,也不会超过平台统一设的上限——取两者中较小的一个。",
+      "「一步」指模型想一步、做一个动作(比如调一次工具)的一个来回;这里定的是这次运行最多能走几个这样的来回。步数用完后,Agent 会被要求马上收尾:不再调用任何工具,直接给出总结,答案可能不完整。\n调大 = 适合研究类、要连续查很多资料的 Agent(经验值 40-60 步);调小 = 控制花费。\n如果这次运行中途还叫了别的小助手分担任务,小助手自己能走的步数不会超过这里设的数,也不会超过平台统一设的上限——取两者中较小的一个。\n例:一个要连查十几个网站做行业调研的 Agent,步数设太小会被迫提前收尾,给出不完整的结论。",
     max_iterations_default: "30",
     wf_type_label: "工作流类型",
-    wf_type_brief:
-      "react=边想边做的经典循环;plan_execute=先由规划模型出一份完整计划,再照着一步步执行",
+    wf_type_brief: "边想边做,还是先规划后执行",
     wf_type_impact:
-      "react(推荐):Agent 边做边想——简单任务直接给答案,复杂任务才会先自己列一份步骤清单,大部分场景用这个就够了。plan_execute:不管任务简单还是复杂,都要先让模型写一份完整计划再执行;像写长报告这种一步扣一步、容易跑偏的活用它更稳,但简单问题也逃不过先规划这一步,会更慢、更费钱(多了一次规划用的模型调用)。用哪个模型做规划,由「模型与路由」组里配置的规则决定,没配置就用主模型。custom 这个选项已经弃用,选了效果跟 react 完全一样。",
+      "react(推荐):Agent 边做边想——简单任务直接给答案,复杂任务才会先自己列一份步骤清单,大部分场景用这个就够了。plan_execute:不管任务简单还是复杂,都要先让模型写一份完整计划再执行。\n像写长报告这种一步扣一步、容易跑偏的活用 plan_execute 更稳,但简单问题也逃不过先规划这一步,会更慢、更费钱(多了一次规划用的模型调用)。\n用哪个模型做规划,由「模型与路由」组里配置的规则决定,没配置就用主模型。custom 这个选项已经弃用,选了效果跟 react 完全一样。",
     wf_type_default: "react",
     wf_type_opt_react: "react(边想边做)",
     wf_type_opt_plan_execute: "plan_execute(先规划后执行)",
     wf_type_opt_custom: "custom(已弃用,等同 react)",
-    workflow_note:
-      "workflow 里还能写 early_stop 和 builder 这两个字段,但它们已经没用了:写了不会报错,可也不会真的生效,留着不影响其他功能。",
     max_no_progress_label: "无进展停机",
-    max_no_progress_brief: "连续好几步都没有实际进展就提前收工,0 = 关闭",
+    max_no_progress_brief: "连续没进展就提前收工",
     max_no_progress_impact:
-      "防止 Agent 卡在原地反复试同一个思路、白白烧步数(比如反复调同一个工具却拿不到想要的结果)。但设太小容易误伤正常的重试,建议设 3-5。",
+      "连续好几步都感觉不到任何实际进展,就提前把这次运行收尾,避免白白浪费步数;设成 0 = 关闭这项检查。\n调大 = 更能容忍正常的重试,不容易误伤;调小 = 更快掐断卡死的循环,但太小容易误伤正常重试,建议设 3-5。\n例:Agent 反复调同一个工具却一直拿不到想要的结果,设了这个值就会提前收工,而不是一直空转烧步数。",
     max_no_progress_default: "0(关闭)",
+    subhead_time: "时间与花费",
     run_deadline_label: "运行最长耗时",
-    run_deadline_brief:
-      "这次运行(含它中途叫起的子 agent)最多能跑多少秒,0 = 用平台默认值(目前 1 小时)",
+    run_deadline_brief: "这次运行最多能跑多久",
     run_deadline_impact:
-      "这次运行最多能跑多久(秒),包含它中途叫起的子 agent;超过就会被强制中止,防止某次运行意外跑很久、把费用跑上去。注意 0 并不是「不限制」的意思——不设置时会套用平台统一的默认上限(目前 3600 秒,也就是 1 小时,由运维配置);想跑更久或者想精确控制,请在这里显式填一个具体秒数。",
+      "这次运行最多能跑多久(秒),包含它中途叫起的子 agent;超过就会被强制中止,防止某次运行意外跑很久、把费用跑上去。\n注意 0 并不是「不限制」的意思——不设置时会套用平台统一的默认上限(目前 3600 秒,也就是 1 小时,由运维配置);想跑更久或者想精确控制,请在这里显式填一个具体秒数。\n例:一次带联网检索的任务不小心卡在死循环里,设了这个上限就会被强制掐断,不会一直烧下去。",
     run_deadline_default: "0(平台默认 1 小时)",
     stream_deadline_label: "首 token 超时",
-    stream_deadline_brief: "从叫模型开始到它吐出第一个字最多等几秒,0 = 不限制",
+    stream_deadline_brief: "等模型开口最多等几秒",
     stream_deadline_impact:
-      "从这次调用模型开始,到它吐出第一个字最多等多少秒。等太久说明模型可能卡住了,系统会自动换一个备用模型接着答,不会让整个运行干等着卡死。默认 180 秒,够写长报告这类慢任务用。它跟下面的「token 间隔超时」不是一回事——那个是从第一个字出现之后才开始算的。设成 0 = 不限制(只建议开发调试或跑慢批任务时这么用)。",
+      "从这次调用模型开始,到它吐出第一个字最多等多少秒。默认 180 秒,够写长报告这类慢任务用。它跟下面的「token 间隔超时」不是一回事——那个是从第一个字出现之后才开始算的。\n设成 0 = 不限制(只建议开发调试或跑慢批任务时这么用)。\n例:模型服务偶发卡住不吐字,超过这个秒数系统就自动换一个备用模型接着答,而不是让整个运行干等着卡死。",
     stream_deadline_default: "180",
     idle_timeout_label: "token 间隔超时",
-    idle_timeout_brief: "模型开始回答后,相邻两个字之间最多能停顿几秒,0 = 不限制",
+    idle_timeout_brief: "两个字间隔太久就收尾",
     idle_timeout_impact:
-      "模型开始吐字之后,如果两个字之间的停顿超过这个时间,就认为它中途卡住不动了(比如卡死或没反应),系统会提前结束这一轮、把已经生成的部分内容保留下来。它跟上面的「首 token 超时」不是一回事——那个管的是「开始答之前」的等待,这个管的是「开始答之后」中途的停顿。设成 0 = 不限制(只建议开发调试或跑慢批任务时这么用);不支持流式输出的模型不受这个设置影响。",
+      "模型开始吐字之后,如果两个字之间的停顿超过这个时间,就认为它中途卡住不动了(比如卡死或没反应)。它跟上面的「首 token 超时」不是一回事——那个管的是「开始答之前」的等待,这个管的是「开始答之后」中途的停顿。\n设成 0 = 不限制(只建议开发调试或跑慢批任务时这么用);不支持流式输出的模型不受这个设置影响。\n例:客服 Agent 回答到一半模型突然卡死,超过这个时间没再吐出新字,系统就把已经生成的部分保留下来、提前结束这一轮,而不是让用户对着卡住的答案干等。",
     idle_timeout_default: "45",
     token_budget_label: "Token 预算",
-    token_budget_brief: "这次运行(包括它调起的所有子任务)总共最多花多少 token。",
+    token_budget_brief: "这次运行总共最多花多少 token",
     token_budget_impact:
-      "给这次运行定一个花费上限(按 token 数算,包含它中途调起的所有子任务)。花到 80% 时会提醒模型抓紧收尾;额度用完后,会强制模型只用已有信息给出一个结论,不再继续调用工具。0 = 不限制。",
+      "给这次运行定一个花费上限(按 token 数算,包含它中途调起的所有子任务)。花到 80% 时会提醒模型抓紧收尾;额度用完后,会强制模型只用已有信息给出一个结论,不再继续调用工具。\n0 = 不限制。\n例:预算设 20 万 token,花到 16 万时模型会被提醒抓紧收尾,真花完 20 万就只能拿现有信息给结论。",
     token_budget_default: "0(关闭)",
   },
   context_gates: {
     group_intro:
-      "当发给模型的内容估算超过「上下文窗口 × 阈值」时,会按顺序启动三道处理:①先把旧的工具执行结果压成一句引用(最省事,几乎不影响效果)→ ②如果还不够,砍掉早期的对话轮次,只留最近的(不额外调用模型,免费)→ ③如果还是不够,才用模型把中间一大段对话总结成一段话(最后一招)。大多数超限情况,前两步就能解决;这里的「窗口」以模型实际能装多少内容为准(在模型目录里能查到)。",
+      "内容太长装不下时,按 ①修剪旧工具结果 → ②只留最近对话 → ③模型总结中间段 的顺序兜底,大多数情况前两步就够。窗口大小以所选模型为准。",
     panel_tool_result_prune: "①结果修剪",
     panel_working_memory: "②滑动窗口",
     panel_context_compression: "③上下文压缩",
-    panel_tool_output_budget: "④工具输出预算",
     pr_enabled_label: "启用结果修剪",
-    pr_enabled_brief: "内容超限时,把比较旧的工具执行结果压缩成一行引用",
+    pr_enabled_brief: "内容超限就把旧结果压成一行",
     pr_enabled_impact:
-      "这是三道处理里最省事、也最不伤内容的一步:完整的对话过程和推理全部保留,只把比较早的工具执行结果换成一句引用(这类结果本来就存在工作区里,随时能无损找回来)。这个操作只影响这一次发给模型的内容,不会改动真正的历史记录。关掉以后,遇到轻微超限就会更早用到后面两道处理(裁对话、做摘要)。",
+      "这是三道处理里最省事、也最不伤内容的一步:完整的对话过程和推理全部保留,只把比较早的工具执行结果换成一句引用(这类结果本来就存在工作区里,随时能无损找回来)。这个操作只影响这一次发给模型的内容,不会改动真正的历史记录。\n关掉以后,遇到轻微超限就会更早用到后面两道处理(裁对话、做摘要)。\n例:一次工具调用返回了几千行日志,压缩后只留一句「已执行 xxx,详情见工作区」,模型看着更清爽,原始日志需要时还能调出来。",
     pr_enabled_default: "true",
     pr_threshold_pct_label: "触发阈值(窗口占比)",
-    pr_threshold_pct_brief:
-      "发给模型的内容估算达到「窗口 × 此值」才会修剪,没到就完全不动",
+    pr_threshold_pct_brief: "内容达到这个比例才触发修剪",
     pr_threshold_pct_impact:
-      "跟后面的「滑动窗口」「上下文压缩」用同一种比例设定方式,但各自独立配置、互不影响。调低 = 更早开始修剪、更省钱;调高 = 保留更多原始内容,但更依赖后面两道处理兜底。可以设在 0.05 到 1 之间。",
+      "跟后面的「滑动窗口」「上下文压缩」用同一种比例设定方式,但各自独立配置、互不影响。\n调低 = 更早开始修剪、更省钱;调高 = 保留更多原始内容,但更依赖后面两道处理兜底。可以设在 0.05 到 1 之间。\n例:窗口 10 万 token、这里设 0.7,发给模型的内容估算超过 7 万 token 才会开始修剪。",
     pr_threshold_pct_default: "0.7",
     pr_recent_kept_label: "保留最近工具结果数",
-    pr_recent_kept_brief: "最近 N 条工具结果保持完整,更早的才压缩成引用",
+    pr_recent_kept_brief: "最近几条结果保持完整,更早的才压缩",
     pr_recent_kept_impact:
-      "调大 = 模型能看到更多完整的工具结果,但占用的内容也更多;设成 0 = 一旦超限,所有工具结果都会被压缩成引用,一条都不留全的。",
+      "超限时,最近这些条工具结果保持完整,更早的才压缩成一行引用。\n调大 = 模型能看到更多完整的工具结果,但占用的内容也更多;设成 0 = 一旦超限,所有工具结果都会被压缩成引用,一条都不留全的。\n例:设成 4,超限时只留最近 4 条工具结果原样保留,更早的全部换成一行引用。",
     pr_recent_kept_default: "4",
     wm_enabled_label: "启用滑动窗口",
-    wm_enabled_brief: "内容超限时,只保留第一轮加最近几轮对话,不用额外调用模型",
+    wm_enabled_brief: "超限时只留首轮加最近几轮对话",
     wm_enabled_impact:
-      "裁剪只会在用户发消息的地方切开,绝不会把一次工具调用和它的结果拆散。大部分轻微超限到这一步就解决了,省下后面用模型做摘要的那笔钱。这个操作只影响这一次发给模型的内容,下一轮还是会从完整的历史记录重新裁剪一遍。",
+      "裁剪只会在用户发消息的地方切开,绝不会把一次工具调用和它的结果拆散。这个操作只影响这一次发给模型的内容,下一轮还是会从完整的历史记录重新裁剪一遍。\n开 = 大部分轻微超限到这一步就解决了,省下后面用模型做摘要的那笔钱;关 = 超限内容会更早用到下一步的「上下文压缩」兜底。\n例:一个聊了 30 轮的对话超限,滑动窗口会自动只留第 1 轮加最近若干轮发给模型,中间那些暂时不发,但完整记录还在。",
     wm_enabled_default: "true",
     wm_threshold_pct_label: "触发阈值(窗口占比)",
-    wm_threshold_pct_brief:
-      "发给模型的内容估算达到「窗口 × 此值」才会裁剪,没到就完全不动",
+    wm_threshold_pct_brief: "内容达到这个比例才触发裁剪",
     wm_threshold_pct_impact:
-      "跟前面的「结果修剪」、后面的「上下文压缩」用同一种比例设定方式,但各自独立配置。调低 = 更早开始裁剪、更省钱;调高 = 保留更多对话内容,但更依赖「上下文压缩」兜底。可以设在 0.05 到 1 之间。",
+      "跟前面的「结果修剪」、后面的「上下文压缩」用同一种比例设定方式,但各自独立配置。\n调低 = 更早开始裁剪、更省钱;调高 = 保留更多对话内容,但更依赖「上下文压缩」兜底。可以设在 0.05 到 1 之间。\n例:窗口 10 万 token、这里设 0.7,内容超过 7 万 token 才会触发裁剪。",
     wm_threshold_pct_default: "0.7",
     wm_max_recent_turns_label: "保留最近轮数",
     wm_max_recent_turns_brief: "滑动窗口保留最近几轮对话",
     wm_max_recent_turns_impact:
-      "调小 = 更省内容,但会丢掉更多中间阶段的上下文(丢掉的这部分不会被总结保留——那是「上下文压缩」的活);长多轮对话建议至少设 10 轮。",
+      "调小 = 更省内容,但会丢掉更多中间阶段的上下文(丢掉的这部分不会被总结保留——那是「上下文压缩」的活);长多轮对话建议至少设 10 轮。\n例:一个聊了 20 轮的答疑对话,这里设 10,超限时就只留最近 10 轮发给模型,更早的 10 轮会被裁掉。",
     wm_max_recent_turns_default: "20",
     wm_keep_first_turn_label: "保留首轮",
-    wm_keep_first_turn_brief:
-      "裁剪时始终保留最开始那一轮(相当于锚住最初的任务目标)",
+    wm_keep_first_turn_brief: "裁剪时始终保留最开始那轮",
     wm_keep_first_turn_impact:
-      "关掉以后,长对话可能会把最开始交代的任务要求给丢了,一般不建议关。",
+      "相当于锚住最初交代的任务目标,不会被后面的裁剪冲掉。\n关掉以后,长对话可能会把最开始交代的任务要求给丢了,一般不建议关。\n例:任务开头说了「只用中文回答」,如果这条要求所在的那一轮被裁掉,模型后面可能就忘了这条要求;保留首轮就是为了防止这种情况。",
     wm_keep_first_turn_default: "true",
     cc_enabled_label: "启用上下文压缩",
-    cc_enabled_brief: "内容超限时,用模型把对话中间的一大段总结成一条背景说明",
+    cc_enabled_brief: "超限时用模型总结中间对话",
     cc_enabled_impact:
-      "这是三道处理里的最后一招:保留最前面 N 条和最后面 M 条消息不动,中间那一大段换成一条〈context-summary〉背景总结;丢弃之前,如果开着长期记忆,会先把中间这段的要点存进长期记忆。如果关掉这个,又赶上前两道处理还是不够用,内容太大就会直接跑失败——没有别的兜底了。",
+      "这是三道处理里的最后一招:保留最前面 N 条和最后面 M 条消息不动,中间那一大段换成一条〈context-summary〉背景总结;丢弃之前,如果开着长期记忆,会先把中间这段的要点存进长期记忆。\n关掉以后,又赶上前两道处理还是不够用,内容太大就会直接跑失败——没有别的兜底了。\n例:一段很长的多轮排查记录,前面几条开场白和最近几条原样保留,中间几十轮的细节被压成一段话——模型照样知道大致发生了什么,只是不再逐字记得。",
     cc_enabled_default: "true",
     cc_threshold_pct_label: "触发阈值(窗口占比)",
-    cc_threshold_pct_brief:
-      "发给模型的内容估算达到「窗口 × 此值」才会压缩,没到就完全不动",
+    cc_threshold_pct_brief: "内容达到这个比例才触发压缩",
     cc_threshold_pct_impact:
-      "跟前面的「结果修剪」「滑动窗口」用同一种比例设定方式,但各自独立配置。调低 = 更早压缩、更省钱;调高 = 保留更多原文,但风险也更高——因为这已经是最后一道处理了,再往后没有别的办法兜底。可以设在 0.05 到 1 之间。",
+      "跟前面的「结果修剪」「滑动窗口」用同一种比例设定方式,但各自独立配置。\n调低 = 更早压缩、更省钱;调高 = 保留更多原文,但风险也更高——因为这已经是最后一道处理了,再往后没有别的办法兜底。可以设在 0.05 到 1 之间。\n例:窗口 10 万 token、这里设 0.7,内容超过 7 万 token 才会触发压缩。",
     cc_threshold_pct_default: "0.7",
     cc_head_keep_label: "保留头部条数",
-    cc_head_keep_brief: "摘要时原样保留最前面 N 条非系统消息",
+    cc_head_keep_brief: "摘要时原样保留最前面 N 条",
     cc_head_keep_impact:
-      "这里面包含记忆内容插入的位置;如果设成 0,又开着「记忆注入」,系统运行时会自动把这个值抬到 1(不会真的变成 0)。",
+      "这里面包含记忆内容插入的位置;如果设成 0,又开着「记忆注入」,系统运行时会自动把这个值抬到 1(不会真的变成 0)。\n例:设成 4,压缩时最前面 4 条消息(通常是系统设定和最初的任务说明)原样保留,不会被总结掉。",
     cc_head_keep_default: "4",
     cc_tail_keep_label: "保留尾部条数",
     cc_tail_keep_brief: "摘要时原样保留最近 M 条",
-    cc_tail_keep_impact: "结尾这部分是当前正在处理的内容,设太小会丢掉最近发生的细节。",
+    cc_tail_keep_impact:
+      "结尾这部分是当前正在处理的内容,设太小会丢掉最近发生的细节。\n例:设成 6,压缩时最近 6 条消息原样保留,确保模型不会忘了刚刚发生的事。",
     cc_tail_keep_default: "6",
     cc_flush_before_compaction_label: "压缩前冲入记忆",
-    cc_flush_before_compaction_brief:
-      "中间那段内容被摘要丢弃前,先把要点写进长期记忆",
+    cc_flush_before_compaction_brief: "丢弃前先把要点写进长期记忆",
     cc_flush_before_compaction_impact:
-      "只有「学习(记住新信息)」开着的时候才会真的生效,不然这个开关等于白开。它能保证压缩很多次以后,重要的决定不会被彻底丢掉。",
+      "它能保证压缩很多次以后,重要的决定不会被彻底丢掉。\n只有「学习(记住新信息)」开着的时候才会真的生效,不然这个开关等于白开。\n例:中间一段对话里用户确认了一个重要决定,这段内容被压缩丢弃前,要点会先存进长期记忆,以后翻旧账时还能查到。",
     cc_flush_before_compaction_default: "true",
     cc_max_passes_label: "最大压缩轮数",
-    cc_max_passes_brief: "连续压缩后仍然超限时,最多再试 N 轮",
+    cc_max_passes_brief: "压完还超限,最多再试几轮",
     cc_max_passes_impact:
-      "如果试完这些轮数还是超限,这次运行就会直接失败(提示内容超限,不会悄悄硬凑合)。做摘要的模型偶尔调用失败会先跳过重试,只有连续失败 3 次才会真的判定失败。",
+      "做摘要的模型偶尔调用失败会先跳过重试,只有连续失败 3 次才会真的判定失败。\n如果试完这些轮数还是超限,这次运行就会直接失败(提示内容超限,不会悄悄硬凑合)。\n例:设成 3,压缩一次还超限就再压一次,最多压 3 次;3 次都不够就直接失败。",
     cc_max_passes_default: "3",
     cc_max_turns_label: "按轮数硬截断(旧机制)",
-    cc_max_turns_brief: "每次调用直接砍到只剩最近 N 轮对话,留空 = 不启用",
+    cc_max_turns_brief: "直接砍到只剩最近几轮对话",
     cc_max_turns_impact:
-      "这是在「三道处理」出现之前就有的老机制,默认关闭(留空)。一旦设置了数值,每次调用都会无条件砍掉多余部分——一般用不上,优先用上面按比例触发的几道处理就够了。",
+      "这是在「三道处理」出现之前就有的老机制,默认关闭(留空 = 不启用)。\n一旦设置了数值,每次调用都会无条件砍掉多余部分——不管内容有没有真的超限,一般用不上,优先用上面按比例触发的几道处理就够了。\n例:设成 20,不管超没超限,每次调用都只留最近 20 轮。",
     cc_max_turns_default: "留空(关闭)",
     cc_max_tokens_label: "按 token 数硬截断(旧机制)",
-    cc_max_tokens_brief: "跟上面类似,只是按 token 数量来砍,留空 = 不启用",
+    cc_max_tokens_brief: "跟上面类似,按 token 数量砍",
     cc_max_tokens_impact:
-      "跟「按轮数硬截断」一样,一旦设置就会无条件生效,一般建议留空不要设。",
+      "跟「按轮数硬截断」一样,一旦设置就会无条件生效,不管内容有没有真的超限。\n留空 = 不启用这个老机制,一般建议留空不要设。\n例:设成 50000,每次调用都会被砍到最多 5 万 token。",
     cc_max_tokens_default: "留空(关闭)",
     cc_pressure_feedback_label: "压力反馈提示",
-    cc_pressure_feedback_brief: "内容快接近窗口上限时,给模型附加一条预算提醒",
+    cc_pressure_feedback_brief: "快到上限时提醒模型收着点",
     cc_pressure_feedback_impact:
-      "内容用量达到「窗口 × 预警占比」时,系统会在最后一条消息后面附加一句提醒,让模型自己注意收着点说(不会去动最前面的系统提示词,所以不影响提示词缓存)。没到这个比例就完全不会加提醒。",
+      "内容用量达到「窗口 × 预警占比」时,系统会在最后一条消息后面附加一句提醒,让模型自己注意收着点说(不会去动最前面的系统提示词,所以不影响提示词缓存)。\n没到这个比例就完全不会加提醒。\n例:用量刚过预警线,模型会自己开始少铺垫细节、抓紧收尾,而不是等到真的超限才被硬性裁剪。",
     cc_pressure_feedback_default: "true",
     cc_pressure_warn_pct_label: "压力预警占比",
     cc_pressure_warn_pct_brief: "触发预算提醒的窗口占比",
     cc_pressure_warn_pct_impact:
-      "这个值理论上应该比「上下文压缩」的触发阈值更低,提醒才有意义——但默认设置里预警是 0.75、压缩是 0.7,也就是说默认情况下压缩反而先于预警发生。想让提醒提前到压缩之前,可以把这个值调低一些。",
+      "这个值理论上应该比「上下文压缩」的触发阈值更低,提醒才有意义。\n但默认设置里预警是 0.75、压缩是 0.7,也就是说默认情况下压缩反而先于预警发生——想让提醒提前到压缩之前,可以把这个值调低一些。",
     cc_pressure_warn_pct_default: "0.75",
     budget_enabled_label: "启用工具输出预算",
-    budget_enabled_brief:
-      "本 Agent 处理「超大工具输出」的总开关——控制要不要把太大的结果挪到别处存、留档或剪短",
+    budget_enabled_brief: "超大工具输出怎么处理的总开关",
     budget_enabled_impact:
-      "真正生效需要两个开关都开着:平台那边的总开关,加上这里的开关(平台那边关了,这里开着也没用)。关掉以后,特别大的工具结果就不会再挪到工作区存起来,太长的内容只能被硬截断。另外,bash/exec/http/mcp 这几类工具早期就有的「结果太大自动转存」机制,不受这个开关影响,照常工作。",
+      "真正生效需要两个开关都开着:平台那边的总开关,加上这里的开关(平台那边关了,这里开着也没用)。另外,bash/exec/http/mcp 这几类工具早期就有的「结果太大自动转存」机制,不受这个开关影响,照常工作。\n开 = 特别大的工具结果会转存到工作区、发给模型的只是一个引用;关 = 特别大的工具结果不再转存,太长的内容只能被硬截断,后面部分直接丢失。\n例:一次网页抓取返回了几十万字的原始 HTML,开着这个开关就会把它转存到工作区,模型只看到一个引用。",
     budget_enabled_default: "true",
   },
   security_gates: {
-    group_intro:
-      "控制沙箱里的代码和工具能不能连外网,按顺序判断三层:先看出网模式这个总开关,然后看黑名单(优先级最高),最后看白名单。",
+    tab_defenses: "防护开关",
+    tab_approval: "人工审批",
+    tab_network: "子任务与网络",
     panel_network: "①网络出网",
     panel_enforce: "②工具强制",
     egress_label: "出网模式",
-    egress_brief:
-      "沙箱访问外网的总开关:proxy = 走带凭据的代理(默认,推荐)/ direct = 直接连,不经代理 / none = 完全断网",
+    egress_brief: "沙箱怎么连外网的总开关",
     egress_impact:
-      "选 none,沙箱里就完全连不了外网,任何请求都发不出去;选 direct 是直接联网、不走代理,也就没有代理帮忙自动带凭据、也没有集中审计记录,一般不建议这么选;选 proxy(默认)就是走带凭据的代理出网,所有请求都会留有审计记录。",
+      "proxy(默认,推荐)= 走带凭据的代理出网,所有请求都会留有审计记录;direct = 直接联网、不经代理,没有代理帮忙自动带凭据,也没有集中审计记录,一般不建议这么选;none = 完全断网,沙箱里任何请求都发不出去。\n例:一个只需要读写自家数据库的 Agent,选 none 就能彻底杜绝它访问外网的可能。",
     egress_default: "proxy",
     egress_opt_proxy: "经凭据代理(默认)",
     egress_opt_direct: "直连",
     egress_opt_none: "断网",
     allowlist_label: "域名白名单",
-    allowlist_brief:
-      "填了域名 = 只允许访问这些域名;留空 = 允许访问整个公网(伪造请求、探测内网这类攻击依然会被拦,全程留有审计记录)",
+    allowlist_brief: "限制只能访问哪些域名",
     allowlist_impact:
-      "匹配规则是精确域名或它的子域名。不能写 ['*'] 这种通配符去放行所有域名(提交时会被直接拒绝)。白名单和黑名单同时设置时,黑名单说了算。",
+      "填了域名 = 只允许访问这些域名;留空 = 允许访问整个公网(伪造请求、探测内网这类攻击依然会被拦,全程留有审计记录)。匹配规则是精确域名或它的子域名,不能写 ['*'] 这种通配符去放行所有域名(提交时会被直接拒绝)。\n白名单和黑名单同时设置时,黑名单说了算。\n例:只填 api.weather.com,这个 Agent 就只能访问天气接口,访问别的网址一律被拦。",
     allowlist_default: "留空(放行公网)",
     denylist_label: "域名黑名单",
-    denylist_brief: "不管白名单怎么设、默认是不是放行,这里列的域名一律强制拦截",
+    denylist_brief: "强制拦截列出的这些域名",
     denylist_impact:
-      "优先级比白名单高,同样是精确域名或子域名匹配。适合「其他都能连,就是要拉黑这几个」的场景。",
+      "不管白名单怎么设、默认是不是放行公网,这里列的域名一律强制拦截,优先级比白名单高,同样是精确域名或子域名匹配。\n例:公网整体放行,但明确不许连竞品官网或已知的钓鱼域名——适合「其他都能连,就是要拉黑这几个」的场景。",
     denylist_default: "留空",
     enforce_label: "工具调用强制",
-    enforce_brief:
-      "在系统提示词里加一段强制要求:遇到需要实时信息的问题必须真的调工具查、立刻行动,不能编造工具的返回结果",
+    enforce_brief: "强制模型该查工具就去查,别瞎编",
     enforce_impact:
-      "auto(默认)= 除了 Claude、GPT 这类本来就很擅长主动调工具的模型,其他模型都会自动加上这段强制要求——新接入一个不太会用工具的模型,不用改配置就能自动获得这层保障;on/off = 不管什么模型,强制打开或强制关闭。",
+      "会在系统提示词里加一段强制要求:遇到需要实时信息的问题,必须真的调用工具去查、立刻行动,不能凭空编造工具的返回结果。\nauto(默认)= 除了 Claude、GPT 这类本来就很擅长主动调工具的模型,其他模型都会自动加上这段强制要求;on/off = 不管什么模型,强制打开或强制关闭。\n例:新接入一个不太会用工具的模型,auto 模式下不用改配置就能自动获得这层保障。",
     enforce_default: "auto",
     enforce_opt_auto: "自动(默认)",
     enforce_opt_on: "强制开启",
     enforce_opt_off: "强制关闭",
     dict_note:
-      "限流规则、隐私信息(PII)处理、安全策略这三项,现在还是自由格式的字典,没有专门的表单——因为后端的字段结构还没最终定下来,请先到 YAML 视图里编辑。",
+      "限流、隐私脱敏、安全策略等高级项请在 YAML 视图配置。",
   },
   sandbox_group: {
     pw_label: "计划投影到工作区",
-    pw_brief:
-      "每轮结束把 PLAN.md / TODO.md / MEMORY.md 写入用户工作区,run 开始时再读回来——让沙箱内外看到同一份任务进度",
+    pw_brief: "把计划进度同步写进工作区",
     pw_impact:
-      "这个开关只管「计划/进度要不要写文件同步」,管不着文件会不会被保存下来:只要运行时带着 user_id,本来就会自动挂载这个用户专属的持久工作区(就算闲置被回收了,下次也会自动恢复);没有 user_id 的系统运行,工作区本来就是用完即丢的临时空间——这两种情况都跟这个开关没关系。另外,这个开关要真正生效,还需要部署那边把沙箱管理组件接好。",
+      "每轮结束时把 PLAN.md / TODO.md / MEMORY.md 写进用户的工作区,下次运行开始时再读回来,让沙箱内外看到同一份任务进度。这个开关要真正生效,还需要部署那边把沙箱管理组件接好。\n这个开关只管「要不要做这层文件同步」,管不着文件会不会被保留下来:只要运行时带着用户身份,工作区文件本来就会一直留着——就算一段时间没人碰、被系统回收了,下次也会自动恢复;没有用户身份的系统运行,工作区从一开始就是用完即丢的临时空间——这两种情况都跟这个开关没关系。\n例:一个跑很久的调研任务中途被打断,开着这个开关,下次接着跑还能看到 PLAN.md 里记的进度;关掉的话,Agent 心里知道计划,只是不会额外写这几个文件去同步。",
     platform_note_title: "平台实际生效值",
     platform_note_body:
-      "沙箱实际用多少资源、用什么镜像,都是由平台部署决定的,配置清单里写了也不算数:镜像统一用平台自带的那个(装了 Python 和办公/数据/多媒体处理常用的库);资源配置(默认 1 个 CPU、1024 MB 内存、最多 128 个进程)由部署环境决定;单条命令默认最多跑 30 秒,工具调用时可以自己指定,但不超过 300 秒;沙箱里的根目录永远是只读的,能写文件的地方永远只有 /workspace 和 /tmp;具体用哪种容器技术运行(gVisor 还是 runc)由部署时的环境变量决定。",
+      "沙箱实际用多少资源、用什么镜像,都是由平台部署决定的,配置清单里写了也不算数。\n镜像统一用平台自带的那个(装了 Python 和办公/数据/多媒体处理常用的库);资源配置(默认 1 个 CPU、1024 MB 内存、最多 128 个进程)由部署环境决定;单条命令默认最多跑 30 秒,工具调用时可以自己指定,但不超过 300 秒。\n沙箱里的根目录永远是只读的,能写文件的地方永远只有 /workspace 和 /tmp;具体用哪种容器技术运行(gVisor 还是 runc)由部署时的环境变量决定。",
     declarative_note:
-      "配置清单里的 runtime / image / image_build / resources / readonly_root / writable / mounts 这几个字段,还有 code 这一整块,目前都只是摆设(专业说法叫「声明性字段」):写了不会报错,但系统运行时根本不会去读它们,留着也没坏处。真要调整实际的资源上限,请去改平台部署那边的配置(sandbox-supervisor 的环境变量)。",
+      "配置清单里的 runtime / image / image_build / resources / readonly_root / writable / mounts 这几个字段,还有 code 这一整块,目前都只是摆设(专业说法叫「声明性字段」):写了不会报错,但系统运行时根本不会去读它们,留着也没坏处。\n真要调整实际的资源上限,请去改平台部署那边的配置(sandbox-supervisor 的环境变量)。",
   },
   memory_group: {
+    tab_basic: "基本",
+    tab_retrieval: "检索细节",
+    tab_budget: "预算与整理",
+    on_label: "长期记忆",
+    on_brief: "跨会话记住用户信息",
+    on_impact:
+      "开启后,Agent 跨会话记住用户信息和过往交互,下次自动想起来;\n关掉则每次对话都从零开始。\n需要平台已配置 Embedding 模型,否则开了也用不了。\n示例:开启,召回 5 条",
+    topk_label: "每轮召回条数",
+    topk_brief: "每轮最多召回几条记忆",
+    topk_impact:
+      "每次对话最多调取几条最相关的记忆。\n太多会挤占上下文,太少会漏信息。\n示例:5",
+    write_back_label: "学习(记住新信息)",
+    write_back_brief: "自动记住新信息",
+    write_back_impact:
+      "开启后,每次对话结束会把新了解到的信息记下来,下次自动想起。\n关掉则只用已有记忆,不再新增。\n示例:开启",
+    verify_reads_label: "回答前核对记忆",
+    verify_reads_brief: "回答前核对记忆,更准更慢",
+    verify_reads_impact:
+      "调取记忆后、用进回答前,先让模型筛一遍,丢掉跟当前问题无关、过期或矛盾的,避免旧记忆带偏回答。\n会多花一次模型调用;万一出错则不拦截、全部放行。\n默认开启。\n示例:开启",
+    write_min_importance_label: "重要性过滤",
+    write_min_importance_brief: "低于此重要度不存记忆",
+    write_min_importance_impact:
+      "给每条要记的信息打一个重要性分(0–1),低于这个值就不记,避免把闲聊也存进去。\n0.3:丢掉明显琐碎的;0:全部都记。\n示例:0.3",
+    reconcile_writes_label: "去重整理",
+    reconcile_writes_brief: "存新记忆前自动去重合并",
+    reconcile_writes_impact:
+      "记新信息前,先和相似的旧记忆比对,自动合并、更新或删除,避免重复堆积、自相矛盾。\n关掉则直接追加。\n默认开启。\n示例:开启",
+    recall_mode_label: "记忆插入位置",
+    recall_mode_brief: "控制记忆多久插入一次",
+    recall_mode_impact:
+      "记忆插入对话的位置。\n每会话:整段对话固定插一次,更省更快(默认)。\n每轮:每轮都重新插,适合对话中会自己改记忆的 Agent。\n示例:每会话",
+    recall_mode_per_session: "每会话(更省更快)",
+    recall_mode_per_turn: "每轮",
+    rewrite_reads_label: "改写问题用于检索",
+    rewrite_reads_brief: "检索前把问题改写得更准",
+    rewrite_reads_impact:
+      "检索记忆前,先把用户最新的消息改写成一句独立的检索词——剥掉指令、精简过长内容,避免带偏召回的记忆。\n会多花一次模型调用;万一出错则用原消息。\n默认关闭(按需开启)。\n示例:关闭",
+    abstain_threshold_label: "跳过弱匹配(阈值)",
+    abstain_threshold_brief: "匹配太弱时干脆不给记忆",
+    abstain_threshold_impact:
+      "检索后,若最相关记忆与问题的相似度低于此值,则不注入任何记忆,而非塞一个勉强的匹配——避免把关系不大的记忆拉进回答。\n0 = 从不跳过(默认);约 0.2–0.3 = 跳过明显偏弱的匹配。\n示例:0",
     panel_injection: "①注入预算",
     panel_consolidation: "②后台记忆整理",
     inj_budget_label: "记忆注入 token 预算",
-    inj_budget_brief:
-      "把召回的记忆塞进提示词时最多能占多少 token——按相关程度从高到低往里塞,塞满就不再放",
+    inj_budget_brief: "记忆最多能占多少 token",
     inj_budget_impact:
-      "召回几条记忆由「每轮召回条数」控制,但万一某一条记忆特别长,也可能把这部分内容撑得很大,这个预算就是用来兜底的(排在边界、放不下的那条会被截断并打上标记)。调大 = 模型能看到更多记忆背景,但每轮更贵;调小 = 省 token,但长记忆可能被截断看不全。",
+      "把召回的记忆塞进提示词时最多能占多少 token——按相关程度从高到低往里塞,塞满就不再放。\n调大 = 模型能看到更多记忆背景,但每轮更贵;调小 = 省 token,但长记忆可能被截断看不全。\n召回几条记忆由「每轮召回条数」控制,但万一某一条记忆特别长,也可能把这部分内容撑得很大,这个预算就是用来兜底的(排在边界、放不下的那条会被截断并打上标记)。",
     inj_budget_default: "2000",
     corr_budget_label: "用户纠正保底预算",
-    corr_budget_brief:
-      "用户明确纠正过的记忆(系统认定百分之百确定的那种)优先能用的专属额度",
+    corr_budget_brief: "用户纠正过的记忆专属额度",
     corr_budget_impact:
-      "确保普通记忆不会把用户明确纠正过的内容挤掉:纠正类记忆会优先分到最多这么多 token,剩下的预算才轮到普通记忆用。设成 0 = 不做这层保护。",
+      "用户明确纠正过的记忆(系统认定百分之百确定的那种)优先能用的专属额度,确保普通记忆不会把它挤掉:纠正类记忆会优先分到最多这么多 token,剩下的预算才轮到普通记忆用。\n设成 0 = 不做这层保护。",
     corr_budget_default: "500",
     consolidation_label: "后台记忆整理",
-    consolidation_brief:
-      "后台每隔一段时间(默认 4 小时一次)自动合并相似的临时记忆、清掉没用的噪音记忆——是后台任务,不会拖慢对话响应速度",
+    consolidation_brief: "后台定期整理记忆,不拖慢对话",
     consolidation_impact:
-      "关掉以后,这个 Agent 的长期记忆就不会再自动去重、沉淀、清理噪音了,临时记忆会越堆越多。整理这个活交给辅助模型做,会按「记忆整理」这个用途单独计费;判断哪些记忆算「相似」的具体标准是租户级别的配置,不在这份配置清单里。",
+      "后台每隔一段时间(默认 4 小时一次)自动合并相似的临时记忆、清掉没用的噪音记忆——是后台任务,不会拖慢对话响应速度。\n关掉以后,这个 Agent 的长期记忆就不会再自动去重、沉淀、清理噪音了,临时记忆会越堆越多。\n整理这个活交给辅助模型做,会按「记忆整理」这个用途单独计费;判断哪些记忆算「相似」的具体标准是租户级别的配置,不在这份配置清单里。",
     aux_model_note:
-      "做整理用的辅助模型,默认用平台统一配置的那个(claude-sonnet-4-6);如果想单独给这个 Agent 指定别的模型,请去 YAML 视图编辑 policies.memory_consolidation.aux_model(需要填一个完整的模型配置块)。",
-    reserved_note:
-      "memory.short_term 和 dynamic_context.inject_memory 这两个字段目前只是占位(专业说法叫保留字段):写了不会报错,但系统不会真的去读。记忆功能是否开启,只看有没有声明 memory.long_term(就是上面这个开关)。",
+      "做整理用的辅助模型默认走平台统一配置(claude-sonnet-4-6)。\n要单独给这个 Agent 换一个,请到 YAML 视图编辑 policies.memory_consolidation.aux_model。",
   },
   model_group: {
     panel_reflection: "反思自评",
     rf_enable_label: "反思自评",
-    rf_enable_brief:
-      "回答之前先让一个评判模型给这次回答打分、挑毛病,不达标就自动重新改进",
+    rf_enable_brief: "回答前先让模型自查打分",
     rf_enable_impact:
-      "每多反思一轮,就多一次模型调用:回答质量会更好,但也更慢、更贵。用哪个模型评判,由下面「反思评判模型」的设置决定;没设置就用主模型自己评判自己。",
+      "回答定稿前,先让一个评判模型给这次回答打分、挑毛病,不达标就自动让模型重新改进一遍,直到达标或次数用完。用哪个模型评判,由下面「反思评判模型」的设置决定;没设置就用主模型自己评判自己。\n每多反思一轮,就多一次模型调用:回答质量会更好,但也更慢、更贵。\n例:客服 Agent 答完一次,评判模型发现少说了退款流程,就打回去让它补上再答一次。",
     rf_budget_label: "反思次数上限",
-    rf_budget_brief: "一次运行最多能反思几次,到了这个次数就直接采用当前答案",
+    rf_budget_brief: "最多反思几次就定稿",
     rf_budget_impact:
-      "调大 = 能多改几轮,但成本和耗时也跟着涨;设成 1 = 只评一次,不改进。",
+      "一次运行最多能反思几轮,到了这个次数不管达不达标都直接采用当前答案,不会无限循环改下去。\n调大 = 能多改几轮,但成本和耗时也跟着涨;设成 1 = 只评一次,不改进。\n例:设成 2,评判觉得第一次答案不够好、改进一次后,不管好没好都直接用第二次的结果。",
     rf_budget_default: "2",
     rf_deadline_label: "单次反思时限(秒)",
-    rf_deadline_brief: "每次反思最多能花多少秒,超时就直接采用当前答案",
+    rf_deadline_brief: "单次反思最多等几秒",
     rf_deadline_impact:
-      "防止评判模型卡住不动、拖累整个运行。调大一点能容忍反应慢的模型;调小一点能保证响应速度。最多能设到 600 秒。",
+      "每一轮反思最多能花多少秒,超时就直接采用当前答案,不再等评判模型——防止评判模型卡住不动、拖累整个运行。\n调大一点能容忍反应慢的模型;调小一点能保证响应速度。最多能设到 600 秒。\n例:评判模型响应变慢,卡到超时还没打完分,就直接放弃这一轮评判,用现有答案往下走。",
     rf_deadline_default: "30",
     yaml_note:
-      "下面这几项暂时只能在 YAML 视图里配置:routing.rules 里的 planning 规则(只有工作流类型选 plan_execute 时才用得到)、vision.fallbacks(看图模型的备用链),以及 base_url / azure_deployment / azure_api_version 这几个 Azure 和自建模型服务的连接参数。另外,api_key_ref 这个字段已经废弃:就算在配置清单里写了也会被忽略,并且会收到一条警告。",
+      "规划模型路由规则(工作流类型选 plan_execute 时用得到)、看图模型备用链、接入点地址(Azure 部署等)这些高级项请到 YAML 视图配置。\napi_key_ref 已废弃,写了会被忽略并给出警告。",
   },
   observability_group: {
     resp_cache_label: "LLM 响应缓存",
-    resp_cache_brief:
-      "同样的请求如果之前问过,直接复用上次的完整回答,不用再调用模型——省钱又快",
+    resp_cache_brief: "问过的问题直接复用答案",
     resp_cache_impact:
-      "一旦命中缓存,这次调用就完全跳过模型(选模型、切备用模型这些步骤都不走了)。如果这个 Agent 的提示词里有跟时间相关的内容(比如当前日期、实时数据),应该关掉这个开关,不然可能会返回过期的答案。这跟「模型与路由」组里的「提示词缓存」(Anthropic 的 prompt caching)不是一回事:那个只是省输入部分的 token,这个开关是把整条回答原样复用。",
+      "同样的请求如果之前问过,直接复用上次的完整回答,不用再调用模型——省钱又快。一旦命中缓存,这次调用就完全跳过模型(选模型、切备用模型这些步骤都不走了)。\n如果这个 Agent 的提示词里有跟时间相关的内容(比如当前日期、实时数据),应该关掉这个开关,不然可能会返回过期的答案。\n这跟「模型与路由」组里的「提示词缓存」(Anthropic 的 prompt caching)不是一回事:那个只是省输入部分的 token,这个开关是把整条回答原样复用。",
+    traj_rec_label: "运行记录存档",
+    traj_rec_brief: "把完整运行过程存档,用于质量评测",
+    traj_rec_impact:
+      "开启时,每次运行结束后把完整过程(用户输入、Agent 回复、工具调用)存一份档案,平台用它做质量评测,将来也可用于改进模型。\n关闭 = 对话内容不落档案,适合处理敏感信息的 Agent。\n例:客服 Agent 涉及用户隐私数据,关掉后运行内容只留在会话记录里,不进分析档案库。",
     triggers_note:
-      "配置清单里能写 triggers 这个字段,但现在还没接通:在清单里写定时任务或 webhook 触发器,不会真的生效。要配定时任务或 webhook 自动化,请通过「触发器管理」功能(/v1/triggers 接口)去创建,走这条路径才能真正跑起来。",
+      "定时任务请到『触发器』页面管理。\n配置清单里的 triggers 字段目前还没接通,写了不会生效——请通过「触发器管理」功能(/v1/triggers 接口)去创建,走这条路径才能真正跑起来。",
     declarative_note:
-      "observability 下面的 trace / log_level / redact_fields 这几个字段目前都只是摆设:写了不会报错,但系统运行时不会真的去读它们——链路追踪是不是开启由平台统一配置决定,日志级别由各个服务的部署环境决定,隐私信息(PII)脱敏是平台的防御机制统一负责的,都不受这几个字段影响。",
+      "observability 下面的 trace / log_level / redact_fields 这几个字段目前都只是摆设:写了不会报错,但系统运行时不会真的去读它们——链路追踪开不开由平台统一配置决定,日志级别由各服务的部署环境决定,隐私信息(PII)脱敏由平台的防御机制统一负责,都不受这几个字段影响。",
   },
   model_select: {
     provider_label: "提供方",
@@ -894,13 +936,10 @@ const zhCN: TranslationKeys = {
     field_name_placeholder: "my-agent",
     field_description: "描述",
     basic_yaml_note:
-      "extends(模板继承)在 YAML 视图编辑。tenant_config 的 compliance_pack / isolation_level / data_residency 为保留字段:通过校验但运行时不读取(沙箱隔离当前恒为 shared);audit_retention_days 暂由平台全局配置决定。",
+      "模板继承(extends)、租户合规标签(compliance_pack 等)这些高级项请到 YAML 视图配置。\n后三项(compliance_pack/isolation_level/data_residency)目前只校验格式,运行时不生效(沙箱隔离当前恒为 shared),审计保留天数暂由平台统一配置。",
     section_model: "模型",
     section_prompt: "系统提示词",
     field_prompt_placeholder: "你是一个有帮助的助手。",
-    section_memory: "长期记忆",
-    memory_hint: "跨会话记忆，需要平台已配 Embedding。",
-    memory_topk: "每轮召回条数",
     section_tools: "工具",
     tool_web_search: "联网搜索",
     tool_http: "HTTP 工具",
@@ -957,12 +996,8 @@ const zhCN: TranslationKeys = {
       "Agent 主对话用的大模型。\n先选厂商,再选具体模型;温度越高回答越发散。\n示例:anthropic / claude-sonnet-4-5,温度 0.2",
     section_prompt_help:
       "系统提示词,定义 Agent 的角色、语气和行为规则,是塑造性格的核心。\n示例:你是资深 Python 工程师,回答简洁、给可运行代码",
-    section_memory_help:
-      "开启后,Agent 跨会话记住用户信息和过往交互,下次自动想起来;\n关掉则每次对话都从零开始。\n示例:开启,召回 5 条",
-    memory_topk_help:
-      "每次对话最多调取几条最相关的记忆。\n太多会挤占上下文,太少会漏信息。\n示例:5",
     section_reflection_evaluator_help:
-      "指定反思自评所用的评判模型(routing 规则)。仅在上方「反思自评」开启后生效;未指定时反思复用主模型。",
+      "指定反思自评所用的评判模型。仅在上方「反思自评」开启后生效;未指定时反思复用主模型。",
     section_defenses: "防御守卫",
     section_defenses_help:
       "配置该 agent 的安全守卫姿态:输入注入防护、输出筛查/脱敏、工具行为审查。",
@@ -972,27 +1007,32 @@ const zhCN: TranslationKeys = {
     defenses_group_output: "输出防护",
     defenses_group_action: "工具行为防护",
     defenses_prompt_injection: "注入 spotlighting",
+    defenses_prompt_injection_brief: "给外部内容打标记,防止误导",
     defenses_prompt_injection_help:
       "对不可信来源内容(检索结果、工具输出等)加标记,降低 prompt 注入劫持风险。默认开。",
     defenses_prompt_injection_off_warn:
       "关闭后不再标记不可信内容,降低注入防护。",
     defenses_output_screen: "输出规则筛查",
+    defenses_output_screen_brief: "拦截疑似泄密的回复内容",
     defenses_output_screen_help:
       "用规则拦截疑似凭据/外泄形的回复。默认开,建议保持。",
     defenses_output_screen_off_warn:
       "关闭后不再拦截凭据/外泄形回复(默认开,不建议关)。",
     defenses_output_judge: "模型型输出 judge",
+    defenses_output_judge_brief: "让模型再检查一遍回复是否安全",
     defenses_output_judge_help:
       "用一个模型逐条判定回复是否对齐/泄漏,是规则筛查之上的兜底。",
     defenses_output_judge_on_warn:
       "每条回复额外一次 LLM 调用(增加延迟与成本);并禁用该 agent 的逐-token 流式响应(回复整条一次性返回)。judge 使用的模型在「平台设置」中配置。",
     defenses_output_judge_on_error: "judge 失败时",
     defenses_output_dlp: "输出 PII 脱敏",
+    defenses_output_dlp_brief: "自动隐藏回复里的隐私信息",
     defenses_output_dlp_help:
       "把回复中的 PII(邮箱/手机/身份证/银行卡)替换为 [redacted]。",
     defenses_output_dlp_on_note:
       "会改写含 PII 的合法回复,例如「你的邮箱是 a@b.com」→「你的邮箱是[redacted]」。",
     defenses_action_screen: "工具调用审查",
+    defenses_action_screen_brief: "调用工具前先检查是否可疑",
     defenses_action_screen_help:
       "在每个工具调用执行前判定其是否对齐:关闭 / 拦截 / 转人工审批。",
     defenses_action_screen_off: "关闭",
@@ -1009,9 +1049,9 @@ const zhCN: TranslationKeys = {
     section_mcp_help:
       "把 Agent 接到 MCP 服务器(外部工具来源)。\n选服务器,还能进一步限定到具体工具。\n示例:接高德地图查位置",
     tool_web_search_help:
-      "允许 Agent 联网搜实时信息(走平台配的搜索服务)。\n示例:问「今天的新闻」时用得上",
+      "允许 Agent 联网搜实时信息,开箱可用(平台自带免费搜索服务,不用自己配置)。\n示例:问「今天的新闻」时用得上",
     tool_http_help:
-      "允许 Agent 调外部 API(经审计代理出网)。\n示例:查天气、调内部服务",
+      "允许 Agent 访问外部网址、调用第三方接口(所有请求都会留痕,方便审计)。\n示例:查天气、调用你们自己的内部系统",
     tool_mcp_help:
       "允许 Agent 用 MCP 服务器提供的工具(数据库、业务系统等)。\n勾选后在下面选具体服务器和工具。\n示例:接公司 CRM",
     tool_exec_python: "运行 Python 代码",
@@ -1025,20 +1065,23 @@ const zhCN: TranslationKeys = {
       "让 Agent 能在对话里帮用户建定时任务(如「每天9点搜新闻」),到点自动跑、结果回到对话。",
     tool_author_skill: "创作技能",
     tool_author_skill_help:
-      "让 Agent 能把一段可复用的做法沉淀成「技能」保存起来,以后自己或别的 Agent 直接用。",
+      "让 Agent 能把一段可复用的做法保存成「技能」,以后自己或别的 Agent 能直接拿来用。\n示例:把「整理周报」的固定步骤存成技能,下次一句话就能触发。",
     tool_refine_skill: "优化技能",
-    tool_refine_skill_help: "让 Agent 能改进已有技能的内容。",
+    tool_refine_skill_help:
+      "让 Agent 能改进已有技能里的内容。\n示例:某个技能的步骤过时了,让 Agent 自己更新一遍。",
     tool_fork_skill: "复制技能",
-    tool_fork_skill_help: "让 Agent 基于已有技能复制一份再改,不动原技能。",
+    tool_fork_skill_help:
+      "让 Agent 基于已有技能复制一份再改,不会动到原技能。\n示例:想照着「周报」技能改出一个「日报」版本。",
     tool_propose_skill: "提交技能到团队",
-    tool_propose_skill_help: "让 Agent 把自己的技能提交给团队共享(需审批)。",
+    tool_propose_skill_help:
+      "让 Agent 把自己摸索出的技能提交给团队共享(需要人工审批通过)。\n示例:Agent 总结出一套好用的做法,想让团队里其他 Agent 也能用上。",
     tool_note_behavior_patch: "记录行为修正",
     tool_note_behavior_patch_help:
-      "让 Agent 能记下「以后这类情况该怎么做」的小修正,逐步改进自己的表现。",
+      "让 Agent 能记下「以后遇到这种情况该怎么做」的小修正,慢慢把自己做得更好。",
     tool_clarify_tool_usage: "澄清工具用法",
     tool_clarify_tool_usage_help: "让 Agent 在用错工具时记下正确用法,下次不再犯。",
     tools_config_note:
-      "上面这些工具开关,只负责决定「用不用这个工具」。如果还想细调某个工具的具体参数(比如联网搜索用哪个搜索引擎、一次返回几条结果),请到 YAML 视图里编辑对应工具的 tools[].config。",
+      "文件读写、产物保存、请求人工确认这些基础能力默认开启,不在此列出;要调整请到 YAML 视图。网页搜索开箱可用(平台自带免费搜索服务)。",
     section_approval: "人工审批",
     section_approval_help:
       "勾选的工具,每次执行前都会暂停,等人工批准后才继续——不管这个工具是一直开着的基础能力,还是你在上面「工具」里手动打开的。\n示例:给 exec_python、http 加一道审批",
@@ -1047,36 +1090,10 @@ const zhCN: TranslationKeys = {
     section_dynamic_workers_help:
       "开启(默认)时,Agent 干活中可以临时拉几个小助手分头处理子任务。\n需要严格单线、只用一个执行体时关掉。\n示例:研究型 Agent 开,简单问答 Bot 关",
     dynamic_workers_hint: "允许 Agent 运行中临时创建小助手分担任务(默认开启)。",
-    section_advanced: "高级",
-    memory_write_back: "学习(记住新信息)",
-    memory_write_back_help:
-      "开启后,每次对话结束会把新了解到的信息记下来,下次自动想起。\n关掉则只用已有记忆,不再新增。\n示例:开启",
-    memory_verify_reads: "回答前核对记忆",
-    memory_verify_reads_help:
-      "调取记忆后、用进回答前,先让模型筛一遍,丢掉跟当前问题无关、过期或矛盾的,避免旧记忆带偏回答。\n会多花一次模型调用;万一出错则不拦截、全部放行。\n默认开启。\n示例:开启",
-    memory_write_min_importance: "重要性过滤",
-    memory_write_min_importance_help:
-      "给每条要记的信息打一个重要性分(0–1),低于这个值就不记,避免把闲聊也存进去。\n0.3:丢掉明显琐碎的;0:全部都记。\n示例:0.3",
-    memory_reconcile_writes: "去重整理",
-    memory_reconcile_writes_help:
-      "记新信息前,先和相似的旧记忆比对,自动合并、更新或删除,避免重复堆积、自相矛盾。\n关掉则直接追加。\n默认开启。\n示例:开启",
-    memory_recall_mode: "记忆插入位置",
-    memory_recall_mode_help:
-      "记忆插入对话的位置。\n每会话:整段对话固定插一次,更省更快(默认)。\n每轮:每轮都重新插,适合对话中会自己改记忆的 Agent。\n示例:每会话",
-    memory_recall_per_session: "每会话(更省更快)",
-    memory_recall_per_turn: "每轮",
-    memory_rewrite_reads: "改写问题用于检索",
-    memory_rewrite_reads_help:
-      "检索记忆前,先把用户最新的消息改写成一句独立的检索词——剥掉指令、精简过长内容,避免带偏召回的记忆。\n会多花一次模型调用;万一出错则用原消息。\n默认关闭(按需开启)。\n示例:关闭",
-    memory_abstain_threshold: "跳过弱匹配(阈值)",
-    memory_abstain_threshold_help:
-      "检索后,若最相关记忆与问题的相似度低于此值,则不注入任何记忆,而非塞一个勉强的匹配——避免把关系不大的记忆拉进回答。\n0 = 从不跳过(默认);约 0.2–0.3 = 跳过明显偏弱的匹配。\n示例:0",
     approval_timeout: "审批等待上限(秒)",
+    approval_timeout_brief: "审批超时没人处理就自动拒绝",
     approval_timeout_help:
       "一个待审批的请求最多等多久(秒),超时自动拒绝,免得一直占着资源。\n默认 24 小时(86400)。\n示例:86400",
-    trajectory_recording: "记录对话留档",
-    trajectory_recording_help:
-      "关闭后本 Agent 的运行不再录制轨迹(ShareGPT 格式,供策展与评测)。平台未配置对象存储时整体不录制,与本开关无关。",
     section_knowledge: "知识库(RAG)",
     section_knowledge_help:
       "Agent 可以检索的知识库,用来给回答找依据。\n选已有的库,或输入名称。\n示例:hr-policies、eng-handbook",
@@ -1120,17 +1137,32 @@ const zhCN: TranslationKeys = {
     prompt_var_remove: "删除",
     prompt_var_add: "添加变量",
     section_output_schema: "结构化输出",
-    section_output_schema_help:
-      "可选。强制 Agent 的最终回复是符合 JSON Schema 的 JSON 对象;中间的工具调用轮次不受约束。\n在 YAML 视图里配置 spec.output_schema:{ name, json_schema, strict }。\n示例:json_schema 要求 { \"answer\": string },则每次最终回复都是机器可读的",
-    output_schema_on_hint:
-      "已启用——最终回复必须符合「{{name}}」schema(spec.output_schema,可在 YAML 视图编辑)。",
-    output_schema_off_hint:
-      "未配置——最终回复为自由文本。到 YAML 视图添加 spec.output_schema 可要求机器可读的 JSON 回复。",
+    output_schema: {
+      on_label: "按模板回复",
+      hint_off:
+        "关闭:自由文本回复。开启后可要求 Agent 按固定字段结构回复(如工单:标题+等级+摘要),对接程序或表格更方便。",
+      col_name: "字段名",
+      col_type: "类型",
+      col_required: "必填",
+      col_desc: "说明",
+      type_string: "文本",
+      type_number: "数字",
+      type_integer: "整数",
+      type_boolean: "是否",
+      type_array_string: "文本列表",
+      type_array_number: "数字列表",
+      add_field: "添加字段",
+      remove_field: "删除",
+      name_invalid: "字段名须以字母或下划线开头,只能含字母数字下划线",
+      name_duplicate: "字段名重复——上面已有同名字段",
+      complex_readonly: "已配置(复杂结构)——请到 YAML 视图编辑",
+      off_confirm: "关闭将清除已定义的回复模板,确定?",
+    },
     inject_date_label: "注入当前日期",
     inject_date_hint:
       "构建时把当天日期写进系统提示词(默认开,按日缓存稳定)。关闭后 Agent 不知道今天几号——仅适合与日期无关的 Agent。",
     dynamic_context_note:
-      "自定义提醒(dynamic_context.custom_reminders)需要按固定格式写成一个列表,请到 YAML 视图里编辑。",
+      "自定义提醒(dynamic_context.custom_reminders)等高级项请到 YAML 视图配置。",
   },
   playground: {
     session_label: "会话",

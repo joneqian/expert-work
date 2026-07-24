@@ -67,35 +67,39 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("cfg-pane")).toBeInTheDocument();
   });
 
-  it("selecting the capabilities group stacks tools/mcp/knowledge/skills/subagents in one pane", async () => {
+  it("selecting the capabilities group renders CapabilitiesSection's five sub-tabs (tools/mcp/knowledge/skills/subagents)", async () => {
     const user = userEvent.setup();
-    const { container } = render(
+    render(
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-capabilities"));
+    expect(screen.getByTestId("capabilities-section")).toBeInTheDocument();
+    // "tools" is the default-active sub-tab.
     expect(screen.getByTestId("af-tools")).toBeInTheDocument();
-    expect(screen.getByTestId("af-mcp")).toBeInTheDocument();
-    expect(screen.getByTestId("af-knowledge")).toBeInTheDocument();
-    expect(screen.getByTestId("af-skills")).toBeInTheDocument();
-    expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
     // "basic" is no longer shown once another group is active.
     expect(screen.queryByTestId("af-basic")).not.toBeInTheDocument();
 
-    // Each stacked section is wrapped in a `data-section-id` anchor div...
-    for (const id of ["tools", "mcp", "knowledge", "skills", "subagents"]) {
-      expect(
-        container.querySelector(`[data-section-id="${id}"]`),
-      ).toBeInTheDocument();
-    }
-    // ...with its own stacked sub-section title (checked for two sections
-    // whose tab label doesn't collide with the section's own heading text).
-    expect(
-      screen.getByText(en.manifest_editor.tab_knowledge),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(en.manifest_editor.tab_subagents),
-    ).toBeInTheDocument();
+    // Each sub-tab lazily mounts its own FormView section on click.
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_mcp }),
+    );
+    expect(screen.getByTestId("af-mcp")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_knowledge }),
+    );
+    expect(screen.getByTestId("af-knowledge")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_skills }),
+    );
+    expect(screen.getByTestId("af-skills")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: en.manifest_editor.tab_subagents }),
+    );
+    expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
   });
 
   it("the 'budget' group renders RunBudgetSection instead of the pending hint", async () => {
@@ -120,40 +124,30 @@ describe("ManifestEditor", () => {
     expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
-  it("the 'security' group renders SecuritySection instead of a plain stacked FormView", async () => {
+  it("the 'security' group renders SecuritySection instead of the pending hint", async () => {
     const user = userEvent.setup();
     render(
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-security"));
-    // "security" still lists real ``sections`` in CONFIG_GROUPS (unlike
-    // budget/context's statically-empty entries), so the distinguishing
-    // signal isn't "not pending" — it's the curated pane's own wrapper +
-    // its dict-note, which a plain stacked FormView never renders.
     expect(screen.getByTestId("security-section")).toBeInTheDocument();
     expect(screen.getByTestId("security-gates-dict-note")).toBeInTheDocument();
-    // The embedded defenses/governance sections still render underneath.
-    expect(screen.getByTestId("af-defenses-output-screen")).toBeInTheDocument();
-    expect(screen.getByTestId("af-approval")).toBeInTheDocument();
+    // The defenses tab (its default-active sub-tab) renders underneath.
+    expect(screen.getByTestId("security-tab-defenses")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
-  it("the 'memory' group renders MemorySection instead of a plain stacked FormView", async () => {
+  it("the 'memory' group renders MemorySection instead of the pending hint", async () => {
     const user = userEvent.setup();
     render(
       <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-memory"));
-    // "memory" still lists a real ``sections`` entry in CONFIG_GROUPS (like
-    // "security"), so the distinguishing signal is the curated pane's own
-    // wrapper + its reserved-fields note, which a plain stacked FormView
-    // never renders.
     expect(screen.getByTestId("memory-section")).toBeInTheDocument();
-    expect(screen.getByTestId("memory-reserved-note")).toBeInTheDocument();
-    // The embedded "memory" FormView section still renders underneath.
-    expect(screen.getByTestId("af-memory")).toBeInTheDocument();
-    expect(screen.getByTestId("af-memory-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("memory-tab-basic")).toBeInTheDocument();
+    expect(screen.queryByTestId("cfg-pane-pending")).not.toBeInTheDocument();
   });
 
   it("the 'model' group renders ModelRoutingSection instead of a plain stacked FormView", async () => {
@@ -163,10 +157,9 @@ describe("ManifestEditor", () => {
     );
     await screen.findByTestId("af-basic");
     await user.click(screen.getByTestId("cfg-nav-model"));
-    // "model" still lists a real ``sections`` entry in CONFIG_GROUPS (like
-    // "security"/"memory"), so the distinguishing signal is the curated
-    // pane's own wrapper + its YAML-guidance note, which a plain stacked
-    // FormView never renders.
+    // "model" still lists a real ``sections`` entry in CONFIG_GROUPS, so the
+    // distinguishing signal is the curated pane's own wrapper + its
+    // YAML-guidance note, which a plain stacked FormView never renders.
     expect(screen.getByTestId("model-routing-section")).toBeInTheDocument();
     expect(screen.getByTestId("model-yaml-note")).toBeInTheDocument();
     // The embedded "model" FormView section (af-model controls) still
@@ -323,7 +316,7 @@ describe("ManifestEditor", () => {
     // Switching to a manifest group hides — but does not unmount — the
     // leading pane, so any embedded antd Form keeps its state.
     await user.click(screen.getByTestId("cfg-nav-memory"));
-    await screen.findByTestId("af-memory");
+    await screen.findByTestId("memory-tab-basic");
     const leadingPane = screen.getByTestId("manifest-leading-meta");
     expect(leadingPane).toHaveStyle({ display: "none" });
     expect(screen.getByTestId("meta-form")).toBeInTheDocument();
@@ -333,7 +326,7 @@ describe("ManifestEditor", () => {
     expect(screen.getByTestId("manifest-leading-meta")).toHaveStyle({
       display: "block",
     });
-    expect(screen.queryByTestId("af-memory")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("memory-tab-basic")).not.toBeInTheDocument();
   });
 
   it("a leading tab with mergeSection folds that manifest section in and de-dupes it from its mapped group", async () => {

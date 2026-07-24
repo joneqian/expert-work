@@ -30,6 +30,22 @@ function collectKeys(obj: object, prefix = ""): string[] {
   return out.sort();
 }
 
+// Task 8 (config-page-redesign) — flat map of every "*_brief" leaf, keyed by
+// dotted path, so the length guard below can name the offender directly
+// instead of just failing on a boolean.
+function collectBriefEntries(obj: object, prefix = ""): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (value !== null && typeof value === "object") {
+      Object.assign(out, collectBriefEntries(value, path));
+    } else if (key.endsWith("_brief") && typeof value === "string") {
+      out[path] = value;
+    }
+  }
+  return out;
+}
+
 describe("locale modules", () => {
   it("zh-CN has the same key set as en", () => {
     expect(collectKeys(zhCN)).toEqual(collectKeys(en));
@@ -44,6 +60,19 @@ describe("locale modules", () => {
     // 新键存在
     expect(zhCN.mcp_servers.source_platform).toBe("平台");
     expect(zhCN.mcp_servers.needs_authorize).toBe("需你授权");
+  });
+
+  // Task 8 — brief copy is a one-glance summary for non-technical operators;
+  // long explanations belong in the sibling "_impact" field instead. 24 is
+  // the guard-rail ceiling (not the 18-char authoring target from the brief
+  // rewrite) — it leaves room for short punctuation/digits without letting a
+  // brief regress back into paragraph territory.
+  it("every *_brief value (zh) stays within the length guard-rail", () => {
+    const entries = collectBriefEntries(zhCN);
+    const offenders = Object.entries(entries).filter(
+      ([, value]) => value.length > 24,
+    );
+    expect(offenders).toEqual([]);
   });
 });
 

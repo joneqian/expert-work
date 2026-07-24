@@ -195,8 +195,10 @@ export interface AgentManifest {
     knowledge?: { knowledge_base_refs?: string[]; [k: string]: unknown } | null;
     // Stream RT-1 (RT-ADR-4) — structured final reply: a JSON Schema the
     // agent's FINAL assistant message must validate against (intermediate
-    // tool-calling turns are unaffected). Authored in the YAML view; the
-    // curated form only surfaces whether it is configured.
+    // tool-calling turns are unaffected). Flat schemas are editable in the
+    // curated form's field-list editor (config-page redesign v2 Task 7 —
+    // see the "structured output field editor" section below); non-flat
+    // schemas stay YAML-only behind a read-only notice.
     output_schema?: {
       name?: string;
       json_schema?: Record<string, unknown>;
@@ -229,7 +231,7 @@ export interface AgentManifest {
     extends?: string;
     // Stream K.K4 (Mini-ADR K-3) — per-agent LLM response cache opt-out
     // (CacheSpec). DISTINCT from ``model.cache_enabled`` (ModelFields,
-    // Anthropic prompt caching) — see ``ResponseCacheFields`` below. Backend
+    // Anthropic prompt caching) — see ``ObservabilityFields`` below. Backend
     // default_factory ⇒ absent block = defaults (enabled=true).
     cache?: { enabled?: boolean; [k: string]: unknown };
     [k: string]: unknown;
@@ -254,6 +256,138 @@ export interface PromptVariableFields {
   description?: string;
   [k: string]: unknown;
 }
+
+// ---- run profile presets (config-page redesign v2 Task 6) ----
+// Three curated one-click presets over 18 previously-scattered "how hard
+// does this agent think/remember" knobs (RunProfileCard, ``groups/
+// BasicSection.tsx``). ``RunProfile`` is a concrete preset name; the wider
+// ``RunProfileState`` adds "custom" — the UI state once any managed field
+// has drifted off every preset's exact values.
+export type RunProfile = "balanced" | "cost" | "capability";
+export type RunProfileState = RunProfile | "custom";
+
+// The 18 managed fields, camelCased to match each field's existing read/patch
+// helper (``readTopK``/``patchRunBudget``/etc. — see ``applyRunProfile``).
+interface RunProfileValues {
+  topK: number;
+  verifyReads: boolean;
+  rewriteReads: boolean;
+  recallMode: string;
+  abstainThreshold: number;
+  injectionTokenBudget: number;
+  correctionTokenBudget: number;
+  consolidationEnabled: boolean;
+  maxIterations: number;
+  maxNoProgress: number;
+  prThresholdPct: number;
+  prRecentKept: number;
+  wmThresholdPct: number;
+  wmMaxRecentTurns: number;
+  ccThresholdPct: number;
+  ccHeadKeep: number;
+  ccTailKeep: number;
+  dynamicWorkersOn: boolean;
+}
+
+// Single source of truth for each managed field's BACKEND default (the value
+// a patch omits entirely — see ``applyRunProfile``'s ``orDefault``). Must stay
+// numerically identical to the matching ``FieldDef.effectiveDefault`` in
+// ``groups/RunBudgetSection.tsx`` (max_iterations/max_no_progress),
+// ``groups/ContextGatesSection.tsx`` (pr_/wm_/cc_ thresholds+keeps),
+// ``groups/MemorySection.tsx`` (top_k/verify_reads/rewrite_reads/recall_mode/
+// abstain_threshold/injection+correction budgets/consolidation), and
+// ``readDynamicWorkersOn`` below (dynamic_workers) — those files' own
+// comments point back here. NOTE ``maxNoProgress``'s backend default is 0,
+// which is NOT any preset's value (balanced/cost/capability write 4/3/6) — a
+// brand-new agent only reads as "balanced" because ``defaults.ts`` seeds
+// ``policies.max_no_progress: 4`` explicitly (see
+// ``form_model_profiles.test.ts``'s seed↔balanced consistency test).
+const PROFILE_BACKEND_DEFAULTS: RunProfileValues = {
+  topK: 5,
+  verifyReads: true,
+  rewriteReads: false,
+  recallMode: "per_session",
+  abstainThreshold: 0,
+  injectionTokenBudget: 2000,
+  correctionTokenBudget: 500,
+  consolidationEnabled: true,
+  maxIterations: 30,
+  maxNoProgress: 0,
+  prThresholdPct: 0.7,
+  prRecentKept: 4,
+  wmThresholdPct: 0.7,
+  wmMaxRecentTurns: 20,
+  ccThresholdPct: 0.7,
+  ccHeadKeep: 4,
+  ccTailKeep: 6,
+  dynamicWorkersOn: true,
+};
+
+// The three presets' target values — spec §③'s authoritative table.
+const RUN_PROFILES: Record<RunProfile, RunProfileValues> = {
+  balanced: {
+    topK: 5,
+    verifyReads: true,
+    rewriteReads: false,
+    recallMode: "per_session",
+    abstainThreshold: 0,
+    injectionTokenBudget: 2000,
+    correctionTokenBudget: 500,
+    consolidationEnabled: true,
+    maxIterations: 30,
+    maxNoProgress: 4,
+    prThresholdPct: 0.7,
+    prRecentKept: 4,
+    wmThresholdPct: 0.7,
+    wmMaxRecentTurns: 20,
+    ccThresholdPct: 0.7,
+    ccHeadKeep: 4,
+    ccTailKeep: 6,
+    dynamicWorkersOn: true,
+  },
+  cost: {
+    topK: 3,
+    verifyReads: false,
+    rewriteReads: false,
+    recallMode: "per_session",
+    abstainThreshold: 0.2,
+    injectionTokenBudget: 1000,
+    correctionTokenBudget: 300,
+    consolidationEnabled: false,
+    maxIterations: 20,
+    maxNoProgress: 3,
+    prThresholdPct: 0.6,
+    prRecentKept: 2,
+    wmThresholdPct: 0.6,
+    wmMaxRecentTurns: 10,
+    ccThresholdPct: 0.6,
+    ccHeadKeep: 2,
+    ccTailKeep: 4,
+    dynamicWorkersOn: false,
+  },
+  capability: {
+    topK: 8,
+    verifyReads: true,
+    rewriteReads: true,
+    recallMode: "per_turn",
+    abstainThreshold: 0,
+    injectionTokenBudget: 4000,
+    correctionTokenBudget: 800,
+    consolidationEnabled: true,
+    maxIterations: 60,
+    maxNoProgress: 6,
+    prThresholdPct: 0.8,
+    prRecentKept: 8,
+    wmThresholdPct: 0.8,
+    wmMaxRecentTurns: 40,
+    ccThresholdPct: 0.85,
+    ccHeadKeep: 6,
+    ccTailKeep: 10,
+    dynamicWorkersOn: true,
+  },
+};
+
+export const RUN_PROFILE_IDS: readonly RunProfile[] = ["balanced", "cost", "capability"];
 
 function asObj(v: unknown): AgentManifest {
   return v !== null && typeof v === "object" && !Array.isArray(v)
@@ -479,14 +613,27 @@ export function setMemoryOn(m: unknown, on: boolean): AgentManifest {
   return patchSpec(m, { memory: { ...memory, long_term: lt } });
 }
 // Merge a partial patch into ``memory.long_term`` preserving siblings. Used by
-// every long_term knob setter so toggling one never clobbers the others.
+// every long_term knob setter so toggling one never clobbers the others. A
+// patch value of ``undefined`` DELETES that key (``applyRunProfile``'s
+// "value === backend default → omit" convention) rather than merely
+// assigning it a literal ``undefined`` — genuine deletion, not just a
+// same-serialized-output shortcut, mirrors ``patchDefenses``'s idiom above
+// and keeps ``Object.keys(long_term)`` (and any future "is this block
+// empty" check) accurate. Unlike ``patchDefenses``/``mergeBlock``, an
+// emptied result stays ``{}`` rather than dropping ``long_term`` itself:
+// ``long_term``'s PRESENCE is the memory on/off switch (``readMemoryOn``),
+// so dropping it here would silently turn memory off.
 function patchLongTerm(
   m: unknown,
   patch: Partial<LongTermFields>,
 ): AgentManifest {
   const memory = specOf(m).memory ?? {};
-  const lt = specOf(m).memory?.long_term ?? {};
-  return patchSpec(m, { memory: { ...memory, long_term: { ...lt, ...patch } } });
+  const lt: Record<string, unknown> = { ...(specOf(m).memory?.long_term ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete lt[k];
+    else lt[k] = v;
+  }
+  return patchSpec(m, { memory: { ...memory, long_term: lt as LongTermFields } });
 }
 export const setTopK = (m: unknown, k: number): AgentManifest =>
   patchLongTerm(m, { retrieve_top_k: k });
@@ -672,10 +819,6 @@ export const readApprovalTimeout = (m: unknown): number =>
   specOf(m).policies?.approval_timeout_s ?? 86400;
 export const setApprovalTimeout = (m: unknown, s: number): AgentManifest =>
   patchPolicies(m, { approval_timeout_s: s });
-export const readTrajectoryRecording = (m: unknown): boolean =>
-  specOf(m).policies?.trajectory_recording ?? true;
-export const setTrajectoryRecording = (m: unknown, on: boolean): AgentManifest =>
-  patchPolicies(m, { trajectory_recording: on });
 
 // ---- run budget (Group 6 试点: workflow.max_iterations + workflow.type
 // + policies.max_no_progress + policies.run_deadline_s + top-level
@@ -882,17 +1025,6 @@ export function patchContextGates(
 // ceiling). The form surfaces this so the autonomous-worker behaviour is
 // visible + can be opted out per agent: ``off`` writes ``{enabled:false}``;
 // ``on`` drops the block (back to the default-on state, keeping YAML clean).
-// Stream RT-1 (RT-ADR-4) — the structured-output block is YAML-authored; the
-// curated form only shows whether it is configured (and under which name).
-// Returns the effective wire name when configured, ``null`` when absent.
-export const readOutputSchemaName = (m: unknown): string | null => {
-  const block = specOf(m).output_schema;
-  if (!block || typeof block !== "object") return null;
-  return typeof block.name === "string" && block.name
-    ? block.name
-    : "final_response";
-};
-
 export const readDynamicWorkersOn = (m: unknown): boolean =>
   (specOf(m).dynamic_workers?.enabled ?? true) !== false;
 
@@ -907,6 +1039,160 @@ export function setDynamicWorkersOn(m: unknown, on: boolean): AgentManifest {
   return patchSpec(m, {
     dynamic_workers: { ...(specOf(m).dynamic_workers ?? {}), enabled: false },
   });
+}
+
+// ---- structured output field editor (config-page redesign v2 Task 7) ----
+// A flat "field list" visualization over ``spec.output_schema.json_schema``
+// (Stream RT-1 / RT-ADR-4's structured-final-reply JSON Schema — see the
+// block's own doc comment on ``AgentManifest.spec.output_schema`` above).
+// Only a FLAT object schema — top-level scalar properties, or a homogeneous
+// array of scalars — is representable in the curated form; anything richer
+// (a nested object property, ``$ref``, ``oneOf``, an extra top-level key, …)
+// reads as ``"unrepresentable"`` so the widget can fall back to a read-only
+// notice and defer to the YAML view rather than silently mangle it.
+// ``name``/``strict`` never surface in the curated form — ``setOutputSchemaRows``
+// preserves them (and any other unknown sibling key already on the block)
+// untouched, only ever replacing the ``json_schema`` key itself.
+export type SchemaFieldType =
+  | "string"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "array_string"
+  | "array_number";
+
+export interface SchemaFieldRow {
+  name: string;
+  type: SchemaFieldType;
+  required: boolean;
+  description: string;
+}
+
+const OUTPUT_SCHEMA_TOP_KEYS = new Set([
+  "type",
+  "properties",
+  "required",
+  "additionalProperties",
+]);
+const OUTPUT_SCHEMA_PROPERTY_KEYS = new Set(["type", "description", "items"]);
+const OUTPUT_SCHEMA_SCALAR_TYPES = new Set(["string", "number", "integer", "boolean"]);
+const OUTPUT_SCHEMA_ARRAY_ITEM_TYPES = new Set(["string", "number"]);
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+// A single property's JSON-Schema fragment → its ``SchemaFieldType``, or
+// ``null`` when it doesn't fit one of the six representable shapes (the
+// caller then declares the WHOLE schema "unrepresentable"). Strict about
+// ``items``: only present (and only ``{type}``-shaped) when the property
+// itself is an array — a stray ``items`` key on a scalar property is
+// rejected rather than silently discarded, so a hand-authored schema never
+// loses data across a read→edit→write round trip.
+function propertyFieldType(prop: unknown): SchemaFieldType | null {
+  if (!isPlainObject(prop)) return null;
+  if (!Object.keys(prop).every((k) => OUTPUT_SCHEMA_PROPERTY_KEYS.has(k))) return null;
+  if ("description" in prop && typeof prop.description !== "string") return null;
+  const { type } = prop;
+  if (typeof type === "string" && OUTPUT_SCHEMA_SCALAR_TYPES.has(type)) {
+    return "items" in prop ? null : (type as SchemaFieldType);
+  }
+  if (type === "array") {
+    const items = prop.items;
+    if (!isPlainObject(items)) return null;
+    if (Object.keys(items).length !== 1 || typeof items.type !== "string") return null;
+    if (!OUTPUT_SCHEMA_ARRAY_ITEM_TYPES.has(items.type)) return null;
+    return items.type === "string" ? "array_string" : "array_number";
+  }
+  return null;
+}
+
+// ``undefined`` = ``spec.output_schema`` absent/null (not configured);
+// ``"unrepresentable"`` = configured but not flat (read-only in the form);
+// otherwise the flat field rows.
+export function readOutputSchemaRows(
+  m: unknown,
+): SchemaFieldRow[] | "unrepresentable" | undefined {
+  const block = specOf(m).output_schema;
+  if (block == null) return undefined;
+  const schema = block.json_schema;
+  if (!isPlainObject(schema)) return "unrepresentable";
+  if (!Object.keys(schema).every((k) => OUTPUT_SCHEMA_TOP_KEYS.has(k))) {
+    return "unrepresentable";
+  }
+  if ("type" in schema && schema.type !== "object") return "unrepresentable";
+
+  const propertiesRaw = "properties" in schema ? schema.properties : {};
+  if (!isPlainObject(propertiesRaw)) return "unrepresentable";
+  const properties = propertiesRaw;
+
+  const requiredRaw = "required" in schema ? schema.required : [];
+  if (
+    !Array.isArray(requiredRaw) ||
+    !requiredRaw.every((r) => typeof r === "string")
+  ) {
+    return "unrepresentable";
+  }
+  const required = requiredRaw as string[];
+  const names = Object.keys(properties);
+  if (!required.every((r) => names.includes(r))) return "unrepresentable";
+
+  const rows: SchemaFieldRow[] = [];
+  for (const name of names) {
+    const type = propertyFieldType(properties[name]);
+    if (type === null) return "unrepresentable";
+    const prop = properties[name] as Record<string, unknown>;
+    rows.push({
+      name,
+      type,
+      required: required.includes(name),
+      description: typeof prop.description === "string" ? prop.description : "",
+    });
+  }
+  return rows;
+}
+
+// A field row → its JSON-Schema property fragment (the inverse of
+// ``propertyFieldType``).
+function rowToProperty(row: SchemaFieldRow): Record<string, unknown> {
+  const base: Record<string, unknown> =
+    row.type === "array_string"
+      ? { type: "array", items: { type: "string" } }
+      : row.type === "array_number"
+        ? { type: "array", items: { type: "number" } }
+        : { type: row.type };
+  return row.description ? { ...base, description: row.description } : base;
+}
+
+// Writes the flat rows back as ``spec.output_schema.json_schema``, preserving
+// any existing ``name``/``strict``/unknown sibling key on the block
+// untouched. ``rows === null`` deletes the WHOLE ``output_schema`` block (the
+// form's off-switch — js-yaml omits the ``undefined``-valued key). An empty
+// ``rows`` array still writes a (non-empty, backend-legal) ``json_schema``
+// dict — ``{type:"object", properties:{}, additionalProperties:false}`` —
+// rather than a bare ``{}`` the backend would reject.
+export function setOutputSchemaRows(
+  m: unknown,
+  rows: SchemaFieldRow[] | null,
+): AgentManifest {
+  if (rows === null) return patchSpec(m, { output_schema: undefined });
+
+  let json_schema: Record<string, unknown>;
+  if (rows.length === 0) {
+    json_schema = { type: "object", properties: {}, additionalProperties: false };
+  } else {
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const row of rows) {
+      properties[row.name] = rowToProperty(row);
+      if (row.required) required.push(row.name);
+    }
+    json_schema = { type: "object", properties, required, additionalProperties: false };
+  }
+
+  const existing = specOf(m).output_schema;
+  const base = isPlainObject(existing) ? existing : {};
+  return patchSpec(m, { output_schema: { ...base, json_schema } });
 }
 
 // ---- evolved-skill auto-attach (SE-16 SE-A42) ----
@@ -1297,35 +1583,210 @@ export function patchReflectionTuning(
   return patchSpec(m, {});
 }
 
-// ---- LLM response cache (spec.cache — Stream K.K4 / Mini-ADR K-3) ----
-// Per-agent opt-out of the orchestrator's LLM response cache (CacheSpec).
+// ---- observability group (spec.cache.enabled + policies.trajectory_recording
+// — config-page redesign v2, Task 8b erratum) ----
+// Curated "触发器与可观测" group over two independent locations: the LLM
+// response cache opt-out (CacheSpec, ``spec.cache`` — Stream K.K4 / Mini-ADR
+// K-3), and trajectory recording (``policies.trajectory_recording`` — Stream
+// L.L7: whether a finished run's full transcript gets serialized to object
+// storage for quality evaluation and future fine-tuning; a privacy-sensitive
+// agent should set this ``False`` to keep conversation content out of
+// non-WORM storage). Task 4 removed trajectory recording's curated toggle as
+// dead-opt-in; Task 8 found the field is actually read at run time
+// (``agent_spec.py``'s ``PolicySpec.trajectory_recording`` /
+// ``agent_factory.py``'s ``trajectory_enabled``), and this task (8b) restores
+// the toggle here.
+//
 // NOTE the naming trap: ``ModelFields.cache_enabled`` (``model.cache_enabled``)
-// is a DIFFERENT, pre-existing field — Anthropic prompt caching. This block is
-// the LLM RESPONSE cache (``spec.cache.enabled``); the two live at different
-// paths, are independently toggled, and must never be confused. Like
-// ``policies.memory_consolidation`` (``patchConsolidation``), ``spec.cache``
-// has a backend ``default_factory`` (an absent block ⇒ ``enabled: True``), so
-// it follows the same standard optional-block ``mergeBlock`` idiom: absent ≡
-// defaults, and an emptied block is dropped rather than kept as ``{}``
-// (dropping is harmless here — unlike the REQUIRED ``sandbox.network`` /
-// ``sandbox.filesystem`` blocks, or the presence-semantic ``memory.long_term``
-// / ``reflection`` blocks). Reader is RAW — no default substitution.
-export interface ResponseCacheFields {
+// is a DIFFERENT, pre-existing field — Anthropic prompt caching. This block's
+// ``responseCacheEnabled`` is the LLM RESPONSE cache (``spec.cache.enabled``);
+// the two live at different paths, are independently toggled, and must never
+// be confused. Both ``spec.cache`` and ``policies.trajectory_recording`` have
+// a backend ``default_factory``/default (an absent block ⇒ ``enabled: True``;
+// an absent key ⇒ ``trajectory_recording: True``), so both fields follow the
+// standard optional-block ``mergeBlock`` idiom: absent ≡ defaults, and an
+// emptied block is dropped rather than kept as ``{}`` (dropping is harmless
+// here — unlike the REQUIRED ``sandbox.network`` / ``sandbox.filesystem``
+// blocks, or the presence-semantic ``memory.long_term`` / ``reflection``
+// blocks). Readers are RAW — no default substitution. ``patchObservability``
+// only touches the block(s) whose fields are present in ``patch``, and
+// deletes a key whose patch value is ``undefined``.
+export interface ObservabilityFields {
   responseCacheEnabled?: boolean;
+  trajectoryRecording?: boolean;
 }
 
-export const readResponseCache = (m: unknown): ResponseCacheFields => ({
+export const readObservability = (m: unknown): ObservabilityFields => ({
   responseCacheEnabled: specOf(m).cache?.enabled,
+  trajectoryRecording: specOf(m).policies?.trajectory_recording,
 });
 
-export function patchResponseCache(
+export function patchObservability(
   m: unknown,
-  patch: Partial<ResponseCacheFields>,
+  patch: Partial<ObservabilityFields>,
 ): AgentManifest {
-  if (!("responseCacheEnabled" in patch)) return patchSpec(m, {});
-  const merged = mergeBlock(
-    specOf(m).cache as Record<string, unknown> | undefined,
-    { enabled: patch.responseCacheEnabled },
+  const spec = specOf(m);
+  const updates: Record<string, unknown> = {};
+
+  if ("responseCacheEnabled" in patch) {
+    updates.cache = mergeBlock(
+      spec.cache as Record<string, unknown> | undefined,
+      { enabled: patch.responseCacheEnabled },
+    );
+  }
+
+  if ("trajectoryRecording" in patch) {
+    updates.policies = mergeBlock(spec.policies ?? undefined, {
+      trajectory_recording: patch.trajectoryRecording,
+    });
+  }
+
+  return patchSpec(m, updates);
+}
+
+// ---- run profile presets (config-page redesign v2 Task 6, cont'd) ----
+// ``applyRunProfile`` writes all 18 managed fields via their EXISTING
+// read/patch pairs (never touching the manifest directly) — the field-level
+// "value === backend default → omit" convention already lives in
+// ``patchLongTerm``/``patchMemoryBudgets``/``patchConsolidation``/
+// ``patchRunBudget``/``patchContextGates``/``setDynamicWorkersOn``; this
+// function only decides, per field, whether to pass the preset's value or
+// ``undefined`` (by comparing against ``PROFILE_BACKEND_DEFAULTS``).
+//
+// Memory-off gating: presets tune knobs, they NEVER flip feature switches
+// (spec §③ — the long-term-memory switch is unmanaged). ``long_term``'s
+// PRESENCE is that switch (``readMemoryOn``), and ``patchLongTerm``
+// materializes the block on first touch — so while memory is off, the 7
+// long_term-backed fields are skipped entirely (not patched, not compared):
+// ``applyRunProfile`` leaves ``memory`` untouched, and ``inferRunProfile``/
+// ``countProfileDiff`` match on the remaining 11 applicable fields only.
+export function applyRunProfile(m: unknown, profile: RunProfile): AgentManifest {
+  const target = RUN_PROFILES[profile];
+  // undefined ⇒ "leave/return this field to the backend default" (deletes
+  // the key via the callee's own patch-undefined convention); otherwise the
+  // preset's explicit value — even when it happens to equal the CURRENT
+  // manifest value, so a re-apply is idempotent.
+  const orDefault = <K extends keyof RunProfileValues>(
+    key: K,
+  ): RunProfileValues[K] | undefined =>
+    target[key] === PROFILE_BACKEND_DEFAULTS[key] ? undefined : target[key];
+
+  // long_term knobs — bypasses the individual setTopK/setVerifyReads/
+  // setRewriteReads/setRecallMode/setAbstainThreshold setters (each accepts
+  // only a definite value, not "delete this key") and instead patches
+  // ``memory.long_term`` directly via the same private helper they use, so
+  // a preset-default field is genuinely absent rather than merely holding
+  // its default value in the manifest (the balanced-profile linchpin
+  // invariant — see ``form_model_profiles.test.ts``).
+  let next = asObj(m);
+  if (readMemoryOn(m)) {
+    next = patchLongTerm(next, {
+      retrieve_top_k: orDefault("topK"),
+      verify_reads: orDefault("verifyReads"),
+      rewrite_reads: orDefault("rewriteReads"),
+      recall_mode: orDefault("recallMode"),
+      abstain_threshold: orDefault("abstainThreshold"),
+    });
+    next = patchMemoryBudgets(next, {
+      injectionTokenBudget: orDefault("injectionTokenBudget"),
+      correctionTokenBudget: orDefault("correctionTokenBudget"),
+    });
+  }
+  next = patchConsolidation(next, {
+    consolidationEnabled: orDefault("consolidationEnabled"),
+  });
+  next = patchRunBudget(next, {
+    maxIterations: orDefault("maxIterations"),
+    maxNoProgress: orDefault("maxNoProgress"),
+  });
+  next = patchContextGates(next, {
+    prThresholdPct: orDefault("prThresholdPct"),
+    prRecentKept: orDefault("prRecentKept"),
+    wmThresholdPct: orDefault("wmThresholdPct"),
+    wmMaxRecentTurns: orDefault("wmMaxRecentTurns"),
+    ccThresholdPct: orDefault("ccThresholdPct"),
+    ccHeadKeep: orDefault("ccHeadKeep"),
+    ccTailKeep: orDefault("ccTailKeep"),
+  });
+  // setDynamicWorkersOn already implements "true (its backend default) →
+  // drop the key, false → write it explicitly" internally, so it's called
+  // directly with the preset's own value (no ``orDefault`` wrapper needed).
+  next = setDynamicWorkersOn(next, target.dynamicWorkersOn);
+  return next;
+}
+
+// Reads all 18 managed fields at their CURRENT effective value (stored value
+// if present, else the backend default) — the comparison basis for both
+// ``inferRunProfile`` and ``countProfileDiff``.
+function effectiveProfileValues(m: unknown): RunProfileValues {
+  const budgets = readMemoryBudgets(m);
+  const consolidation = readConsolidation(m);
+  const runBudget = readRunBudget(m);
+  const gates = readContextGates(m);
+  return {
+    topK: readTopK(m) ?? PROFILE_BACKEND_DEFAULTS.topK,
+    verifyReads: readVerifyReads(m),
+    rewriteReads: readRewriteReads(m),
+    recallMode: readRecallMode(m),
+    abstainThreshold: readAbstainThreshold(m),
+    injectionTokenBudget:
+      budgets.injectionTokenBudget ?? PROFILE_BACKEND_DEFAULTS.injectionTokenBudget,
+    correctionTokenBudget:
+      budgets.correctionTokenBudget ?? PROFILE_BACKEND_DEFAULTS.correctionTokenBudget,
+    consolidationEnabled:
+      consolidation.consolidationEnabled ?? PROFILE_BACKEND_DEFAULTS.consolidationEnabled,
+    maxIterations: runBudget.maxIterations ?? PROFILE_BACKEND_DEFAULTS.maxIterations,
+    maxNoProgress: runBudget.maxNoProgress ?? PROFILE_BACKEND_DEFAULTS.maxNoProgress,
+    prThresholdPct: gates.prThresholdPct ?? PROFILE_BACKEND_DEFAULTS.prThresholdPct,
+    prRecentKept: gates.prRecentKept ?? PROFILE_BACKEND_DEFAULTS.prRecentKept,
+    wmThresholdPct: gates.wmThresholdPct ?? PROFILE_BACKEND_DEFAULTS.wmThresholdPct,
+    wmMaxRecentTurns:
+      gates.wmMaxRecentTurns ?? PROFILE_BACKEND_DEFAULTS.wmMaxRecentTurns,
+    ccThresholdPct: gates.ccThresholdPct ?? PROFILE_BACKEND_DEFAULTS.ccThresholdPct,
+    ccHeadKeep: gates.ccHeadKeep ?? PROFILE_BACKEND_DEFAULTS.ccHeadKeep,
+    ccTailKeep: gates.ccTailKeep ?? PROFILE_BACKEND_DEFAULTS.ccTailKeep,
+    dynamicWorkersOn: readDynamicWorkersOn(m),
+  };
+}
+
+const PROFILE_FIELD_KEYS = Object.keys(
+  PROFILE_BACKEND_DEFAULTS,
+) as (keyof RunProfileValues)[];
+
+// The 7 long_term-backed fields ``applyRunProfile`` skips while memory is
+// off (see its memory-off gating note) — infer/count must skip the same set
+// or an applied preset would immediately read back as "custom".
+const MEMORY_PROFILE_KEYS: readonly (keyof RunProfileValues)[] = [
+  "topK",
+  "verifyReads",
+  "rewriteReads",
+  "recallMode",
+  "abstainThreshold",
+  "injectionTokenBudget",
+  "correctionTokenBudget",
+];
+
+const applicableProfileKeys = (m: unknown): (keyof RunProfileValues)[] =>
+  readMemoryOn(m)
+    ? PROFILE_FIELD_KEYS
+    : PROFILE_FIELD_KEYS.filter((k) => !MEMORY_PROFILE_KEYS.includes(k));
+
+/** Every applicable managed field (all 18, or the 11 non-memory ones while
+ * memory is off) matches one preset exactly → that preset; else "custom". */
+export function inferRunProfile(m: unknown): RunProfileState {
+  const current = effectiveProfileValues(m);
+  const keys = applicableProfileKeys(m);
+  const match = RUN_PROFILE_IDS.find((profile) =>
+    keys.every((k) => current[k] === RUN_PROFILES[profile][k]),
   );
-  return patchSpec(m, { cache: merged });
+  return match ?? "custom";
+}
+
+/** Count of applicable managed fields whose current effective value differs
+ * from ``profile``'s target — the confirm dialog's "N settings will change". */
+export function countProfileDiff(m: unknown, profile: RunProfile): number {
+  const current = effectiveProfileValues(m);
+  const target = RUN_PROFILES[profile];
+  return applicableProfileKeys(m).filter((k) => current[k] !== target[k])
+    .length;
 }

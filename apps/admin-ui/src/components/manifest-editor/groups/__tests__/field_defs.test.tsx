@@ -4,11 +4,11 @@ import userEvent from "@testing-library/user-event";
 import "../../../../i18n";
 
 import i18n from "../../../../i18n";
-import { PolicyFieldList, PolicyFieldTable, type FieldDef } from "../field_defs";
+import { PolicyFieldList, type FieldDef } from "../field_defs";
 
 // A synthetic i18n subtree, registered once for this suite, so
 // PolicyFieldList's generic behaviour (patch semantics, isDefault,
-// optional impact/default copy) can be verified without depending on any
+// optional help/resetHint copy) can be verified without depending on any
 // real field's copy — mirrors the ``${i18nKey}_label/_brief/_impact/_default``
 // convention Task 3's FieldDef authors will follow, including the
 // "impact/default may be omitted" case called out on ``PolicyFieldListProps``.
@@ -24,13 +24,21 @@ beforeAll(() => {
         count_brief: "A count of things",
         count_impact: "Raising this increases X",
         count_default: "10",
+        // no _default key — exercises the effectiveDefault-stringified fallback
+        count2_label: "Count 2",
+        count2_brief: "A second count",
+        // no count2_impact — exercises the omitted-help branch
+        // no _default key, and effectiveDefault is null — exercises the
+        // omitted-resetHint branch (unset-is-the-feature-off field)
+        count3_label: "Count 3",
+        count3_brief: "A third count with no numeric default",
         ratio_label: "Ratio",
         ratio_brief: "A ratio value",
         ratio_default: "0.5",
-        // no ratio_impact — exercises the omitted-impact branch
+        // no ratio_impact — exercises the omitted-help branch
         flag_label: "Flag",
         flag_brief: "A boolean flag",
-        // no flag_impact — exercises the omitted-impact branch
+        // no flag_impact — exercises the omitted-help branch
         flag_default: "true",
         mode_label: "Mode",
         mode_brief: "How the thing runs",
@@ -40,7 +48,6 @@ beforeAll(() => {
         mode_option_off: "Turned Off",
         labels_label: "Labels",
         labels_brief: "Free-form tags",
-        group_a_title: "Group A",
       },
     },
     true,
@@ -54,6 +61,22 @@ const NUMBER_DEF: FieldDef = {
   valueKey: "count",
   kind: "number",
   effectiveDefault: 10,
+};
+
+const NUMBER_NO_DEFAULT_COPY_DEF: FieldDef = {
+  fieldId: "workflow.count2",
+  i18nKey: `${NS}.count2`,
+  valueKey: "count2",
+  kind: "number",
+  effectiveDefault: 7,
+};
+
+const NUMBER_NULL_DEFAULT_DEF: FieldDef = {
+  fieldId: "workflow.count3",
+  i18nKey: `${NS}.count3`,
+  valueKey: "count3",
+  kind: "number",
+  effectiveDefault: null,
 };
 
 const PERCENT_DEF: FieldDef = {
@@ -193,38 +216,102 @@ describe("PolicyFieldList", () => {
     expect(onPatch).toHaveBeenCalledWith({ flag: undefined });
   });
 
-  it("isDefault is true (gray badge) when the raw value is unset", () => {
+  // ---- isDefault / "已自定义" tag + reset ----
+
+  it("shows no '已自定义' tag when the raw value is unset", () => {
     renderList([NUMBER_DEF], {});
-    const badge = screen.getByText("Default 10");
-    expect(badge.closest(".ant-tag")).not.toHaveClass("ant-tag-blue");
+    expect(
+      screen.queryByTestId("field-customized-workflow.count"),
+    ).not.toBeInTheDocument();
   });
 
-  it("isDefault is true (gray badge) when the raw value explicitly equals the default", () => {
+  it("shows no '已自定义' tag when the raw value explicitly equals the default", () => {
     renderList([NUMBER_DEF], { count: 10 });
-    const badge = screen.getByText("Default 10");
-    expect(badge.closest(".ant-tag")).not.toHaveClass("ant-tag-blue");
+    expect(
+      screen.queryByTestId("field-customized-workflow.count"),
+    ).not.toBeInTheDocument();
   });
 
-  it("isDefault is false (blue badge, current value) once the raw value diverges", () => {
+  it("shows the '已自定义' tag once the raw value diverges from default", () => {
     renderList([NUMBER_DEF], { count: 42 });
-    expect(screen.queryByText("Default 10")).not.toBeInTheDocument();
-    const badge = screen.getByText("42");
-    expect(badge.closest(".ant-tag")).toHaveClass("ant-tag-blue");
+    expect(
+      screen.getByTestId("field-customized-workflow.count"),
+    ).toBeInTheDocument();
   });
 
-  it("omits the impact expander when the def's i18n subtree has no _impact key", () => {
-    renderList([PERCENT_DEF], { ratio: 0.5 });
-    expect(screen.queryByText("Impact")).not.toBeInTheDocument();
-  });
-
-  it("suppresses the badge for switch fields at default, even when the def's i18n subtree defines a _default key", () => {
-    renderList([SWITCH_DEF], {});
-    expect(document.querySelector(".ant-tag")).not.toBeInTheDocument();
-  });
-
-  it("suppresses the badge for switch fields once diverged from default too", () => {
+  it("shows the '已自定义' tag for a diverged switch field too (no kind-based suppression in v2)", () => {
     renderList([SWITCH_DEF], { flag: true });
-    expect(document.querySelector(".ant-tag")).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("field-customized-policies.flag"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the '已自定义' tag for a diverged tags field too (no kind-based suppression in v2)", () => {
+    renderList([TAGS_DEF], { labels: ["alpha"] });
+    expect(
+      screen.getByTestId("field-customized-policies.labels"),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking the reset button on a diverged field patches an explicit undefined", async () => {
+    const user = userEvent.setup();
+    const onPatch = vi.fn();
+    renderList([NUMBER_DEF], { count: 42 }, onPatch);
+
+    const resetButton = screen.getByTestId("field-reset-workflow.count");
+    await user.click(resetButton);
+
+    expect(onPatch).toHaveBeenCalledWith({ count: undefined });
+  });
+
+  // ---- help (ⓘ) wiring from `${i18nKey}_impact` ----
+
+  it("renders no ⓘ trigger when the def's i18n subtree has no _impact key", () => {
+    renderList([PERCENT_DEF], { ratio: 0.5 });
+    expect(
+      screen.queryByTestId("field-help-policies.ratio"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a ⓘ trigger with the _impact copy when the def's i18n subtree defines one", async () => {
+    const user = userEvent.setup();
+    renderList([NUMBER_DEF], { count: 42 });
+
+    const trigger = screen.getByTestId("field-help-workflow.count");
+    await user.click(trigger);
+
+    expect(await screen.findByText("Raising this increases X")).toBeInTheDocument();
+  });
+
+  // ---- resetHint wiring from `${i18nKey}_default`, with effectiveDefault fallback ----
+
+  it("resetHint uses the _default i18n copy when present", async () => {
+    const user = userEvent.setup();
+    renderList([NUMBER_DEF], { count: 42 });
+
+    await user.hover(screen.getByTestId("field-reset-workflow.count"));
+
+    expect(await screen.findByText("Reset to default: 10")).toBeInTheDocument();
+  });
+
+  it("resetHint falls back to String(effectiveDefault) when no _default i18n copy exists", async () => {
+    const user = userEvent.setup();
+    renderList([NUMBER_NO_DEFAULT_COPY_DEF], { count2: 42 });
+
+    await user.hover(screen.getByTestId("field-reset-workflow.count2"));
+
+    expect(await screen.findByText("Reset to default: 7")).toBeInTheDocument();
+  });
+
+  it("resetHint is omitted when effectiveDefault is null and there is no _default i18n copy", () => {
+    renderList([NUMBER_NULL_DEFAULT_DEF], { count3: 42 });
+
+    // The reset button itself still renders (isDefault is false)...
+    expect(
+      screen.getByTestId("field-reset-workflow.count3"),
+    ).toBeInTheDocument();
+    // ...but nothing carries the "Reset to default:" hint text.
+    expect(screen.queryByText(/Reset to default:/)).not.toBeInTheDocument();
   });
 
   // ---- select ----
@@ -336,72 +423,5 @@ describe("PolicyFieldList", () => {
     pressKey(combobox, "Backspace");
 
     expect(onPatch).toHaveBeenLastCalledWith({ labels: undefined });
-  });
-
-  it("suppresses the badge for tags fields", () => {
-    renderList([TAGS_DEF], { labels: ["alpha"] });
-    expect(
-      document.querySelector('[data-field-id="policies.labels"] .ant-tag'),
-    ).not.toBeInTheDocument();
-  });
-});
-
-describe("PolicyFieldTable", () => {
-  it("renders one row per def, with brief and impact both visible (no collapse)", () => {
-    render(
-      <PolicyFieldTable
-        groups={[{ defs: [NUMBER_DEF, PERCENT_DEF, SWITCH_DEF] }]}
-        values={{}}
-        onPatch={vi.fn()}
-      />,
-    );
-
-    for (const def of [NUMBER_DEF, PERCENT_DEF, SWITCH_DEF]) {
-      expect(rowFor(def.fieldId)).toBeInTheDocument();
-    }
-    // brief is always visible, per def
-    expect(screen.getByText("A count of things")).toBeInTheDocument();
-    expect(screen.getByText("A ratio value")).toBeInTheDocument();
-    expect(screen.getByText("A boolean flag")).toBeInTheDocument();
-    // impact (only NUMBER_DEF's i18n subtree defines one) is visible with
-    // no click needed — no collapse control anywhere in the table.
-    expect(screen.getByText("Raising this increases X")).toBeInTheDocument();
-    expect(document.querySelector(".ant-collapse")).not.toBeInTheDocument();
-  });
-
-  it("renders a group header row when a group carries a titleKey", () => {
-    render(
-      <PolicyFieldTable
-        groups={[{ titleKey: `${NS}.group_a_title`, defs: [NUMBER_DEF] }]}
-        values={{}}
-        onPatch={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText("Group A")).toBeInTheDocument();
-  });
-
-  it("omits the header row for a group with no titleKey", () => {
-    render(
-      <PolicyFieldTable groups={[{ defs: [NUMBER_DEF] }]} values={{}} onPatch={vi.fn()} />,
-    );
-
-    expect(screen.queryByText("Group A")).not.toBeInTheDocument();
-  });
-
-  it("clicking a switch control calls onPatch with the explicit non-default value", async () => {
-    const user = userEvent.setup();
-    const onPatch = vi.fn();
-    render(
-      <PolicyFieldTable
-        groups={[{ defs: [SWITCH_DEF] }]}
-        values={{ flag: false }}
-        onPatch={onPatch}
-      />,
-    );
-
-    await user.click(within(rowFor("policies.flag")).getByRole("switch"));
-
-    expect(onPatch).toHaveBeenCalledWith({ flag: true });
   });
 });

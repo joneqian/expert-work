@@ -182,10 +182,11 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   await nameInput.clear();
   await nameInput.fill("mcp-agent");
 
-  // MCP is one of the stacked sections under the "Capabilities" group now —
-  // no separate enable checkbox; the server list shows directly and
-  // selecting a server enables MCP.
+  // MCP lives behind the capabilities group's [MCP] sub-tab (config-page
+  // redesign v2, Task 5) — open the group, then the tab; the server list
+  // shows there and selecting a server enables MCP.
   await page.getByTestId("cfg-nav-capabilities").click();
+  await page.getByRole("tab", { name: "MCP" }).click();
 
   // The McpToolPicker mounts and fetches /v1/mcp-servers/available.
   await expect(page.getByTestId("af-mcp-server-github")).toBeVisible();
@@ -231,9 +232,10 @@ test("(b) create modal with MCP picker passes axe (serious + critical)", async (
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
 
-  // MCP is one of the stacked sections under the "Capabilities" group now
-  // (no separate enable checkbox).
+  // MCP lives behind the capabilities group's [MCP] sub-tab (config-page
+  // redesign v2, Task 5).
   await page.getByTestId("cfg-nav-capabilities").click();
+  await page.getByRole("tab", { name: "MCP" }).click();
 
   // Wait for the picker to load so axe sees the full DOM.
   await expect(page.getByTestId("af-mcp-server-github")).toBeVisible();

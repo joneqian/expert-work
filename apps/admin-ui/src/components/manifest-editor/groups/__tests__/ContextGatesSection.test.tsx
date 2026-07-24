@@ -6,17 +6,22 @@ import "../../../../i18n";
 import { ContextGatesSection } from "../ContextGatesSection";
 import type { AgentManifest } from "../../form_model";
 
-// The 18 knobs across the four PolicySpec sub-blocks (tool_result_prune /
-// working_memory / context_compression / tool_output_budget) — mirrors
-// ``ContextGatesFields`` in form_model.ts.
-const FIELD_IDS = [
+// The three tabbed PolicySpec sub-blocks (config-page redesign v2 Task 3) —
+// mirrors ``ContextGatesFields`` in form_model.ts. tool_output_budget (the
+// fourth sub-block) is NOT tabbed — it's a single master-switch row that
+// lives outside the Tabs, at the top of the section.
+const PRUNE_FIELD_IDS = [
   "policies.tool_result_prune.enabled",
   "policies.tool_result_prune.threshold_pct",
   "policies.tool_result_prune.recent_tool_results_kept",
+];
+const WINDOW_FIELD_IDS = [
   "policies.working_memory.enabled",
   "policies.working_memory.threshold_pct",
   "policies.working_memory.max_recent_turns",
   "policies.working_memory.keep_first_turn",
+];
+const COMPRESS_FIELD_IDS = [
   "policies.context_compression.enabled",
   "policies.context_compression.threshold_pct",
   "policies.context_compression.head_keep",
@@ -27,18 +32,17 @@ const FIELD_IDS = [
   "policies.context_compression.max_tokens",
   "policies.context_compression.pressure_feedback",
   "policies.context_compression.pressure_warn_pct",
-  "policies.tool_output_budget.enabled",
 ];
+const BUDGET_FIELD_ID = "policies.tool_output_budget.enabled";
 
-// The four PolicyFieldTable group-header rows ContextGatesSection wires one
-// per PolicySpec sub-block — mirrors the ``context_gates.panel_*`` i18n
-// values (en locale).
-const GROUP_TITLES = [
-  "① Tool-result prune",
-  "② Sliding window",
-  "③ Context compression",
-  "④ Tool-output budget",
-];
+// Mirrors the (en locale) ``context_gates.panel_*`` values — the ①②③
+// sequence order is the whole point of this section, so the labels
+// (and the tabs' left-to-right order) must carry it.
+const TAB_LABELS = {
+  prune: "① Tool-result prune",
+  window: "② Sliding window",
+  compress: "③ Context compression",
+};
 
 function renderSection(
   formData: AgentManifest = {},
@@ -47,26 +51,73 @@ function renderSection(
   return render(<ContextGatesSection formData={formData} onChange={onChange} />);
 }
 
-function rowFor(fieldId: string): HTMLElement {
-  return document.querySelector(`[data-field-id="${fieldId}"]`) as HTMLElement;
+function rowFor(fieldId: string): HTMLElement | null {
+  return document.querySelector(`[data-field-id="${fieldId}"]`);
+}
+
+async function openTab(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+): Promise<void> {
+  await user.click(screen.getByRole("tab", { name: label }));
 }
 
 describe("ContextGatesSection", () => {
-  it("renders as a single PolicyFieldTable — no Collapse anywhere", () => {
+  it("renders with no Collapse anywhere", () => {
     renderSection();
-    expect(screen.getByTestId("policy-field-table")).toBeInTheDocument();
     expect(document.querySelector(".ant-collapse")).not.toBeInTheDocument();
   });
 
-  it("renders all four group titles and all 18 fields, all visible with no expand step", () => {
+  it("renders a one-line intro above everything else", () => {
     renderSection();
-    for (const title of GROUP_TITLES) {
-      expect(screen.getByText(title)).toBeVisible();
+    expect(
+      screen.getByText(/prune old tool results/i),
+    ).toBeVisible();
+  });
+
+  it("renders the tool-output-budget master switch outside the Tabs, at the very top", () => {
+    renderSection();
+    const row = rowFor(BUDGET_FIELD_ID);
+    expect(row).toBeInTheDocument();
+    expect(row).toBeVisible();
+    expect(row?.closest(".ant-tabs")).toBeNull();
+  });
+
+  it("renders three tabs labeled ①②③ in order, prune (①) active by default", () => {
+    renderSection();
+    const tabs = screen.getAllByRole("tab").map((el) => el.textContent);
+    expect(tabs).toEqual([
+      TAB_LABELS.prune,
+      TAB_LABELS.window,
+      TAB_LABELS.compress,
+    ]);
+    expect(
+      screen.getByRole("tab", { name: TAB_LABELS.prune }),
+    ).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows the prune tab's 3 fields by default, with no click needed", () => {
+    renderSection();
+    for (const id of PRUNE_FIELD_IDS) {
+      expect(rowFor(id)).toBeVisible();
     }
-    for (const id of FIELD_IDS) {
-      const row = rowFor(id);
-      expect(row).toBeInTheDocument();
-      expect(row).toBeVisible();
+  });
+
+  it("switching to the sliding-window (②) tab shows its 4 fields", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await openTab(user, TAB_LABELS.window);
+    for (const id of WINDOW_FIELD_IDS) {
+      expect(rowFor(id)).toBeVisible();
+    }
+  });
+
+  it("switching to the context-compression (③) tab shows its 10 fields", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await openTab(user, TAB_LABELS.compress);
+    for (const id of COMPRESS_FIELD_IDS) {
+      expect(rowFor(id)).toBeVisible();
     }
   });
 
@@ -75,7 +126,7 @@ describe("ContextGatesSection", () => {
     const onChange = vi.fn();
     renderSection({}, onChange);
 
-    const row = rowFor("policies.tool_result_prune.threshold_pct");
+    const row = rowFor("policies.tool_result_prune.threshold_pct") as HTMLElement;
     const input = within(row).getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "0.4");
@@ -89,7 +140,7 @@ describe("ContextGatesSection", () => {
     const onChange = vi.fn();
     renderSection({}, onChange);
 
-    const row = rowFor("policies.tool_result_prune.enabled");
+    const row = rowFor("policies.tool_result_prune.enabled") as HTMLElement;
     await user.click(within(row).getByRole("switch"));
 
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
@@ -104,7 +155,7 @@ describe("ContextGatesSection", () => {
     };
     renderSection(seed, onChange);
 
-    const row = rowFor("policies.tool_result_prune.enabled");
+    const row = rowFor("policies.tool_result_prune.enabled") as HTMLElement;
     await user.click(within(row).getByRole("switch"));
 
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
@@ -115,8 +166,9 @@ describe("ContextGatesSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
+    await openTab(user, TAB_LABELS.window);
 
-    const row = rowFor("policies.working_memory.max_recent_turns");
+    const row = rowFor("policies.working_memory.max_recent_turns") as HTMLElement;
     const input = within(row).getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "12");
@@ -129,8 +181,9 @@ describe("ContextGatesSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
+    await openTab(user, TAB_LABELS.compress);
 
-    const row = rowFor("policies.context_compression.head_keep");
+    const row = rowFor("policies.context_compression.head_keep") as HTMLElement;
     const input = within(row).getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "2");
@@ -143,8 +196,9 @@ describe("ContextGatesSection", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderSection({}, onChange);
+    await openTab(user, TAB_LABELS.compress);
 
-    const row = rowFor("policies.context_compression.max_turns");
+    const row = rowFor("policies.context_compression.max_turns") as HTMLElement;
     const input = within(row).getByRole("spinbutton") as HTMLInputElement;
     expect(input).toHaveValue("");
     await user.type(input, "8");
@@ -158,14 +212,14 @@ describe("ContextGatesSection", () => {
     const onChange = vi.fn();
     renderSection({}, onChange);
 
-    const row = rowFor("policies.tool_output_budget.enabled");
+    const row = rowFor(BUDGET_FIELD_ID) as HTMLElement;
     await user.click(within(row).getByRole("switch"));
 
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
     expect(last.spec?.policies?.tool_output_budget?.enabled).toBe(false);
   });
 
-  it("patching one sub-block preserves sibling sub-blocks", async () => {
+  it("patching one sub-block preserves sibling sub-blocks (including ones on other tabs)", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const seed: AgentManifest = {
@@ -178,7 +232,7 @@ describe("ContextGatesSection", () => {
     };
     renderSection(seed, onChange);
 
-    const row = rowFor("policies.tool_result_prune.threshold_pct");
+    const row = rowFor("policies.tool_result_prune.threshold_pct") as HTMLElement;
     const input = within(row).getByRole("spinbutton");
     await user.clear(input);
     await user.type(input, "0.5");
@@ -189,9 +243,36 @@ describe("ContextGatesSection", () => {
     expect(last.spec?.policies?.tool_output_budget?.enabled).toBe(false);
   });
 
-  it("shows the gray 'Default 0.7' badge for tool_result_prune.threshold_pct when unset", () => {
+  it("shows no '已自定义' tag for tool_result_prune.threshold_pct when unset (at default)", () => {
     renderSection({});
-    const row = rowFor("policies.tool_result_prune.threshold_pct");
-    expect(within(row).getByText("Default 0.7")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        "field-customized-policies.tool_result_prune.threshold_pct",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the '已自定义' tag and a reset button for tool_result_prune.threshold_pct once diverged", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const seed: AgentManifest = {
+      spec: { policies: { tool_result_prune: { threshold_pct: 0.4 } } },
+    };
+    renderSection(seed, onChange);
+
+    expect(
+      screen.getByTestId(
+        "field-customized-policies.tool_result_prune.threshold_pct",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByTestId(
+        "field-reset-policies.tool_result_prune.threshold_pct",
+      ),
+    );
+
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.policies?.tool_result_prune?.threshold_pct).toBeUndefined();
   });
 });

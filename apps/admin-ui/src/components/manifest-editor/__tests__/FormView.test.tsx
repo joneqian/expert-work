@@ -98,23 +98,6 @@ describe("FormView", () => {
 
     renderSection("subagents");
     expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
-
-    renderSection("memory");
-    expect(screen.getByTestId("af-memory")).toBeInTheDocument();
-    // Memory-on seed surfaces the write-back master toggle + the advanced panel.
-    expect(screen.getByTestId("af-memory-writeback")).toBeInTheDocument();
-    expect(screen.getByTestId("af-memory-advanced")).toBeInTheDocument();
-
-    renderSection("governance");
-    expect(screen.getByTestId("af-approval")).toBeInTheDocument();
-    expect(screen.getByTestId("af-dynamic-workers")).toBeInTheDocument();
-    expect(screen.getByTestId("af-governance-advanced")).toBeInTheDocument();
-    // Run-deadline moved to the "budget" group's RunBudgetSection (Task 6) —
-    // governance no longer renders its own control for it.
-    expect(screen.queryByTestId("af-run-deadline")).not.toBeInTheDocument();
-
-    renderSection("defenses");
-    expect(screen.getByTestId("af-defenses")).toBeInTheDocument();
   });
 
   it("keeps the section's own heading on the singular section= path", () => {
@@ -188,35 +171,6 @@ describe("FormView", () => {
     expect(last.spec?.model?.fallback).toBeUndefined();
   });
 
-  it("toggling write-back off sets memory.long_term.write_back false", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("memory", SEED, onChange);
-    await user.click(screen.getByTestId("af-memory-writeback"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.memory?.long_term?.write_back).toBe(false);
-  });
-
-  it("checking an approval tool adds it to policies.approval_required_tools", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("governance", SEED, onChange);
-    await user.click(screen.getByTestId("af-approval-exec_python"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.policies?.approval_required_tools).toEqual([
-      "exec_python",
-    ]);
-  });
-
-  it("turning dynamic workers off writes dynamic_workers.enabled=false", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("governance", SEED, onChange);
-    await user.click(screen.getByTestId("af-dynamic-workers-toggle"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.dynamic_workers?.enabled).toBe(false);
-  });
-
   it("shows the vision (VL fallback) section when the main model is text-only", () => {
     // SEED's model has no supports_vision → Path B section appears.
     renderSection("model");
@@ -281,15 +235,6 @@ describe("FormView", () => {
     expect(last.spec?.sandbox).toEqual({ kind: "none" });
   });
 
-  it("toggling memory off sets spec.memory.long_term to null", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("memory", SEED, onChange);
-    await user.click(screen.getByTestId("af-memory-toggle"));
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.memory?.long_term).toBeNull();
-  });
-
   it("checking web search adds a builtin web_search tool entry", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -336,12 +281,22 @@ describe("FormView", () => {
     );
   });
 
-  it("new-agent default seed: exec_python/bash checked on, opt-in tools checked off", () => {
+  it("new-agent default seed: every toggleable tool (incl. web_search/http/opt-in-7) checked on", () => {
     const seeded = parseYaml(BASE_MANIFEST_YAML) as AgentManifest;
     renderSection("tools", seeded);
+    expect(screen.getByTestId("af-tool-web_search")).toBeChecked();
+    expect(screen.getByTestId("af-tool-http")).toBeChecked();
     expect(screen.getByTestId("af-tool-exec_python")).toBeChecked();
     expect(screen.getByTestId("af-tool-bash")).toBeChecked();
-    expect(screen.getByTestId("af-tool-manage_task")).not.toBeChecked();
+    expect(screen.getByTestId("af-tool-manage_task")).toBeChecked();
+    expect(screen.getByTestId("af-tool-author_skill")).toBeChecked();
+    expect(screen.getByTestId("af-tool-refine_skill")).toBeChecked();
+    expect(screen.getByTestId("af-tool-fork_skill")).toBeChecked();
+    expect(
+      screen.getByTestId("af-tool-propose_skill_to_tenant"),
+    ).toBeChecked();
+    expect(screen.getByTestId("af-tool-note_behavior_patch")).toBeChecked();
+    expect(screen.getByTestId("af-tool-clarify_tool_usage")).toBeChecked();
   });
 
   it("editing the prompt updates spec.system_prompt.template", async () => {
@@ -361,28 +316,38 @@ describe("FormView", () => {
     await waitFor(() => expect(catalog.loadModelCatalog).toHaveBeenCalled());
   });
 
-  // RT-1 (RT-ADR-4) — the structured-output block is YAML-authored; the
-  // prompt tab surfaces its state (configured name vs. not-configured hint).
-  it("shows the not-configured structured-output hint by default", () => {
+  // RT-1 (RT-ADR-4) / config-page redesign v2 Task 7 — the structured-output
+  // block is a flat field-list editor (OutputSchemaEditor) riding the prompt
+  // tab; its own test suite (widgets/__tests__/OutputSchemaEditor.test.tsx)
+  // covers the editor's behavior in depth — these two just confirm it's
+  // wired to the right formData/onChange here.
+  it("shows the output-schema switch off by default", () => {
     renderSection("prompt");
     const block = screen.getByTestId("af-output-schema");
-    expect(within(block).getByText(/spec\.output_schema/)).toBeInTheDocument();
+    expect(within(block).getByTestId("af-output-schema-switch")).not.toBeChecked();
   });
 
-  it("shows the schema name when output_schema is configured", () => {
+  it("shows the configured schema's fields when output_schema is set", () => {
     const seeded: AgentManifest = {
       ...SEED,
       spec: {
         ...SEED.spec,
         output_schema: {
           name: "review_verdict",
-          json_schema: { type: "object" },
+          json_schema: {
+            type: "object",
+            properties: { verdict: { type: "string" } },
+            additionalProperties: false,
+          },
         },
       },
     };
     renderSection("prompt", seeded);
     const block = screen.getByTestId("af-output-schema");
-    expect(within(block).getByText(/review_verdict/)).toBeInTheDocument();
+    expect(within(block).getByTestId("af-output-schema-switch")).toBeChecked();
+    expect(within(block).getByTestId("af-output-schema-name-0")).toHaveValue(
+      "verdict",
+    );
   });
 
   // inject_current_date (DynamicContextSpec) — default-on switch at the tail
@@ -415,113 +380,5 @@ describe("FormView", () => {
   it("renders the tools-section note about per-tool YAML config", () => {
     renderSection("tools");
     expect(screen.getByTestId("af-tools-config-note")).toBeInTheDocument();
-  });
-
-  it("renders the defenses section with every switch/select", () => {
-    renderSection("defenses");
-    expect(screen.getByTestId("af-defenses")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("af-defenses-prompt-injection"),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-output-screen")).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-output-judge")).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-output-dlp")).toBeInTheDocument();
-    expect(screen.getByTestId("af-defenses-action-screen")).toBeInTheDocument();
-  });
-
-  it("output_screen is on by default; toggling it off writes defenses.output_screen", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-output-screen"),
-    ).getByRole("switch");
-    expect(sw).toBeChecked();
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.output_screen).toBe("off");
-  });
-
-  it("enabling the judge writes defenses.output_judge=block", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-output-judge"),
-    ).getByRole("switch");
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.output_judge).toBe("block");
-  });
-
-  it("hides the judge on-error select until the judge is enabled", () => {
-    renderSection("defenses"); // SEED: judge off
-    expect(
-      screen.queryByTestId("af-defenses-output-judge-on-error"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows the judge on-error select when the judge is enabled", () => {
-    const judged: AgentManifest = {
-      ...SEED,
-      spec: { ...SEED.spec, defenses: { output_judge: "block" } },
-    };
-    renderSection("defenses", judged);
-    expect(
-      screen.getByTestId("af-defenses-output-judge-on-error"),
-    ).toBeInTheDocument();
-  });
-
-  it("enabling DLP writes defenses.output_dlp=redact", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-output-dlp"),
-    ).getByRole("switch");
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.output_dlp).toBe("redact");
-  });
-
-  it("turning prompt_injection off writes defenses.prompt_injection=off", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderSection("defenses", SEED, onChange);
-    const sw = within(
-      screen.getByTestId("af-defenses-prompt-injection"),
-    ).getByRole("switch");
-    expect(sw).toBeChecked(); // spotlight default = on
-    await user.click(sw);
-    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
-    expect(last.spec?.defenses?.prompt_injection).toBe("off");
-  });
-
-  it("shows the action_screen on-error select only when action_screen != off", () => {
-    renderSection("defenses"); // SEED: action_screen off
-    expect(
-      screen.queryByTestId("af-defenses-action-screen-on-error"),
-    ).not.toBeInTheDocument();
-    const withAction: AgentManifest = {
-      ...SEED,
-      spec: { ...SEED.spec, defenses: { action_screen: "block" } },
-    };
-    renderSection("defenses", withAction);
-    expect(
-      screen.getByTestId("af-defenses-action-screen-on-error"),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the extends note only when spec.extends is set", () => {
-    renderSection("defenses");
-    expect(
-      screen.queryByTestId("af-defenses-extends-note"),
-    ).not.toBeInTheDocument();
-    const withExtends: AgentManifest = {
-      ...SEED,
-      spec: { ...SEED.spec, extends: "secure-template" },
-    };
-    renderSection("defenses", withExtends);
-    expect(screen.getByTestId("af-defenses-extends-note")).toBeInTheDocument();
   });
 });
