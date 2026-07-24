@@ -25,6 +25,7 @@ import { YamlView } from "./YamlView";
 import { GroupNav } from "./GroupNav";
 import { SettingsSearch } from "./SettingsSearch";
 import { CONFIG_GROUPS } from "./groups";
+import { BasicSection } from "./groups/BasicSection";
 import { RunBudgetSection } from "./groups/RunBudgetSection";
 import { ContextGatesSection } from "./groups/ContextGatesSection";
 import { CapabilitiesSection } from "./groups/CapabilitiesSection";
@@ -38,10 +39,11 @@ import type { McpPickerSource } from "./widgets/McpToolPicker";
 /** Curated group panes — a hand-written component that replaces FormView's
  * registered-sections pathway for that group entirely, checked BEFORE the
  * plain ``FormView`` stacked-sections fallback below — so it wins even for
- * "model"/"capabilities", whose ``CONFIG_GROUPS`` entries still list real
- * sections — ``ModelRoutingSection``/``CapabilitiesSection`` embed those
- * themselves (the latter as five ``Tabs`` sub-tabs instead of one stacked
- * pane).
+ * "basic"/"model"/"capabilities", whose ``CONFIG_GROUPS`` entries still list
+ * real sections — ``BasicSection``/``ModelRoutingSection``/
+ * ``CapabilitiesSection`` embed those themselves (config-page redesign v2
+ * Task 6 adds ``RunProfileCard`` above the plain "basic" FormView section;
+ * capabilities embeds five ``Tabs`` sub-tabs instead of one stacked pane).
  * "budget"/"context"/"memory"/"security"/"sandbox"/"observability" instead
  * have a statically-empty entry (``sections: []``) and render ONLY their
  * curated pane — "memory" and "security" used to embed real FormView
@@ -51,7 +53,10 @@ import type { McpPickerSource } from "./widgets/McpToolPicker";
  * anymore. Every ``CONFIG_GROUPS`` entry now has either real sections or a
  * curated pane here, so there's no longer a group that can fall through to a
  * generic "pending" hint (that branch — and its ``cfg-pane-pending`` testid
- * — has been removed). */
+ * — has been removed). ``BasicSection`` never renders on the leading-tab
+ * ``mergeSection="basic"`` path (``AgentTemplateConfigForm``) — that path
+ * folds the plain FormView section into the leading tab directly, bypassing
+ * this record entirely (see ``lt.mergeSection`` below). */
 interface CuratedPaneProps {
   formData: unknown;
   onChange: (data: unknown) => void;
@@ -63,6 +68,7 @@ const CURATED_GROUP_PANES: Record<
   string,
   (props: CuratedPaneProps) => ReactNode
 > = {
+  basic: BasicSection,
   budget: RunBudgetSection,
   context: ContextGatesSection,
   capabilities: CapabilitiesSection,

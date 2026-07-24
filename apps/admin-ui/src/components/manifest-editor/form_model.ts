@@ -255,6 +255,138 @@ export interface PromptVariableFields {
   [k: string]: unknown;
 }
 
+// ---- run profile presets (config-page redesign v2 Task 6) ----
+// Three curated one-click presets over 18 previously-scattered "how hard
+// does this agent think/remember" knobs (RunProfileCard, ``groups/
+// BasicSection.tsx``). ``RunProfile`` is a concrete preset name; the wider
+// ``RunProfileState`` adds "custom" — the UI state once any managed field
+// has drifted off every preset's exact values.
+export type RunProfile = "balanced" | "cost" | "capability";
+export type RunProfileState = RunProfile | "custom";
+
+// The 18 managed fields, camelCased to match each field's existing read/patch
+// helper (``readTopK``/``patchRunBudget``/etc. — see ``applyRunProfile``).
+interface RunProfileValues {
+  topK: number;
+  verifyReads: boolean;
+  rewriteReads: boolean;
+  recallMode: string;
+  abstainThreshold: number;
+  injectionTokenBudget: number;
+  correctionTokenBudget: number;
+  consolidationEnabled: boolean;
+  maxIterations: number;
+  maxNoProgress: number;
+  prThresholdPct: number;
+  prRecentKept: number;
+  wmThresholdPct: number;
+  wmMaxRecentTurns: number;
+  ccThresholdPct: number;
+  ccHeadKeep: number;
+  ccTailKeep: number;
+  dynamicWorkersOn: boolean;
+}
+
+// Single source of truth for each managed field's BACKEND default (the value
+// a patch omits entirely — see ``applyRunProfile``'s ``orDefault``). Must stay
+// numerically identical to the matching ``FieldDef.effectiveDefault`` in
+// ``groups/RunBudgetSection.tsx`` (max_iterations/max_no_progress),
+// ``groups/ContextGatesSection.tsx`` (pr_/wm_/cc_ thresholds+keeps),
+// ``groups/MemorySection.tsx`` (top_k/verify_reads/rewrite_reads/recall_mode/
+// abstain_threshold/injection+correction budgets/consolidation), and
+// ``readDynamicWorkersOn`` below (dynamic_workers) — those files' own
+// comments point back here. NOTE ``maxNoProgress``'s backend default is 0,
+// which is NOT any preset's value (balanced/cost/capability write 4/3/6) — a
+// brand-new agent only reads as "balanced" because ``defaults.ts`` seeds
+// ``policies.max_no_progress: 4`` explicitly (see
+// ``form_model_profiles.test.ts``'s seed↔balanced consistency test).
+const PROFILE_BACKEND_DEFAULTS: RunProfileValues = {
+  topK: 5,
+  verifyReads: true,
+  rewriteReads: false,
+  recallMode: "per_session",
+  abstainThreshold: 0,
+  injectionTokenBudget: 2000,
+  correctionTokenBudget: 500,
+  consolidationEnabled: true,
+  maxIterations: 30,
+  maxNoProgress: 0,
+  prThresholdPct: 0.7,
+  prRecentKept: 4,
+  wmThresholdPct: 0.7,
+  wmMaxRecentTurns: 20,
+  ccThresholdPct: 0.7,
+  ccHeadKeep: 4,
+  ccTailKeep: 6,
+  dynamicWorkersOn: true,
+};
+
+// The three presets' target values — spec §③'s authoritative table.
+const RUN_PROFILES: Record<RunProfile, RunProfileValues> = {
+  balanced: {
+    topK: 5,
+    verifyReads: true,
+    rewriteReads: false,
+    recallMode: "per_session",
+    abstainThreshold: 0,
+    injectionTokenBudget: 2000,
+    correctionTokenBudget: 500,
+    consolidationEnabled: true,
+    maxIterations: 30,
+    maxNoProgress: 4,
+    prThresholdPct: 0.7,
+    prRecentKept: 4,
+    wmThresholdPct: 0.7,
+    wmMaxRecentTurns: 20,
+    ccThresholdPct: 0.7,
+    ccHeadKeep: 4,
+    ccTailKeep: 6,
+    dynamicWorkersOn: true,
+  },
+  cost: {
+    topK: 3,
+    verifyReads: false,
+    rewriteReads: false,
+    recallMode: "per_session",
+    abstainThreshold: 0.2,
+    injectionTokenBudget: 1000,
+    correctionTokenBudget: 300,
+    consolidationEnabled: false,
+    maxIterations: 20,
+    maxNoProgress: 3,
+    prThresholdPct: 0.6,
+    prRecentKept: 2,
+    wmThresholdPct: 0.6,
+    wmMaxRecentTurns: 10,
+    ccThresholdPct: 0.6,
+    ccHeadKeep: 2,
+    ccTailKeep: 4,
+    dynamicWorkersOn: false,
+  },
+  capability: {
+    topK: 8,
+    verifyReads: true,
+    rewriteReads: true,
+    recallMode: "per_turn",
+    abstainThreshold: 0,
+    injectionTokenBudget: 4000,
+    correctionTokenBudget: 800,
+    consolidationEnabled: true,
+    maxIterations: 60,
+    maxNoProgress: 6,
+    prThresholdPct: 0.8,
+    prRecentKept: 8,
+    wmThresholdPct: 0.8,
+    wmMaxRecentTurns: 40,
+    ccThresholdPct: 0.85,
+    ccHeadKeep: 6,
+    ccTailKeep: 10,
+    dynamicWorkersOn: true,
+  },
+};
+
+const RUN_PROFILE_IDS: readonly RunProfile[] = ["balanced", "cost", "capability"];
+
 function asObj(v: unknown): AgentManifest {
   return v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as AgentManifest)
@@ -479,14 +611,27 @@ export function setMemoryOn(m: unknown, on: boolean): AgentManifest {
   return patchSpec(m, { memory: { ...memory, long_term: lt } });
 }
 // Merge a partial patch into ``memory.long_term`` preserving siblings. Used by
-// every long_term knob setter so toggling one never clobbers the others.
+// every long_term knob setter so toggling one never clobbers the others. A
+// patch value of ``undefined`` DELETES that key (``applyRunProfile``'s
+// "value === backend default → omit" convention) rather than merely
+// assigning it a literal ``undefined`` — genuine deletion, not just a
+// same-serialized-output shortcut, mirrors ``patchDefenses``'s idiom above
+// and keeps ``Object.keys(long_term)`` (and any future "is this block
+// empty" check) accurate. Unlike ``patchDefenses``/``mergeBlock``, an
+// emptied result stays ``{}`` rather than dropping ``long_term`` itself:
+// ``long_term``'s PRESENCE is the memory on/off switch (``readMemoryOn``),
+// so dropping it here would silently turn memory off.
 function patchLongTerm(
   m: unknown,
   patch: Partial<LongTermFields>,
 ): AgentManifest {
   const memory = specOf(m).memory ?? {};
-  const lt = specOf(m).memory?.long_term ?? {};
-  return patchSpec(m, { memory: { ...memory, long_term: { ...lt, ...patch } } });
+  const lt: Record<string, unknown> = { ...(specOf(m).memory?.long_term ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete lt[k];
+    else lt[k] = v;
+  }
+  return patchSpec(m, { memory: { ...memory, long_term: lt as LongTermFields } });
 }
 export const setTopK = (m: unknown, k: number): AgentManifest =>
   patchLongTerm(m, { retrieve_top_k: k });
@@ -1324,4 +1469,151 @@ export function patchResponseCache(
     { enabled: patch.responseCacheEnabled },
   );
   return patchSpec(m, { cache: merged });
+}
+
+// ---- run profile presets (config-page redesign v2 Task 6, cont'd) ----
+// ``applyRunProfile`` writes all 18 managed fields via their EXISTING
+// read/patch pairs (never touching the manifest directly) — the field-level
+// "value === backend default → omit" convention already lives in
+// ``patchLongTerm``/``patchMemoryBudgets``/``patchConsolidation``/
+// ``patchRunBudget``/``patchContextGates``/``setDynamicWorkersOn``; this
+// function only decides, per field, whether to pass the preset's value or
+// ``undefined`` (by comparing against ``PROFILE_BACKEND_DEFAULTS``).
+//
+// Memory-off gating: presets tune knobs, they NEVER flip feature switches
+// (spec §③ — the long-term-memory switch is unmanaged). ``long_term``'s
+// PRESENCE is that switch (``readMemoryOn``), and ``patchLongTerm``
+// materializes the block on first touch — so while memory is off, the 7
+// long_term-backed fields are skipped entirely (not patched, not compared):
+// ``applyRunProfile`` leaves ``memory`` untouched, and ``inferRunProfile``/
+// ``countProfileDiff`` match on the remaining 11 applicable fields only.
+export function applyRunProfile(m: unknown, profile: RunProfile): AgentManifest {
+  const target = RUN_PROFILES[profile];
+  // undefined ⇒ "leave/return this field to the backend default" (deletes
+  // the key via the callee's own patch-undefined convention); otherwise the
+  // preset's explicit value — even when it happens to equal the CURRENT
+  // manifest value, so a re-apply is idempotent.
+  const orDefault = <K extends keyof RunProfileValues>(
+    key: K,
+  ): RunProfileValues[K] | undefined =>
+    target[key] === PROFILE_BACKEND_DEFAULTS[key] ? undefined : target[key];
+
+  // long_term knobs — bypasses the individual setTopK/setVerifyReads/
+  // setRewriteReads/setRecallMode/setAbstainThreshold setters (each accepts
+  // only a definite value, not "delete this key") and instead patches
+  // ``memory.long_term`` directly via the same private helper they use, so
+  // a preset-default field is genuinely absent rather than merely holding
+  // its default value in the manifest (the balanced-profile linchpin
+  // invariant — see ``form_model_profiles.test.ts``).
+  let next = asObj(m);
+  if (readMemoryOn(m)) {
+    next = patchLongTerm(next, {
+      retrieve_top_k: orDefault("topK"),
+      verify_reads: orDefault("verifyReads"),
+      rewrite_reads: orDefault("rewriteReads"),
+      recall_mode: orDefault("recallMode"),
+      abstain_threshold: orDefault("abstainThreshold"),
+    });
+    next = patchMemoryBudgets(next, {
+      injectionTokenBudget: orDefault("injectionTokenBudget"),
+      correctionTokenBudget: orDefault("correctionTokenBudget"),
+    });
+  }
+  next = patchConsolidation(next, {
+    consolidationEnabled: orDefault("consolidationEnabled"),
+  });
+  next = patchRunBudget(next, {
+    maxIterations: orDefault("maxIterations"),
+    maxNoProgress: orDefault("maxNoProgress"),
+  });
+  next = patchContextGates(next, {
+    prThresholdPct: orDefault("prThresholdPct"),
+    prRecentKept: orDefault("prRecentKept"),
+    wmThresholdPct: orDefault("wmThresholdPct"),
+    wmMaxRecentTurns: orDefault("wmMaxRecentTurns"),
+    ccThresholdPct: orDefault("ccThresholdPct"),
+    ccHeadKeep: orDefault("ccHeadKeep"),
+    ccTailKeep: orDefault("ccTailKeep"),
+  });
+  // setDynamicWorkersOn already implements "true (its backend default) →
+  // drop the key, false → write it explicitly" internally, so it's called
+  // directly with the preset's own value (no ``orDefault`` wrapper needed).
+  next = setDynamicWorkersOn(next, target.dynamicWorkersOn);
+  return next;
+}
+
+// Reads all 18 managed fields at their CURRENT effective value (stored value
+// if present, else the backend default) — the comparison basis for both
+// ``inferRunProfile`` and ``countProfileDiff``.
+function effectiveProfileValues(m: unknown): RunProfileValues {
+  const budgets = readMemoryBudgets(m);
+  const consolidation = readConsolidation(m);
+  const runBudget = readRunBudget(m);
+  const gates = readContextGates(m);
+  return {
+    topK: readTopK(m) ?? PROFILE_BACKEND_DEFAULTS.topK,
+    verifyReads: readVerifyReads(m),
+    rewriteReads: readRewriteReads(m),
+    recallMode: readRecallMode(m),
+    abstainThreshold: readAbstainThreshold(m),
+    injectionTokenBudget:
+      budgets.injectionTokenBudget ?? PROFILE_BACKEND_DEFAULTS.injectionTokenBudget,
+    correctionTokenBudget:
+      budgets.correctionTokenBudget ?? PROFILE_BACKEND_DEFAULTS.correctionTokenBudget,
+    consolidationEnabled:
+      consolidation.consolidationEnabled ?? PROFILE_BACKEND_DEFAULTS.consolidationEnabled,
+    maxIterations: runBudget.maxIterations ?? PROFILE_BACKEND_DEFAULTS.maxIterations,
+    maxNoProgress: runBudget.maxNoProgress ?? PROFILE_BACKEND_DEFAULTS.maxNoProgress,
+    prThresholdPct: gates.prThresholdPct ?? PROFILE_BACKEND_DEFAULTS.prThresholdPct,
+    prRecentKept: gates.prRecentKept ?? PROFILE_BACKEND_DEFAULTS.prRecentKept,
+    wmThresholdPct: gates.wmThresholdPct ?? PROFILE_BACKEND_DEFAULTS.wmThresholdPct,
+    wmMaxRecentTurns:
+      gates.wmMaxRecentTurns ?? PROFILE_BACKEND_DEFAULTS.wmMaxRecentTurns,
+    ccThresholdPct: gates.ccThresholdPct ?? PROFILE_BACKEND_DEFAULTS.ccThresholdPct,
+    ccHeadKeep: gates.ccHeadKeep ?? PROFILE_BACKEND_DEFAULTS.ccHeadKeep,
+    ccTailKeep: gates.ccTailKeep ?? PROFILE_BACKEND_DEFAULTS.ccTailKeep,
+    dynamicWorkersOn: readDynamicWorkersOn(m),
+  };
+}
+
+const PROFILE_FIELD_KEYS = Object.keys(
+  PROFILE_BACKEND_DEFAULTS,
+) as (keyof RunProfileValues)[];
+
+// The 7 long_term-backed fields ``applyRunProfile`` skips while memory is
+// off (see its memory-off gating note) — infer/count must skip the same set
+// or an applied preset would immediately read back as "custom".
+const MEMORY_PROFILE_KEYS: readonly (keyof RunProfileValues)[] = [
+  "topK",
+  "verifyReads",
+  "rewriteReads",
+  "recallMode",
+  "abstainThreshold",
+  "injectionTokenBudget",
+  "correctionTokenBudget",
+];
+
+const applicableProfileKeys = (m: unknown): (keyof RunProfileValues)[] =>
+  readMemoryOn(m)
+    ? PROFILE_FIELD_KEYS
+    : PROFILE_FIELD_KEYS.filter((k) => !MEMORY_PROFILE_KEYS.includes(k));
+
+/** Every applicable managed field (all 18, or the 11 non-memory ones while
+ * memory is off) matches one preset exactly → that preset; else "custom". */
+export function inferRunProfile(m: unknown): RunProfileState {
+  const current = effectiveProfileValues(m);
+  const keys = applicableProfileKeys(m);
+  const match = RUN_PROFILE_IDS.find((profile) =>
+    keys.every((k) => current[k] === RUN_PROFILES[profile][k]),
+  );
+  return match ?? "custom";
+}
+
+/** Count of applicable managed fields whose current effective value differs
+ * from ``profile``'s target — the confirm dialog's "N settings will change". */
+export function countProfileDiff(m: unknown, profile: RunProfile): number {
+  const current = effectiveProfileValues(m);
+  const target = RUN_PROFILES[profile];
+  return applicableProfileKeys(m).filter((k) => current[k] !== target[k])
+    .length;
 }

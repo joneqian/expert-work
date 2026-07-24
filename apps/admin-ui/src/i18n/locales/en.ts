@@ -597,6 +597,24 @@ export interface TranslationKeys {
     field_reset: string;
     field_reset_hint: string;
   };
+  // config-page redesign v2 Task 6 — RunProfileCard, the "basic" group's
+  // one-click preset over 18 fields scattered across memory/budget/context
+  // (form_model.ts's RUN_PROFILES). ``{balanced,cost,capability}``/
+  // ``{...}_desc`` are the three preset cards' label + one-line blurb;
+  // ``custom`` is the "no preset matches" tag.
+  run_profile: {
+    title: string;
+    hint: string;
+    balanced: string;
+    balanced_desc: string;
+    cost: string;
+    cost_desc: string;
+    capability: string;
+    capability_desc: string;
+    custom: string;
+    confirm_title: string;
+    confirm_body: string;
+  };
   // Task 6 — pilot "Run Budget & Timeouts" group (RunBudgetSection). Six
   // FieldRow-rendered knobs living in three manifest locations
   // (workflow.max_iterations+type / policies.max_no_progress+run_deadline_s /
@@ -3434,6 +3452,22 @@ const en: TranslationKeys = {
     field_customized_badge: "Customized",
     field_reset: "Reset to default",
     field_reset_hint: "Reset to default: {{value}}",
+  },
+  run_profile: {
+    title: "Run profile",
+    hint: "Pick a profile to auto-configure memory, steps, and compression — every group below can still be fine-tuned field by field.",
+    balanced: "Balanced (recommended)",
+    balanced_desc: "Solid for everyday use at moderate cost (default).",
+    cost: "Cost-saving",
+    cost_desc:
+      "Saves tokens: remembers and thinks less, compresses sooner — cheaper on long conversations.",
+    capability: "High-capability",
+    capability_desc:
+      "Remembers and thinks more: double the steps, fuller memory, steadier on hard tasks — costs more.",
+    custom: "Custom",
+    confirm_title: 'Apply "{{name}}"?',
+    confirm_body:
+      "This will change {{count}} settings; you can still adjust any of them afterward.",
   },
   run_budget: {
     subhead_steps: "Steps & flow",
