@@ -145,3 +145,20 @@ class InMemoryMcpOAuthConnectionStore(McpOAuthConnectionStore):
             for cid in victims:
                 del self._rows[cid]
             return len(victims)
+
+    async def count_for_catalog(self, *, catalog_id: UUID) -> int:
+        return sum(1 for r in self._rows.values() if r.catalog_id == catalog_id)
+
+    async def list_for_catalog(
+        self, *, catalog_id: UUID, limit: int = 1000
+    ) -> list[McpOAuthConnectionRecord]:
+        rows = [r for r in self._rows.values() if r.catalog_id == catalog_id]
+        rows.sort(key=lambda r: r.created_at)
+        return rows[:limit]
+
+    async def delete_for_catalog(self, *, catalog_id: UUID) -> int:
+        async with self._lock:
+            victims = [cid for cid, r in self._rows.items() if r.catalog_id == catalog_id]
+            for cid in victims:
+                del self._rows[cid]
+            return len(victims)

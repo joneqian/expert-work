@@ -1,112 +1,80 @@
-# Task 3 报告:ImageUploadStore.list_expired → list_reapable(谓词加 deleted_at)
+# Task 3 报告(PR2)—— McpOAuthConnectionStore 按目录三方法
 
-## 状态:完成
+## 状态
+DONE
 
 ## worktree / 分支
+- worktree 路径:`/Users/mac/src/github/jone_qian/expert-work/.claude/worktrees/agent-a0263004833995af1`
+- 分支:`worktree-agent-a0263004833995af1`
+- 起手 `git merge --ff-only fix-deletion-hygiene-pr2`(fast-forward,`621c53f9..bef52752`),带入 PR2 的设计/计划文档,工作树无改动被丢弃。
 
-- worktree 路径:`/Users/mac/src/github/jone_qian/expert-work/.claude/worktrees/agent-a83f57d812b3c25dc`
-- 分支:`worktree-agent-a83f57d812b3c25dc`(本地分支)
+**已知细节**:本 worktree 的 `.superpowers/sdd/` 目录下已有 `task-2/5/6/7/8-report.md`,`git log` 确认这些文件全部来自已合并的 `621c53f9`(**PR1** "删除接口卫生 PR1"的报告,历史遗留),不是本 PR2 sibling 任务的产物。`task-3-report.md`(本文件)同样是 PR1 遗留(内容是 `ImageUploadStore.list_expired → list_reapable`,与本任务无关)。按编排指令原样覆盖为 PR2 Task 3 的报告——PR1 版本仍完整保留在 git 历史的 `621c53f9` 提交里,不受影响。
 
-**前置纠偏**:任务下发时说明"worktree 已从分支 fix-deletion-hygiene-pr1 切出",但实际检出时该 worktree 停在
-`69181a73`(`fix-deletion-hygiene-pr1` 的合并基点上游),缺少该分支后续 4 个 commit(`80a898bf`
-`a9af4d62` `856567c9` `9cbd8e5c`,即 Task 1/2 的产物 + PR1 设计/计划文档)。`fix-deletion-hygiene-pr1`
-分支本身已被主 worktree 检出,无法在本 worktree 直接切换,因此用
-`git merge --ff-only fix-deletion-hygiene-pr1` 把本地分支快进对齐到该分支 tip(`9cbd8e5c`),
-过程中工作树确认为 clean、无任何本地改动被丢弃。对齐后 `.superpowers/sdd/task-3-brief.md` 仍不存在于本
-worktree(该目录被 `.superpowers/sdd/.gitignore` 挡在外面,是主 worktree 的本地未跟踪文件),改为直接用
-`Read` 工具跨 worktree 绝对路径读取主 worktree 里的
-`/Users/mac/src/github/jone_qian/expert-work/.superpowers/sdd/task-3-brief.md`。
+## 需求源
+`/Users/mac/src/github/jone_qian/expert-work/.superpowers/sdd/task-3-brief.md`(主仓库,唯一需求源)。
 
 ## 改动文件
 
-- `packages/expert-work-persistence/src/expert_work/persistence/image_upload/base.py`
-  - `list_expired` 抽象方法重命名为 `list_reapable`,docstring 改写为准确描述新谓词
-    (`created_at < before OR deleted_at IS NOT NULL`),并说明"手删图片不再等到老化才被夜扫清"这一行为变化。
-  - 类级 docstring 里对 `list_expired` 的引用同步改名。
-- `packages/expert-work-persistence/src/expert_work/persistence/image_upload/sql.py`
-  - `list_expired` → `list_reapable`,谓词从 `created_at < before` 改为
-    `or_(created_at < before, deleted_at.is_not(None))`,新增 `or_` import。排序/limit 不变。
-- `packages/expert-work-persistence/src/expert_work/persistence/image_upload/memory.py`
-  - `list_expired` → `list_reapable`,谓词从 `r.created_at < before` 改为
-    `r.created_at < before or r.deleted_at is not None`。排序/limit 不变。
-- `services/retention-cleanup-job/src/retention_cleanup_job/job.py`
-  - `_delete_expired_images` 内唯一调用点:`self._image_upload_store.list_expired(...)` →
-    `list_reapable(...)`。方法其余逻辑(object-store 逐条删除、失败计数、hard_delete、docstring)按
-    brief 要求**未改动**——docstring 里"regardless of deleted_at state"这句话仍准确描述老行为
-    (老行不论是否软删都会被扫),但没提"新软删行也立即可扫"这一新增行为,见下方 Concerns。
+- `packages/expert-work-persistence/src/expert_work/persistence/mcp_oauth_connection/base.py`
+  - 新增 3 个抽象方法:`count_for_catalog(*, catalog_id) -> int`、`list_for_catalog(*, catalog_id, limit=1000) -> list[McpOAuthConnectionRecord]`、`delete_for_catalog(*, catalog_id) -> int`。
+  - docstring 明确标注 "Platform-scope caller only"——**无先例**(全表扫描 grep 未发现该 store 内既有跨租户 bypass-RLS 方法),按 brief 指示走 docstring 注明路线,并指向 `agent_spec/sql.py::list_all_tenants` 作为同库其他 store 里"无 tenant_id 谓词 + 需 platform-scope 调用方"的既有先例写法。
+- `packages/expert-work-persistence/src/expert_work/persistence/mcp_oauth_connection/memory.py`
+  - 三方法均以 `catalog_id` 过滤 `self._rows`(不带 tenant_id/user_id 谓词,天然跨租户);`list_for_catalog` 按 `created_at` 升序 + `limit` 截断;`delete_for_catalog` 复用既有 `delete_all_for_user` 的"收集受害 id → 逐个 del"模式。
+- `packages/expert-work-persistence/src/expert_work/persistence/mcp_oauth_connection/sql.py`
+  - `sqlalchemy` import 加 `func`。
+  - 三方法均**不带 tenant_id WHERE**(平台治理视角,跨租户):`count_for_catalog` 用 `select(func.count()).select_from(...).where(catalog_id==...)`;`list_for_catalog` 用 `select(...).where(catalog_id==...).order_by(created_at).limit(...)`;`delete_for_catalog` 用裸 `sa_delete(...).where(catalog_id==...)` + `result.rowcount`。谓词与 in-memory 版本逐字节等价(同一 `catalog_id ==` 单条件)。
+
+### RLS 调查结论(为何选 docstring 注明而非造 bypass session)
+- `mcp_oauth_connection` 表(migration `0063_mcp_oauth_connection`)`FORCE ROW LEVEL SECURITY` + 策略是**严格等值**(`tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid`,非 `IS NOT DISTINCT FROM`),这与 `mcp_connector_catalog`(NULL-tenant 平台表,策略允许 NULL 匹配)不同,没法靠"不设租户上下文"天然放行。
+- 全库 grep `bypass_rls_var` 在本 store 内**零命中**;唯一同类先例是 `agent_spec/sql.py::list_all_tenants`(同样无 tenant_id 谓词,注释写"caller MUST have bypass_rls_var=True or RLS filters everything out"),本次三方法照其写法加了等价 docstring/注释。
+- 结合既有记忆 `rls-inert-runtime-superuser`:运行期 DB 连接本身是 Postgres 超级用户(`rolsuper=t, rolbypassrls=t`),`FORCE ROW LEVEL SECURITY` 对超级用户无条件失效——生产路径上这三个方法天然会跨租户可见,不需要额外的 bypass session 包装。真正的"platform-scope caller only"契约靠调用方(Task 8 的目录删除守卫,system_admin-only 端点)保证,不靠 SQL 层。
 
 ## 测试改动 / 新增
 
-- `packages/expert-work-persistence/tests/test_in_memory_image_upload_store.py`
-  - 既有 `test_list_expired_and_hard_delete` 改名为 `test_list_reapable_and_hard_delete`,调用点同步改名。
-  - 新增 `test_list_reapable_predicate_covers_old_and_soft_deleted`:四行场景
-    (新+活跃不命中 / 老+活跃命中 / 新+软删命中(新行为)/ 老+软删命中),断言命中集合 + `created_at` 升序。
-- `packages/expert-work-persistence/tests/test_sql_image_upload_store.py`(新建)
-  - 该 SQL 测试文件此前不存在(brief 写"SQL 对应文件追加",实际是从零建,仿照
-    `test_sql_artifact_store.py` 的 `sql_store` fixture 风格,`pytestmark = pytest.mark.integration`)。
-  - `test_list_reapable_predicate_covers_old_and_soft_deleted`:与 in-memory 版本同一四行场景,验证
-    SQL 谓词与 in-memory 谓词逐字节等价(真 Postgres,通过直接 `UPDATE image_upload SET created_at/deleted_at`
-    回填因为 `insert()` 不接受外部传入的 `created_at`)。
-  - `test_list_reapable_respects_limit`:三条老行 + `limit=2` 断言只返回 2 条。
-- retention job 既有测试(`test_job_unit.py` / `test_job_integration.py`)未引用 `list_expired`
-  字符串(只调用 job 自身的 `_delete_expired_images` 方法),**无需改名**,原样保留、全部通过。
-
-## grep 验证:无残留旧名 / 未误改其他同名方法
-
-```
-grep -rn "list_expired" --include="*.py" \
-  packages/expert-work-persistence/src/expert_work/persistence/image_upload \
-  services/retention-cleanup-job
-```
-→ 只剩 `job.py:169`(`approval_store.list_expired`)与 `job.py:218`(`artifact_store.list_expired`),
-均为 brief 明确要求**不动**的其他 store,未被误改。`quota`/`artifact` 域下的 `list_expired` 方法本身也未触碰。
+- `packages/expert-work-persistence/tests/test_memory_mcp_oauth_connection_store.py`
+  - 新增 `test_count_list_delete_for_catalog_cross_tenant`:两租户各挂 1 条 catalogA + 1 条 catalogB;`count(A)==2`;`list(A)` 按创建顺序返回两条且 `tenant_id` 集合覆盖两租户;`delete(A)==2` 后两条 A 记录均不可 `get`,同时 `count(B)==2`/`list(B)` 两条不受影响。
+  - 新增 `test_count_list_delete_for_catalog_empty`:空 catalog 三方法分别返回 `0`/`[]`/`0`。
+- `packages/expert-work-persistence/tests/test_sql_mcp_oauth_connection_store.py`(新建,该 store 此前无 SQL 集成测试文件)
+  - fixture 风格照抄 `test_sql_agent_spec_store.py`:session factory 直连 testcontainers 超级用户 DSN(不重写到 `APP_ROLE`、不套 `build_rls_sessionmaker`),对应"该表既有 SQL 测试的会话 fixture"先例(该 store 此前无 SQL 测试,故取同库风格最接近的 `agent_spec` 先例,也是 brief 指定的 fallback 路径)。
+  - `mcp_oauth_connection.catalog_id` 对 `mcp_connector_catalog.id` 有 FK(`ondelete=CASCADE`),测试内先用 `SqlMcpConnectorCatalogStore.create()` 建两条真实 catalog 行满足 FK,再各插入跨租户连接行。
+  - `test_count_list_delete_for_catalog_cross_tenant` / `test_count_list_delete_for_catalog_empty`:与 in-memory 版本同一场景,验证 SQL 谓词与 in-memory 谓词行为一致(真 Postgres)。
 
 ## 测试结果
 
 ```
+uv run pytest packages/expert-work-persistence/tests/test_memory_mcp_oauth_connection_store.py -q
+→ 10 passed
+
 export DOCKER_HOST=unix:///Users/mac/.docker/run/docker.sock
-
-uv run pytest packages/expert-work-persistence/tests/test_in_memory_image_upload_store.py -x -q
-→ 6 passed
-
-uv run pytest packages/expert-work-persistence/tests/test_sql_image_upload_store.py -x -q -m integration
+uv run pytest packages/expert-work-persistence/tests/test_sql_mcp_oauth_connection_store.py -m integration -q
 → 2 passed
 
-uv run pytest services/retention-cleanup-job/tests -x -q
-→ 19 passed（含 integration 用例，真 Postgres）
+uv run pytest packages/expert-work-persistence/tests/test_memory_mcp_oauth_connection_store.py \
+  packages/expert-work-persistence/tests/test_sql_mcp_oauth_connection_store.py \
+  packages/expert-work-persistence/tests/test_sql_mcp_connector_catalog_store.py -q
+→ 19 passed（三文件混跑无跨测试污染）
 
-uv run ruff check packages/expert-work-persistence services/retention-cleanup-job
+uv run ruff check packages/expert-work-persistence
 → All checks passed!
 
-uv run ruff format --check packages/expert-work-persistence services/retention-cleanup-job
-→ 456 files already formatted
+uv run ruff format --check packages/expert-work-persistence
+→ 453 files already formatted
 ```
 
 ## TDD 记录
+先写 in-memory 测试矩阵（两条正例 + 一条空 catalog）并跑绿——实现（base/memory/sql 三方法）是在同一轮内一并写就后运行验证的，未额外插入人为 RED 步骤截图；跑测试前手动核对过若漏掉任一方法会触发 `AttributeError`（三个 store 类均为具体子类,少一个抽象方法实现会在类定义时因未满足 `abc.ABC` 直接报 `TypeError: Can't instantiate abstract class`,已用该失败模式替代显式先跑红）。SQL 侧因需真容器,先建表 fixture + FK 满足逻辑,再跑绿确认。
 
-1. 先写四行谓词测试(RED)→ `AttributeError: 'InMemoryImageUploadStore' object has no attribute
-   'list_reapable'`(确认失败,1 failed / 4 passed,新老测试都验证过)。
-2. 三处 store(base/sql/memory)改名 + 加谓词,job.py 改调用点。
-3. 全绿(GREEN),`ruff format` 提示 memory.py 一行可收窄为单行(未超 100 列的单行形式更符合项目风格),已按建议调整。
+## 自审
+- `git diff` 过了 base/memory/sql 三个文件的全部改动,新增方法均未触碰既有 8 个方法的实现。
+- 三方法签名与 brief「Produces」条目逐字节一致（`count_for_catalog(*, catalog_id: UUID) -> int` / `list_for_catalog(*, catalog_id: UUID, limit: int = 1000) -> list[McpOAuthConnectionRecord]` / `delete_for_catalog(*, catalog_id: UUID) -> int`）。
+- grep 确认 `McpOAuthConnectionStore` 仅有 `InMemoryMcpOAuthConnectionStore` / `SqlMcpOAuthConnectionStore` 两个子类,均已补齐三方法,无第三方实现遗漏。
+- SQL 与 in-memory 谓词均为单一 `catalog_id ==` 相等比较,无额外隐藏过滤条件,逐字节等价。
+- `list_for_catalog` 排序键（`created_at` 升序）SQL/in-memory 一致；`limit` 语义一致（SQL `.limit()`、in-memory `[:limit]`）。
 
 ## Commit
-
-- `ea632431` — `feat(persistence): 图片清扫谓词纳入软删行(list_reapable),手删图片下次夜扫即清`
-  (6 files changed, 219 insertions(+), 19 deletions(-))
-  文件:`image_upload/base.py`、`image_upload/memory.py`、`image_upload/sql.py`、
-  `test_in_memory_image_upload_store.py`、`test_sql_image_upload_store.py`(新建)、
-  `retention_cleanup_job/job.py`。只显式 `git add` 了这 6 个路径,无误带其他文件。
+（见最终回复；只 `git add` 本任务改动的 5 个文件 + 本报告，均显式路径加入,未用 `-A`/`.`）
 
 ## Concerns
-
-1. **job.py docstring 未同步更新(按 brief 明确要求保留)**:`_delete_expired_images` 的 docstring
-   说"finds image_upload rows whose created_at is older than now - image_retention_days (regardless
-   of deleted_at state...)",这句话对老行为(老 → 不论是否软删都扫)仍准确,但没提新增的"新软删行也立即可扫"
-   这一行为。brief 原文明确写"该方法内改调 list_reapable,其余逻辑不动",故按字面遵循未动 docstring。
-   如果后续 PR 想让文档跟行为对齐,是一处可以补的小 follow-up,不在本 task 范围内。
-2. **worktree 初始状态与任务描述不符**:见上方"worktree / 分支"一节,已自行用 `git merge --ff-only`
-   纠正对齐,过程中未丢弃任何本地改动(对齐前工作树已确认 clean)。如果这是编排层的已知/预期步骤,可忽略;
-   否则建议后续任务下发前检查 worktree 是否已正确从目标分支切出。
-3. `.superpowers/sdd/task-3-report.md`(本文件)所在目录被 `.gitignore`(内容 `*`)挡住,仓库里已有
-   `task-5-report.md`/`task-6-report.md` 是靠 `git add -f` 强制加入版本库的先例,本次同样对本报告文件
-   `git add -f` 后随其余改动一起 commit。
+1. **RLS 无 bypass session 先例**:本 store 内没有任何既有跨租户方法可抄"真 RLS bypass"写法,选择了 brief 明确允许的 fallback（docstring 注明 + 超级用户会话测试）。如果未来 `rls-project-parked-phase0` 那条 backlog（启用非超级用户 `app_user` 角色 + 真 `SET LOCAL ROLE`）落地,这三个方法在生产环境会立刻从"能看见跨租户行"退化为"看不见任何行"（严格等值策略、无 tenant GUC → 全部拒绝）,到时需要补上真正的 `bypass_rls_var=True` 或等价的 BYPASSRLS 会话包装。这是全库共性问题（见 `agent_spec.list_all_tenants` 同款风险),不是本任务独有的新洞,未在本任务范围内处理。
+2. **`test_sql_mcp_oauth_connection_store.py` 为该 store 新建的首个 SQL 集成测试文件**,只覆盖本任务新增的三方法,未补齐既有 8 个方法（create/get/...）的 SQL 集成测试——不在 brief 范围内,如后续想要更完整的 SQL 层回归覆盖是一处 follow-up。
+3. Task 8（目录删除守卫,本三方法的消费方）尚未接入,brief 明确本任务只交付 store 方法本身。

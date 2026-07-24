@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -206,6 +206,43 @@ class SqlMcpOAuthConnectionStore(McpOAuthConnectionStore):
         stmt = sa_delete(McpOAuthConnectionRow).where(
             McpOAuthConnectionRow.tenant_id == tenant_id,
             McpOAuthConnectionRow.user_id == user_id,
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def count_for_catalog(self, *, catalog_id: UUID) -> int:
+        # Platform-scope, cross-tenant by design — no tenant_id predicate.
+        # No bypass-RLS session precedent on this store; the caller must run
+        # on a platform-scope session (superuser/BYPASSRLS) or RLS filters
+        # every row out. See base.py docstring.
+        stmt = (
+            select(func.count())
+            .select_from(McpOAuthConnectionRow)
+            .where(McpOAuthConnectionRow.catalog_id == catalog_id)
+        )
+        async with self._sf() as session:
+            return int((await session.execute(stmt)).scalar_one())
+
+    async def list_for_catalog(
+        self, *, catalog_id: UUID, limit: int = 1000
+    ) -> list[McpOAuthConnectionRecord]:
+        # Platform-scope, cross-tenant by design — see count_for_catalog.
+        stmt = (
+            select(McpOAuthConnectionRow)
+            .where(McpOAuthConnectionRow.catalog_id == catalog_id)
+            .order_by(McpOAuthConnectionRow.created_at)
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_record(r) for r in rows]
+
+    async def delete_for_catalog(self, *, catalog_id: UUID) -> int:
+        # Platform-scope, cross-tenant by design — see count_for_catalog.
+        stmt = sa_delete(McpOAuthConnectionRow).where(
+            McpOAuthConnectionRow.catalog_id == catalog_id
         )
         async with self._sf() as session:
             result = await session.execute(stmt)
