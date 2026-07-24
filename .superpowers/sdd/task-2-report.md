@@ -1,105 +1,89 @@
-# Task 2 报告 — FeedbackStore.delete_for_threads
+# Task 2 报告(PR2)—— SecretStore.delete 原语
 
 ## 状态
 DONE
 
+## worktree / 分支
+- worktree 路径:`/Users/mac/src/github/jone_qian/expert-work/.claude/worktrees/agent-aa023008118d65b2e`
+- 分支:`worktree-agent-aa023008118d65b2e`
+- 起手 `git merge --ff-only fix-deletion-hygiene-pr2`(621c53f9 → bef52752,快进,仅带入两份 PR2 计划/设计文档,无冲突)。
+
+注:本文件路径此前已被 git 跟踪(PR1 #1048 把它随「删除接口卫生 PR1」一起提交进了历史,内容是 PR1 Task 2——`FeedbackStore.delete_for_threads`——的报告,与本 PR2 Task 2 无关)。本次按 brief 指示整篇覆盖为 PR2 Task 2 的报告。
+
 ## 改动文件
-- `packages/expert-work-persistence/src/expert_work/persistence/feedback_store.py`
-  - `sqlalchemy` import 加 `delete`。
-  - 抽象类 `FeedbackStore` 新增 `delete_for_threads(*, tenant_id: UUID, thread_ids: Sequence[UUID]) -> int` 抽象方法(docstring 说明 Task 8 purge_user 消费 + 空列表短路语义)。
-  - `InMemoryFeedbackStore.delete_for_threads`:`wanted = set(thread_ids)`,过滤保留 `not (r.tenant_id == tenant_id and r.thread_id in wanted)`,用 before/after 行数差返回删除计数;空列表提前返回 0。
-  - `DbFeedbackStore.delete_for_threads`:与 brief 给定实现逐字节一致 —— 500 一片分批 `DELETE ... WHERE tenant_id == :t AND thread_id IN (:chunk)`,累加各批 `result.rowcount`,末尾统一 `commit()`;空列表提前返回 0。
+- `packages/expert-work-runtime/src/expert_work/runtime/secret_store/base.py`
+  - `SecretStore` Protocol(`@runtime_checkable`)新增 `async def delete(self, name: str) -> None`,plain `async def` + docstring-only body,照抄该 Protocol 现有 `get`/`put`/`list_versions` 的写法(历史坑:Protocol 里 async 方法不能写 `...`/`raise NotImplementedError`,只能 docstring-only)。docstring:"Idempotent — deleting an absent name does NOT raise."
+- `packages/expert-work-runtime/src/expert_work/runtime/secret_store/local_dev.py`
+  - `LocalDevSecretStore.delete`:`self.secrets.pop(name, None)`(该类真实属性名为 `secrets`,非 brief 占位的假设名,已核实)。
+- `packages/expert-work-runtime/src/expert_work/runtime/secret_store/aliyun_kms.py`
+  - `KmsBackend` Protocol(非 `@runtime_checkable`,普通 `Protocol`)新增 `async def delete_secret(self, name: str) -> None`,同一 docstring-only 写法,docstring 同样注明幂等契约。
+  - `AliyunKmsSecretStore.delete`:透传 `await self._backend.delete_secret(name)`,随后按 `put` 的既有失效写法剔除该 name 的全部缓存版本:`self._cache = {k: v for k, v in self._cache.items() if k[0] != name}`(缓存键是 `(name, version)` 元组,与 `put` 逐字节对齐)。
 
-- `packages/expert-work-persistence/tests/test_feedback_store_delete.py`(新建,`ls tests | grep -i feedback` 未命中既有 store 级测试文件,按 brief 指定文件名新建):
-  - 共享 `_seed()` 助手:插 t1/threadA×2、t1/threadB×1、t2/threadA×1(异租户同 thread_id)。
-  - InMemory 两个用例:`delete_for_threads(tenant_id=t1, thread_ids=[threadA])` 返回 2 + threadB(t1)与 threadA(t2 行)均仍可 `list_for_thread` 查到;空列表返回 0。
-  - Db(Postgres testcontainers)侧同一场景两个用例,`sql_store` fixture 照搬 `test_sql_memory_store.py` 的容器 fixture 风格(`postgres_container` 会话级 fixture + alembic upgrade head + `create_async_engine_from_config`/`create_async_session_factory`,非 RLS-role 版本 —— 因为 `delete_for_threads` 的租户隔离由显式 `WHERE tenant_id ==` 断言,不依赖 RLS 策略,故不需要 `test_rls_integration.py` 那套非超级用户角色配置的重基建)。
+## 测试改动
+- `packages/expert-work-runtime/tests/test_secret_store.py`
+  - `test_delete_then_get_raises_secret_not_found`:put→delete→get 抛 `SecretNotFoundError`。
+  - `test_delete_missing_name_does_not_raise`:对空 store 删不存在的 name,不抛。
+- `packages/expert-work-runtime/tests/test_aliyun_kms_secret_store.py`
+  - `FakeKmsBackend` 新增 `delete_calls: list[str]` 记录 + `delete_secret` 方法(pop 掉 fake 内部 dict,便于后续 `fetch_secret` 反映"已删")。
+  - `test_delete_delegates_to_backend`:`store.delete("k")` → `backend.delete_calls == ["k"]`。
+  - `test_delete_invalidates_cached_value`:先 `get` 灌缓存 → `delete` → 重新 `seed` 同名 → 再 `get`,断言 `fetch_calls == 2`(即缓存确实被清,未走命中路径直接透传旧值)。
+  - `test_delete_missing_secret_does_not_raise`:对空 backend 删不存在的 name,不抛(幂等)。
 
-## 偏离及理由
-1. **除 brief Step1 描述的 InMemory 场景外,额外加了 Postgres 集成测试(2 个用例)**,覆盖同一场景跑在真实 `DbFeedbackStore` 上。理由:brief 给出的 Db 实现含分批 `DELETE...IN` + `rowcount` 累加逻辑,是本任务的新增复杂度来源,InMemory 测试完全测不到(SQLAlchemy `rowcount`/异步引擎实际行为需要真容器验证);且同一 PR1 的 Task 1(`MemoryStore.hard_delete_expired`)已在姊妹文件里同时加了 in-memory + `test_sql_memory_store.py` 两侧测试,视为本轮"硬删类方法双测"的既定先例。未新造容器基建,复用根 `conftest.py` 的 `postgres_container` 会话级 fixture,写法照抄 `test_sql_memory_store.py`。
-2. **发现但未使用 `test_rls_integration.py` 里既有的 `feedback_rls_store` fixture**(它已经在跑 `DbFeedbackStore`,但走的是非超级用户 RLS 角色 + 全套 APP_ROLE 授权配置)。未复用理由:`delete_for_threads` 的隔离靠显式 SQL `WHERE tenant_id ==`,与 RLS 策略无关,不需要那套更重的角色基建;用 `test_sql_memory_store.py` 的轻量容器风格(超级用户连接,RLS 天然旁路但查询本身已过滤)已足够验证该方法的真实行为,且更贴合 brief「不新造基建、照 test_sql_* 系列文件的容器 fixture 风格写」的指示。
-
-## 测试证据
+## 全仓 grep —— 其他 SecretStore 实现/桩类核查
 ```
-$ uv run pytest packages/expert-work-persistence/tests/test_feedback_store_delete.py -k in_memory -q
-..                                                                       [100%]
-2 passed, 2 deselected in 0.47s
-
-$ export DOCKER_HOST=unix:///Users/mac/.docker/run/docker.sock
-$ uv run pytest packages/expert-work-persistence/tests/test_feedback_store_delete.py -q
-....                                                                     [100%]
-4 passed, 2 warnings in 9.89s   # (第二次热跑 3.10s,warning 为 alembic path_separator 弃用提示,与本改动无关)
-
-$ uv run ruff check packages/expert-work-persistence
-All checks passed!            # 首轮曾报 2 处 RUF002(docstring `×` 歧义符),已改成 ASCII `x` 后清零
-
-$ uv run ruff format --check packages/expert-work-persistence
-449 files already formatted
-
-$ uv run mypy packages/expert-work-persistence/src/expert_work/persistence/feedback_store.py
-Success: no issues found in 1 source file
-
-$ uv run pytest packages/expert-work-persistence/tests -k feedback -m "not integration" -q
-2 passed, 865 deselected in 2.18s
+grep -rn "class.*SecretStore\|SecretStore)" --include="*.py" packages services | grep -v test_secret
+grep -rln "SecretStore" --include="*.py" packages services
 ```
+命中且需要评估的实现/桩类:
+1. `services/control-plane/src/control_plane/encrypted_secret_store.py::SqlEncryptedSecretStore` —— 生产级 Postgres 加密后端,当前只有 get/put/list_versions,未补 `delete`。
+2. `packages/expert-work-common/src/expert_work/testing/__init__.py::InMemorySecretStore` —— 测试桩,当前只有 get/put(连既有的 `list_versions` 都还没补,是先于本任务已存在的缺口)。
+3. `services/credential-proxy/tests/test_credential_proxy_unit.py::FakeSecretStore`、`services/control-plane/tests/test_webhook_delivery_worker.py::_FakeSecretStore`、`services/control-plane/tests/test_dynamic_resolver.py::_SecretStore`、`services/control-plane/tests/test_resolving_callers.py::_CapturingSecretStore` —— 均为 services 测试文件里的局部桩类,`_CapturingSecretStore` 用处已带 `# type: ignore[arg-type]`。
 
-TDD 红→绿:实现前跑同一测试文件,`test_in_memory_delete_for_threads_scopes_by_tenant_and_thread` 以
-`AttributeError: 'InMemoryFeedbackStore' object has no attribute 'delete_for_threads'` 失败,确认真红后再实现。
+**判断:均未改动。** 理由:
+- brief 的验收命令是 `uv run mypy packages`(仅 packages),CI 实际 typecheck job 的范围是 `packages services/audit-backup-worker/src services/billing-rollup-job/src services/event-log-archive-job/src services/orchestrator/src services/retention-cleanup-job/src`(见 `.github/workflows/ci.yml:75`)——两个范围都**不含** `services/control-plane` 与 `services/credential-proxy`,这与既有记忆「CI mypy 不含 control-plane」吻合。
+- 已用两条命令逐一验证:`uv run mypy packages` 与完整 CI 范围命令均 `Success: no issues found`,加 `delete`/`delete_secret` 没有让任何桩类在当前受检范围内报错。
+- `InMemorySecretStore` 本身早已不满足 Protocol(缺 `list_versions`),是本任务改动之前就存在、且不在 packages 内被以 `SecretStore` 类型标注消费的既有缺口,不属于本任务改动范围(surgical:只补因我这次改动而新破的桩,不顺手修不相关的存量缺口)。
+- `SqlEncryptedSecretStore` 是 T6/T7/T8(密文清理接线)未来大概率要接的真实生产后端,但补 `delete` 涉及新 DELETE/软删语义设计(该表有 `is_current`/多版本行),超出本 Task 2(仅原语定义+两个测试后端)的声明范围,留给后续接线任务判断是硬删全部版本行还是别的策略。
 
-## 自审
-- `git diff` 过了 `feedback_store.py` 全部改动,三处新增方法均未触碰既有方法/其余代码。
-- 抽象方法签名 `async def delete_for_threads(self, *, tenant_id: UUID, thread_ids: Sequence[UUID]) -> int` 与 brief「Produces」条目逐字节一致。
-- Db 实现与 brief 给定代码块逐字节一致(500 分片、`getattr(result, "rowcount", 0) or 0`、统一 commit)。
-- grep 确认 `FeedbackStore` 仅有 `InMemoryFeedbackStore`/`DbFeedbackStore` 两个子类,无第三方实现遗漏新抽象方法。
-- 空列表路径两侧实现均提前 `return 0`,不进入插叙/DELETE 语句。
-
-## Concerns
-无阻塞性遗留问题。Task 8(purge_user 消费方)尚未接入本方法,属于后续任务范围,brief 已明确本任务只交付 store 方法本身。
-
----
-
-## 追加 — T2 review 两处发现修复(2026-07-24)
-
-### 状态
-DONE
-
-### 背景
-T2 review 指出上面「偏离及理由 §2」的判断站不住:`sql_store` fixture 走的是 testcontainers 超级用户连接,`feedback` 表的 FORCE RLS 被超级用户身份无条件绕过——而 `DbFeedbackStore` 类文档明确要求生产路径必须是 RLS-wrapped sessionmaker。既有测试锁的只是分片 `DELETE...IN` + `rowcount` 累加逻辑,从未验证过"RLS GUC 与显式 `tenant_id` 参数一致"这条生产契约,是真实覆盖缺口,不是可以照抄 `test_sql_memory_store.py` 轻量风格带过的选择题。
-
-### 改动
-1. **`packages/expert-work-persistence/tests/test_feedback_store_delete.py`**(新增,不改动既有测试/fixture):
-   - import 新增 `urllib.parse.{urlparse,urlunparse}`、`sqlalchemy.{create_engine,text}`、`expert_work.persistence.rls.{build_rls_sessionmaker,current_tenant_id_var}`。
-   - 新增 `APP_ROLE`/`APP_PASSWORD` 模块常量(取名 `expert_work_app_feedback_delete`,与 `test_rls_integration.py`/`test_billing_ledger_rls_integration.py` 等共享同一 session-scoped `postgres_container` 的其余 RLS 集成测试文件区分角色名,避免授权冲突)。
-   - 新增 `_rewrite_credentials` / `_provision_app_role` 两个 helper——原样照抄 `test_rls_integration.py:74-118` 的非超级用户角色配置模式(该仓库对每个 RLS 集成测试文件都是各自复制这套 helper,非集中在 conftest,`test_billing_ledger_rls_integration.py` 同款先例)。
-   - 新增 `feedback_rls_store` fixture:`alembic upgrade head` → `_provision_app_role` → 用 `APP_ROLE` 重写 DSN 建 engine → `build_rls_sessionmaker(create_async_session_factory(engine))` 包装 sessionmaker → `yield DbFeedbackStore(session_factory), engine`。对齐 brief 指定的 `test_rls_integration.py:249-260` 版本。
-   - 新增 autouse fixture `reset_rls_context`:每测试前后重置 `current_tenant_id_var`,避免跨测试 GUC 泄漏。
-   - 新增集成测试 `test_sql_delete_for_threads_rls_scoped_to_session_guc`:tenant A/B 各自在自己的 RLS 作用域下插入一条共享 `thread_id` 的 feedback 行;GUC 固定在 tenant A 后,①`delete_for_threads(tenant_id=tenant_a, ...)` 删掉 A 自己那行(`deleted_own == 1`);②同一会话不切 GUC,改传 `tenant_id=tenant_b` 再删——RLS 在显式 `WHERE` 生效前就已把可见/可删行集裁剪到 GUC=A,所以匹配 0 行(`deleted_other == 0`);③切 GUC 到 B 读回,证明 B 的行是真的还在(不是仅仅从 A 的视角不可见)。既有超级用户 `sql_store`/`test_sql_delete_for_threads_scopes_by_tenant_and_thread` 两个用例原样保留——锁的是分片/rowcount 逻辑,brief 明确不删。
-
-2. **`packages/expert-work-persistence/src/expert_work/persistence/feedback_store.py`**:
-   - `FeedbackStore.delete_for_threads` 抽象方法 docstring 追加一段,照 `mark_processed`("A *write* — must run under the row's own tenant RLS scope...")同款写法,补上 RLS 范围契约:方法期望在 tenant-scoped RLS session 内调用,`tenant_id` 参数须与会话 GUC 一致,不一致时删 0 行而非误删他租户数据。
-
-### 自审(变异验证,非只跑绿)
-用 scratchpad 里的副本临时把 `feedback_rls_store` fixture 的 `build_rls_sessionmaker(create_async_session_factory(engine))` 换回裸 `create_async_session_factory(engine)`(即退回无 RLS 包装的 sessionmaker,模拟"测试其实没走 RLS"这一被指出的缺口),单独跑新测试:
+## 测试结果
 ```
-$ uv run pytest packages/expert-work-persistence/tests/test_feedback_store_delete.py -q -k rls_scoped
-FAILED ...test_sql_delete_for_threads_rls_scoped_to_session_guc
-1 failed, 4 deselected
-```
-`deleted_other` 变成 1(B 的行被跨租户删掉)——证明新测试确实在断言 RLS 生效,不是摆设。改回真实文件后 5/5 全绿(见下方证据),确认改动未残留。
+$ uv run pytest packages/expert-work-runtime/tests/test_secret_store.py packages/expert-work-runtime/tests/test_aliyun_kms_secret_store.py -q
+........................................                                 [100%]
+40 passed in 0.37s
 
-### 测试证据(改动后,真实文件)
-```
-$ export DOCKER_HOST=unix:///Users/mac/.docker/run/docker.sock
-$ uv run pytest packages/expert-work-persistence/tests/test_feedback_store_delete.py -q
-.....                                                                    [100%]
-5 passed, 3 warnings in 3.30s   # warning 为既有 alembic path_separator 弃用提示,与本改动无关
+$ uv run pytest packages/expert-work-runtime -q
+427 passed, 40 errors in 41.07s
+# 40 errors 全部来自 test_sql_run_store.py(testcontainers 需要 DOCKER_HOST,本地未设置,
+# 与本改动无关的既有环境缺口 —— 见记忆 local-docker-testcontainers)
 
-$ uv run ruff check packages/expert-work-persistence
+$ uv run ruff check packages/expert-work-runtime
 All checks passed!
 
-$ uv run ruff format --check packages/expert-work-persistence
-452 files already formatted   # 首轮曾报新测试文件需要 reformat(行宽换行),`ruff format` 后清零
+$ uv run ruff format --check packages/expert-work-runtime
+99 files already formatted
+
+$ uv run mypy packages
+Success: no issues found in 669 source files
+
+$ uv run mypy packages services/audit-backup-worker/src services/billing-rollup-job/src services/event-log-archive-job/src services/orchestrator/src services/retention-cleanup-job/src
+Success: no issues found in 772 source files
 ```
 
-### Concerns
-无阻塞性遗留问题。既有超级用户测试与新 RLS-scoped 测试并存,分别锁定"分片/rowcount 机制"与"RLS GUC×显式参数一致性契约"两条不重叠的回归线。
+## TDD 记录
+1. 先加 5 个新测试(LocalDev 2 个 + AliyunKms 3 个,含 `FakeKmsBackend.delete_secret`),跑红:
+   `AttributeError: 'LocalDevSecretStore' object has no attribute 'delete'` /
+   `AttributeError: 'AliyunKmsSecretStore' object has no attribute 'delete'`(5 failed, 35 passed)。
+2. 实现 base.py / local_dev.py / aliyun_kms.py 三处改动。
+3. 全绿(40 passed)。
+
+## 自审
+- `base.py` 新增的 `delete` 与 `KmsBackend.delete_secret` 均为 plain `async def` + docstring-only body,与该 Protocol 内其余方法写法逐字节一致(未误写 `...` 或 `raise NotImplementedError`)。
+- `LocalDevSecretStore.delete` 用 `.pop(name, None)`,天然幂等,不查存在性、不抛。
+- `AliyunKmsSecretStore.delete` 的缓存失效表达式与 `put` 里的失效表达式逐字节相同(`{k: v for k, v in self._cache.items() if k[0] != name}`),避免两处语义漂移(对齐记忆里「同一语义分散多处实现加约束要全处一起加」的教训——这里是新增而非改约束,但特意保持了与 `put` 的镜像写法,便于未来两处一起改)。
+- 未改动 `packages/expert-work-common/src/expert_work/testing/__init__.py`、`services/**`、`factory.py`、`refs.py`、`__init__.py`(导出列表不变,`delete` 通过 `SecretStore`/`KmsBackend` 类型本身可见,无需新增导出符号)。
+- `git diff --stat` 仅 5 个文件改动,与 brief 声明的改动范围(3 源文件 + 2 测试文件)完全一致,无越界改动。
+
+## Concerns
+1. `SqlEncryptedSecretStore`(control-plane 生产加密后端)仍缺 `delete` —— 大概率是 T6/T7/T8 接线时的下一个阻塞点,但其 `delete` 语义(硬删全部版本行 vs 仅标记当前行失效)未在本 brief 定义,留给消费方任务决策,不在本任务擅自实现。
+2. `InMemorySecretStore`(`expert_work.testing`)存量即缺 `list_versions`,现在也缺 `delete` —— 与本任务无因果关系(改动前就已不满足 Protocol),按 surgical 原则未顺手补,但如果后续任务要用它整测 T6/T7/T8 的 delete 路径,需要先补全。
+3. `uv run pytest packages/expert-work-runtime -q` 全量跑有 40 个 testcontainers 相关 error(缺 `DOCKER_HOST`),与本次改动无关,未尝试修复环境(不在任务范围)。

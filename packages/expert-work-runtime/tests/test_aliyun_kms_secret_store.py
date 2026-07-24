@@ -38,6 +38,7 @@ class FakeKmsBackend:
         self.secrets: dict[str, FetchedSecret] = {}
         self.fetch_calls = 0
         self.put_calls: list[tuple[str, str]] = []
+        self.delete_calls: list[str] = []
 
     def seed(
         self,
@@ -60,6 +61,10 @@ class FakeKmsBackend:
 
     async def put_secret(self, name: str, value: str) -> None:
         self.put_calls.append((name, value))
+
+    async def delete_secret(self, name: str) -> None:
+        self.delete_calls.append(name)
+        self.secrets.pop(name, None)
 
     async def list_versions(self, name: str) -> list[str]:
         if name not in self.secrets:
@@ -182,6 +187,36 @@ async def test_put_invalidates_cached_value() -> None:
     await store.put("k", "rotated")
     await store.get("k")  # cache dropped → re-fetch
     assert backend.fetch_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_delegates_to_backend() -> None:
+    backend = FakeKmsBackend()
+    backend.seed("k", "v")
+    store = AliyunKmsSecretStore(backend)
+
+    await store.delete("k")
+    assert backend.delete_calls == ["k"]
+
+
+@pytest.mark.asyncio
+async def test_delete_invalidates_cached_value() -> None:
+    backend = FakeKmsBackend()
+    backend.seed("k", "v")
+    store = AliyunKmsSecretStore(backend, clock=FakeClock())
+
+    await store.get("k")  # caches
+    await store.delete("k")
+    backend.seed("k", "v2")  # re-seed so the post-delete re-fetch has something
+    await store.get("k")  # cache dropped → re-fetch
+    assert backend.fetch_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_secret_does_not_raise() -> None:
+    """Idempotent — deleting an absent name is a no-op, not an error."""
+    store = AliyunKmsSecretStore(FakeKmsBackend())
+    await store.delete("nope")
 
 
 @pytest.mark.asyncio

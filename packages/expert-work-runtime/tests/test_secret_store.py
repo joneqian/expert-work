@@ -111,6 +111,21 @@ async def test_get_explicit_dev_version_ok_other_version_raises() -> None:
         await store.get("k", version="v99")
 
 
+@pytest.mark.asyncio
+async def test_delete_then_get_raises_secret_not_found() -> None:
+    store = LocalDevSecretStore.from_mapping({"k": "v"})
+    await store.delete("k")
+    with pytest.raises(SecretNotFoundError):
+        await store.get("k")
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_name_does_not_raise() -> None:
+    """Idempotent — deleting an absent name is a no-op, not an error."""
+    store = LocalDevSecretStore()
+    await store.delete("nope")
+
+
 # ---------------------------------------------------------------------------
 # LocalDevSecretStore.from_env_file
 # ---------------------------------------------------------------------------
