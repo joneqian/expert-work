@@ -449,3 +449,21 @@ class SqlRoleBindingStore(RoleBindingStore):
             await session.commit()
         rowcount = getattr(result, "rowcount", 0) or 0
         return int(rowcount) > 0
+
+    async def delete_for_subject(
+        self,
+        *,
+        subject_type: str,
+        subject_id: UUID,
+        tenant_id: UUID,
+    ) -> int:
+        stmt = delete(RoleBindingRow).where(
+            RoleBindingRow.subject_type == subject_type,
+            RoleBindingRow.subject_id == subject_id,
+            RoleBindingRow.tenant_id == tenant_id,
+            RoleBindingRow.platform_scope.is_(False),
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)

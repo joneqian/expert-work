@@ -393,3 +393,23 @@ class InMemoryRoleBindingStore(RoleBindingStore):
                     return False
             del self._rows[role_binding_id]
             return True
+
+    async def delete_for_subject(
+        self,
+        *,
+        subject_type: str,
+        subject_id: UUID,
+        tenant_id: UUID,
+    ) -> int:
+        async with self._lock:
+            to_delete = [
+                row.id
+                for row in self._rows.values()
+                if row.subject_type == subject_type
+                and row.subject_id == subject_id
+                and row.tenant_id == tenant_id
+                and not row.platform_scope
+            ]
+            for row_id in to_delete:
+                del self._rows[row_id]
+            return len(to_delete)

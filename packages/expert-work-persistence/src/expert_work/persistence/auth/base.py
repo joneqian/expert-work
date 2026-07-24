@@ -310,3 +310,18 @@ class RoleBindingStore(abc.ABC):
 
         Returns ``False`` if no row matched (wrong id, wrong scope, etc.).
         """
+
+    @abc.abstractmethod
+    async def delete_for_subject(
+        self,
+        *,
+        subject_type: str,
+        subject_id: UUID,
+        tenant_id: UUID,
+    ) -> int:
+        """Delete every non-platform-scope binding for a subject in a tenant.
+
+        ``platform_scope`` rows are never touched — platform-level grants do
+        not belong to a tenant member's lifecycle. Returns the number of rows
+        removed; idempotent (calling again after a full delete returns 0).
+        """

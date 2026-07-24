@@ -375,6 +375,59 @@ async def test_inmem_delete_wrong_scope_returns_false() -> None:
 
 
 @pytest.mark.asyncio
+async def test_inmem_delete_for_subject() -> None:
+    """delete_for_subject wipes all non-platform-scope bindings for a subject
+    within one tenant, leaves other-tenant + platform-scope rows untouched,
+    and is idempotent (second call returns 0)."""
+    store = InMemoryRoleBindingStore()
+    subject = uuid4()
+    tenant = uuid4()
+    other_tenant = uuid4()
+    await store.create(
+        subject_type="user",
+        subject_id=subject,
+        tenant_id=tenant,
+        role=Role.ADMIN,
+        granted_by="root",
+    )
+    await store.create(
+        subject_type="user",
+        subject_id=subject,
+        tenant_id=tenant,
+        role=Role.OPERATOR,
+        granted_by="root",
+    )
+    other_tenant_binding = await store.create(
+        subject_type="user",
+        subject_id=subject,
+        tenant_id=other_tenant,
+        role=Role.VIEWER,
+        granted_by="root",
+    )
+    platform_binding = await store.create(
+        subject_type="user",
+        subject_id=subject,
+        tenant_id=None,
+        role=Role.SYSTEM_ADMIN,
+        platform_scope=True,
+        granted_by="root",
+    )
+
+    removed = await store.delete_for_subject(
+        subject_type="user", subject_id=subject, tenant_id=tenant
+    )
+    assert removed == 2
+
+    remaining = await store.list_for_subject(subject_type="user", subject_id=subject)
+    assert {b.id for b in remaining} == {other_tenant_binding.id, platform_binding.id}
+
+    again = await store.delete_for_subject(
+        subject_type="user", subject_id=subject, tenant_id=tenant
+    )
+    assert again == 0
+
+
+@pytest.mark.asyncio
 async def test_inmem_list_for_subject_returns_all_scopes() -> None:
     """list_for_subject with tenant_id=None returns tenant + platform bindings together."""
     store = InMemoryRoleBindingStore()
