@@ -15,16 +15,26 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from control_plane.app import create_app
+from control_plane.audit import build_default_audit_logger
 from control_plane.auth import JWTVerifier
 from control_plane.keycloak import FakeKeycloakAdminClient
 from control_plane.settings import Settings
 from expert_work.common.lifecycle import Lifecycle
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
 from tests.auth_fixtures import make_test_jwt
 
 
 @pytest.fixture
+def audit_store() -> InMemoryAuditLogStore:
+    return InMemoryAuditLogStore()
+
+
+@pytest.fixture
 async def admin_app(
-    settings: Settings, lifecycle: Lifecycle, jwt_verifier: JWTVerifier
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+    audit_store: InMemoryAuditLogStore,
 ) -> AsyncIterator[tuple[AsyncClient, UUID, object, FakeKeycloakAdminClient]]:
     kc = FakeKeycloakAdminClient()
     app = create_app(
@@ -32,6 +42,7 @@ async def admin_app(
         lifecycle=lifecycle,
         jwt_verifier=jwt_verifier,
         keycloak_admin_client=kc,
+        audit_logger=build_default_audit_logger(audit_store),
     )
     tenant_id = uuid4()
     transport = ASGITransport(app=app)
@@ -154,6 +165,112 @@ async def test_revoke_missing_member_404(
     client, tenant_id, _app, _kc = admin_app
     resp = await client.delete(f"/v1/members/{uuid4()}", headers=_admin_headers(tenant_id))
     assert resp.status_code == 404
+
+
+# --- revoke/suspend role-binding cleanup (delete-hygiene PR2 T5) -------------
+
+
+@pytest.mark.asyncio
+async def test_revoke_invited_member_removes_role_binding(
+    admin_app: tuple[AsyncClient, UUID, object, FakeKeycloakAdminClient],
+    audit_store: InMemoryAuditLogStore,
+) -> None:
+    from expert_work.protocol import AuditAction, AuditQuery
+
+    client, tenant_id, app, _kc = admin_app
+    inv = await client.post(
+        "/v1/members/invite",
+        json={"invitations": [{"email": "a@co.com", "role": "viewer"}]},
+        headers=_admin_headers(tenant_id),
+    )
+    member_id = UUID(inv.json()["data"]["results"][0]["member_id"])
+    member = await app.state.tenant_member_repo.get(tenant_id=tenant_id, member_id=member_id)
+    assert member is not None and member.keycloak_user_id is not None
+    kc_user_id = UUID(member.keycloak_user_id)
+    bindings_before = await app.state.role_binding_repo.list_for_subject(  # type: ignore[attr-defined]
+        subject_type="user", subject_id=kc_user_id, tenant_id=tenant_id
+    )
+    assert len(bindings_before) == 1  # invite_member wrote the tenant-scope binding
+
+    resp = await client.delete(f"/v1/members/{member_id}", headers=_admin_headers(tenant_id))
+    assert resp.status_code == 204
+
+    bindings_after = await app.state.role_binding_repo.list_for_subject(  # type: ignore[attr-defined]
+        subject_type="user", subject_id=kc_user_id, tenant_id=tenant_id
+    )
+    assert bindings_after == []
+
+    page = await audit_store.query(AuditQuery(tenant_id=tenant_id))
+    revoke_rows = [r for r in page.entries if r.action is AuditAction.MEMBER_REVOKE]
+    assert len(revoke_rows) == 1
+    assert revoke_rows[0].details["role_bindings_removed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_suspend_active_member_removes_role_binding(
+    admin_app: tuple[AsyncClient, UUID, object, FakeKeycloakAdminClient],
+    audit_store: InMemoryAuditLogStore,
+) -> None:
+    from datetime import UTC, datetime
+
+    from expert_work.protocol import AuditAction, AuditQuery
+
+    client, tenant_id, app, _kc = admin_app
+    inv = await client.post(
+        "/v1/members/invite",
+        json={"invitations": [{"email": "a@co.com", "role": "viewer"}]},
+        headers=_admin_headers(tenant_id),
+    )
+    member_id = UUID(inv.json()["data"]["results"][0]["member_id"])
+    member = await app.state.tenant_member_repo.get(tenant_id=tenant_id, member_id=member_id)
+    assert member is not None and member.keycloak_user_id is not None
+    kc_user_id = UUID(member.keycloak_user_id)
+    moved = await app.state.tenant_member_repo.transition(
+        member_id=member_id, tenant_id=tenant_id, to="active", now=datetime.now(UTC)
+    )
+    assert moved
+
+    resp = await client.delete(f"/v1/members/{member_id}", headers=_admin_headers(tenant_id))
+    assert resp.status_code == 204
+    active_member = await app.state.tenant_member_repo.get(tenant_id=tenant_id, member_id=member_id)
+    assert active_member is not None and active_member.status == "suspended"
+
+    bindings_after = await app.state.role_binding_repo.list_for_subject(  # type: ignore[attr-defined]
+        subject_type="user", subject_id=kc_user_id, tenant_id=tenant_id
+    )
+    assert bindings_after == []
+
+    page = await audit_store.query(AuditQuery(tenant_id=tenant_id))
+    suspend_rows = [r for r in page.entries if r.action is AuditAction.MEMBER_SUSPEND]
+    assert len(suspend_rows) == 1
+    assert suspend_rows[0].details["role_bindings_removed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_revoke_member_without_keycloak_user_id_skips_cleanup(
+    admin_app: tuple[AsyncClient, UUID, object, FakeKeycloakAdminClient],
+    audit_store: InMemoryAuditLogStore,
+) -> None:
+    """A member that never got a Keycloak account has no binding to clean up."""
+    from expert_work.protocol import AuditAction, AuditQuery
+
+    client, tenant_id, app, _kc = admin_app
+    member = await app.state.tenant_member_repo.create(
+        tenant_id=tenant_id,
+        email="a@co.com",
+        role="viewer",
+        invited_by=str(uuid4()),
+        keycloak_user_id=None,
+    )
+    resp = await client.delete(f"/v1/members/{member.id}", headers=_admin_headers(tenant_id))
+    assert resp.status_code == 204
+    revoked = await app.state.tenant_member_repo.get(tenant_id=tenant_id, member_id=member.id)
+    assert revoked is not None and revoked.status == "revoked"
+
+    page = await audit_store.query(AuditQuery(tenant_id=tenant_id))
+    revoke_rows = [r for r in page.entries if r.action is AuditAction.MEMBER_REVOKE]
+    assert len(revoke_rows) == 1
+    assert revoke_rows[0].details["role_bindings_removed"] == 0
 
 
 @pytest.mark.asyncio
