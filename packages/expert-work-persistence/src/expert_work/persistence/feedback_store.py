@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from expert_work.persistence.models.feedback import FeedbackRow
@@ -93,6 +93,16 @@ class FeedbackStore(abc.ABC):
         processed row just overwrites the timestamp.
         """
 
+    @abc.abstractmethod
+    async def delete_for_threads(self, *, tenant_id: UUID, thread_ids: Sequence[UUID]) -> int:
+        """Hard-delete every feedback row for ``tenant_id`` on any of ``thread_ids``.
+
+        Deletion-hygiene purge (Task 8) — cascades feedback removal when
+        a user's threads are purged. Scoped by both tenant and thread id
+        so another tenant's row sharing the same thread id is untouched.
+        An empty ``thread_ids`` deletes nothing and returns ``0``.
+        """
+
 
 class InMemoryFeedbackStore(FeedbackStore):
     """In-memory :class:`FeedbackStore` — dev / unit tests."""
@@ -124,6 +134,16 @@ class InMemoryFeedbackStore(FeedbackStore):
                 self._rows[i] = replace(r, processed_at=processed_at)
                 return True
         return False
+
+    async def delete_for_threads(self, *, tenant_id: UUID, thread_ids: Sequence[UUID]) -> int:
+        if not thread_ids:
+            return 0
+        wanted = set(thread_ids)
+        before = len(self._rows)
+        self._rows = [
+            r for r in self._rows if not (r.tenant_id == tenant_id and r.thread_id in wanted)
+        ]
+        return before - len(self._rows)
 
 
 class DbFeedbackStore(FeedbackStore):
@@ -204,6 +224,23 @@ class DbFeedbackStore(FeedbackStore):
             updated = (await session.execute(stmt)).scalars().all()
             await session.commit()
         return bool(updated)
+
+    async def delete_for_threads(self, *, tenant_id: UUID, thread_ids: Sequence[UUID]) -> int:
+        if not thread_ids:
+            return 0
+        ids = list(thread_ids)
+        total = 0
+        async with self._sf() as session:
+            for i in range(0, len(ids), 500):
+                result = await session.execute(
+                    delete(FeedbackRow).where(
+                        FeedbackRow.tenant_id == tenant_id,
+                        FeedbackRow.thread_id.in_(ids[i : i + 500]),
+                    )
+                )
+                total += int(getattr(result, "rowcount", 0) or 0)
+            await session.commit()
+        return total
 
 
 def _row_to_record(row: FeedbackRow) -> FeedbackRecord:
