@@ -97,3 +97,14 @@ class InMemoryImageUploadStore(ImageUploadStore):
         for image_id in victims:
             del self._rows[image_id]
         return len(victims)
+
+    async def list_for_user(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int = 10000,
+    ) -> list[ImageUpload]:
+        rows = [r for r in self._rows.values() if r.tenant_id == tenant_id and r.user_id == user_id]
+        rows.sort(key=lambda r: r.created_at)
+        return rows[:limit]

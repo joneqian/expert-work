@@ -112,3 +112,20 @@ class ImageUploadStore(abc.ABC):
         touches another tenant's or user's rows; rows with a NULL ``user_id``
         are not this user's and are left untouched. The object-store bytes are
         reaped separately by the retention sweep (orphaned key < stuck row)."""
+
+    @abc.abstractmethod
+    async def list_for_user(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int = 10000,
+    ) -> list[ImageUpload]:
+        """Deletion-hygiene purge (Task 8) — every row for a user, including
+        soft-deleted ones.
+
+        Unlike :meth:`list_active_for_thread`, this does NOT filter on
+        ``deleted_at`` — ``purge_user`` needs the ``object_key`` of a
+        soft-deleted row too (its blob hasn't necessarily been reaped yet).
+        Tenant- AND user-scoped, same isolation rule as
+        :meth:`delete_all_for_user`. Sorted by ``created_at`` ascending."""

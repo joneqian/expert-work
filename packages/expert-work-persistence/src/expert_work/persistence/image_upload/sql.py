@@ -162,3 +162,28 @@ class SqlImageUploadStore(ImageUploadStore):
             )
             await session.commit()
             return int(getattr(result, "rowcount", 0) or 0)
+
+    async def list_for_user(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int = 10000,
+    ) -> list[ImageUpload]:
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ImageUploadRow)
+                        .where(
+                            ImageUploadRow.tenant_id == tenant_id,
+                            ImageUploadRow.user_id == user_id,
+                        )
+                        .order_by(ImageUploadRow.created_at.asc())
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_dto(r) for r in rows]
