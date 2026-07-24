@@ -66,5 +66,8 @@ class InMemorySecretStore:
     async def put(self, name: str, value: str) -> None:
         self._store[name] = value
 
+    async def delete(self, name: str) -> None:
+        self._store.pop(name, None)
+
 
 __all__ = ["FakeCompletion", "InMemorySecretStore", "MockLLM"]

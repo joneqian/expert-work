@@ -27,7 +27,7 @@ from uuid import uuid4
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from control_plane.tenant_scope import bypass_rls_session
@@ -169,3 +169,17 @@ class SqlEncryptedSecretStore:
         if not rows:
             raise SecretNotFoundError(name)
         return list(rows)
+
+    async def delete(self, name: str) -> None:
+        """Hard-delete every version row of the secret ``name``.
+
+        Idempotent — deleting an absent name does NOT raise.
+        """
+        async with bypass_rls_session(), self._sf() as session:
+            await session.execute(
+                delete(EncryptedSecretRow).where(
+                    EncryptedSecretRow.tenant_id.is_(None),
+                    EncryptedSecretRow.name == name,
+                )
+            )
+            await session.commit()
