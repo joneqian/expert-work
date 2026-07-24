@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -162,3 +162,29 @@ class SqlUserWorkspaceStore(UserWorkspaceStore):
                 select(UserWorkspaceRow).where(UserWorkspaceRow.deleted_at.is_(None))
             )
             return [_row_to_workspace(row) for row in result.scalars().all()]
+
+    async def list_archived_expired(
+        self, *, before: datetime, limit: int = 100
+    ) -> list[UserWorkspace]:
+        async with self._sf() as session:
+            result = await session.execute(
+                select(UserWorkspaceRow)
+                .where(
+                    UserWorkspaceRow.deleted_at.is_not(None),
+                    UserWorkspaceRow.deleted_at < before,
+                    UserWorkspaceRow.archived_object_key.is_not(None),
+                )
+                .order_by(UserWorkspaceRow.deleted_at.asc())
+                .limit(limit)
+            )
+            return [_row_to_workspace(row) for row in result.scalars().all()]
+
+    async def hard_delete(self, *, workspace_id: UUID) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                delete(UserWorkspaceRow).where(UserWorkspaceRow.id == workspace_id)
+            )
+            await session.commit()
+            # rowcount is supported by CursorResult for DELETE statements;
+            # mypy stubs for SQLAlchemy's async API don't expose it yet.
+            return bool(result.rowcount)  # type: ignore[attr-defined]

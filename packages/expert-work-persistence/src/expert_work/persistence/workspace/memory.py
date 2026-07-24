@@ -83,3 +83,25 @@ class InMemoryUserWorkspaceStore(UserWorkspaceStore):
 
     async def list_active(self) -> list[UserWorkspace]:
         return [row for row in self._rows.values() if row.deleted_at is None]
+
+    async def list_archived_expired(
+        self, *, before: datetime, limit: int = 100
+    ) -> list[UserWorkspace]:
+        expired = sorted(
+            (
+                row
+                for row in self._rows.values()
+                if row.deleted_at is not None
+                and row.deleted_at < before
+                and row.archived_object_key is not None
+            ),
+            key=lambda row: row.deleted_at or datetime.min.replace(tzinfo=UTC),
+        )
+        return expired[:limit]
+
+    async def hard_delete(self, *, workspace_id: UUID) -> bool:
+        key = self._find_by_id(workspace_id)
+        if key is None:
+            return False
+        del self._rows[key]
+        return True
