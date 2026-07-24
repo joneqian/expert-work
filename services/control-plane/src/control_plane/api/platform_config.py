@@ -18,6 +18,7 @@ paths); the HTTP surface keeps the design's ``/v1/platform/credentials`` path.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from typing import Annotated, cast
 from uuid import UUID
@@ -50,6 +51,8 @@ from expert_work.protocol import (
 )
 from expert_work.runtime.audit.logger import AuditLogger
 from expert_work.runtime.secret_store import SecretStore
+
+logger = logging.getLogger("expert_work.control_plane.api.platform_config")
 
 
 class PlatformSecretWrite(BaseModel):
@@ -168,6 +171,60 @@ def _env_tool_refs(request: Request) -> dict[Tool, str]:
     return dict(settings.effective_platform_tool_credentials)
 
 
+def _canonical_secret_name(
+    *,
+    provider: str | None = None,
+    key_id: str | None = None,
+    tool: str | None = None,
+    tenant_id: UUID | None = None,
+) -> str:
+    """Rebuild the canonical platform-managed secret slot name.
+
+    Shared by the write path (:func:`_do_upsert_provider` / ``upsert_tool`` /
+    ``upsert_tenant_provider`` / ``upsert_tenant_tool``) and the delete
+    endpoints below so the two can never drift (spec §B2). Four forms,
+    selected by which arguments are given:
+
+    * ``expert-work/platform/llm/{provider}`` (+ ``/{key_id}`` when ``key_id``
+      is neither ``None`` nor ``"default"``)
+    * ``expert-work/platform/tool/{tool}``
+    * ``expert-work/platform/tenant/{tenant_id}/llm/{provider}``
+    * ``expert-work/platform/tenant/{tenant_id}/tool/{tool}``
+    """
+    if tenant_id is not None:
+        if tool is not None:
+            return f"expert-work/platform/tenant/{tenant_id}/tool/{tool}"
+        return f"expert-work/platform/tenant/{tenant_id}/llm/{provider}"
+    if tool is not None:
+        return f"expert-work/platform/tool/{tool}"
+    name = f"expert-work/platform/llm/{provider}"
+    if key_id not in (None, "default"):
+        name = f"{name}/{key_id}"
+    return name
+
+
+async def _delete_managed_secret(
+    secret_store: SecretStore, *, secret_ref: str | None, canonical: str
+) -> bool:
+    """Best-effort delete of the platform-managed secret backing a catalog row.
+
+    Only deletes when ``secret_ref`` is exactly the platform-managed
+    ``secret://{canonical}`` ref — an operator-supplied external
+    ``secret://`` / ``kms://`` reference is never touched. Returns whether
+    the managed secret was deleted (for the audit ``secret_deleted`` flag).
+    """
+    if secret_ref != f"secret://{canonical}":
+        return False
+    try:
+        await secret_store.delete(canonical)
+    except Exception:
+        logger.warning(
+            "platform_config: failed to delete managed secret %r", canonical, exc_info=True
+        )
+        return False
+    return True
+
+
 def build_platform_config_router() -> APIRouter:
     router = APIRouter(prefix="/v1/platform/credentials", tags=["platform_config"])
 
@@ -270,9 +327,7 @@ def build_platform_config_router() -> APIRouter:
             )
         # Stream Y-MK — multiple keys share one secret name slot per key_id so
         # rotated/extra keys never collide with the default one.
-        name = f"expert-work/platform/llm/{provider}"
-        if key_id != "default":
-            name = f"{name}/{key_id}"
+        name = _canonical_secret_name(provider=provider, key_id=key_id)
         secret_ref = await _resolve_write_ref(payload, secret_store, name=name)
         async with bypass_rls_session():
             row = await store.upsert_provider(
@@ -360,7 +415,7 @@ def build_platform_config_router() -> APIRouter:
                 detail={"code": "UNKNOWN_TOOL", "message": f"tool {tool!r} not in catalog"},
             )
         secret_ref = await _resolve_write_ref(
-            payload, secret_store, name=f"expert-work/platform/tool/{tool}"
+            payload, secret_store, name=_canonical_secret_name(tool=tool)
         )
         async with bypass_rls_session():
             row = await store.upsert_tool(
@@ -386,6 +441,7 @@ def build_platform_config_router() -> APIRouter:
         store: Annotated[PlatformSecretStore, Depends(_get_store)],
         service: Annotated[PlatformSecretsService, Depends(_get_service)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         request: Request,
     ) -> None:
         _require_system_admin(principal)
@@ -416,6 +472,12 @@ def build_platform_config_router() -> APIRouter:
                         "message": f"{in_use} agent(s) reference this provider; disable instead",
                     },
                 )
+            row = await store.get_provider(cast(Provider, provider))
+            secret_deleted = await _delete_managed_secret(
+                secret_store,
+                secret_ref=row.secret_ref if row is not None else None,
+                canonical=_canonical_secret_name(provider=provider, key_id="default"),
+            )
             deleted = await store.delete_provider(cast(Provider, provider))
         if not deleted:
             raise HTTPException(status_code=404, detail="platform provider credential not found")
@@ -425,7 +487,7 @@ def build_platform_config_router() -> APIRouter:
             principal=principal,
             action=AuditAction.PLATFORM_PROVIDER_CREDENTIAL_DELETE,
             key=provider,
-            details={},
+            details={"secret_deleted": secret_deleted},
         )
 
     @router.delete("/providers/{provider}/keys/{key_id}", status_code=204)
@@ -436,6 +498,7 @@ def build_platform_config_router() -> APIRouter:
         store: Annotated[PlatformSecretStore, Depends(_get_store)],
         service: Annotated[PlatformSecretsService, Depends(_get_service)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         request: Request,
     ) -> None:
         """Stream Y-MK — delete one key. Blocked only when it is the *last*
@@ -467,6 +530,12 @@ def build_platform_config_router() -> APIRouter:
                             ),
                         },
                     )
+            target = next((r for r in rows if r.key_id == key_id), None)
+            secret_deleted = await _delete_managed_secret(
+                secret_store,
+                secret_ref=target.secret_ref if target is not None else None,
+                canonical=_canonical_secret_name(provider=provider, key_id=key_id),
+            )
             deleted = await store.delete_provider(cast(Provider, provider), key_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="platform provider key not found")
@@ -476,7 +545,7 @@ def build_platform_config_router() -> APIRouter:
             principal=principal,
             action=AuditAction.PLATFORM_PROVIDER_CREDENTIAL_DELETE,
             key=f"{provider}#{key_id}",
-            details={"key_id": key_id},
+            details={"key_id": key_id, "secret_deleted": secret_deleted},
         )
 
     @router.delete("/tools/{tool}", status_code=204)
@@ -486,6 +555,7 @@ def build_platform_config_router() -> APIRouter:
         store: Annotated[PlatformSecretStore, Depends(_get_store)],
         service: Annotated[PlatformSecretsService, Depends(_get_service)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         request: Request,
     ) -> None:
         _require_system_admin(principal)
@@ -513,6 +583,12 @@ def build_platform_config_router() -> APIRouter:
                         "message": f"{in_use} agent(s) reference this tool; disable instead",
                     },
                 )
+            row = await store.get_tool(cast(Tool, tool))
+            secret_deleted = await _delete_managed_secret(
+                secret_store,
+                secret_ref=row.secret_ref if row is not None else None,
+                canonical=_canonical_secret_name(tool=tool),
+            )
             deleted = await store.delete_tool(cast(Tool, tool))
         if not deleted:
             raise HTTPException(status_code=404, detail="platform tool credential not found")
@@ -522,7 +598,7 @@ def build_platform_config_router() -> APIRouter:
             principal=principal,
             action=AuditAction.PLATFORM_TOOL_CREDENTIAL_DELETE,
             key=tool,
-            details={},
+            details={"secret_deleted": secret_deleted},
         )
 
     # --- per-tenant overrides (Stream HX-8) ---------------------------
@@ -620,7 +696,9 @@ def build_platform_config_router() -> APIRouter:
             )
         await _require_tenant(request, tenant_id)
         secret_ref = await _resolve_write_ref(
-            payload, secret_store, name=f"expert-work/platform/tenant/{tenant_id}/llm/{provider}"
+            payload,
+            secret_store,
+            name=_canonical_secret_name(tenant_id=tenant_id, provider=provider),
         )
         async with bypass_rls_session():
             row = await store.upsert_tenant_provider(
@@ -664,7 +742,9 @@ def build_platform_config_router() -> APIRouter:
             )
         await _require_tenant(request, tenant_id)
         secret_ref = await _resolve_write_ref(
-            payload, secret_store, name=f"expert-work/platform/tenant/{tenant_id}/tool/{tool}"
+            payload,
+            secret_store,
+            name=_canonical_secret_name(tenant_id=tenant_id, tool=tool),
         )
         async with bypass_rls_session():
             row = await store.upsert_tenant_tool(
@@ -696,12 +776,22 @@ def build_platform_config_router() -> APIRouter:
         store: Annotated[PlatformSecretStore, Depends(_get_store)],
         service: Annotated[PlatformSecretsService, Depends(_get_service)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
     ) -> None:
         # Deleting an override just falls the tenant back to the platform
         # view — never an outage by itself, so no in-use guard (unlike the
         # platform-row delete above).
         _require_system_admin(principal)
         async with bypass_rls_session():
+            target = next(
+                (r for r in await store.list_tenant_providers(tenant_id) if r.provider == provider),
+                None,
+            )
+            secret_deleted = await _delete_managed_secret(
+                secret_store,
+                secret_ref=target.secret_ref if target is not None else None,
+                canonical=_canonical_secret_name(tenant_id=tenant_id, provider=provider),
+            )
             deleted = await store.delete_tenant_provider(
                 tenant_id=tenant_id, provider=cast(Provider, provider)
             )
@@ -713,7 +803,7 @@ def build_platform_config_router() -> APIRouter:
             principal=principal,
             action=AuditAction.PLATFORM_PROVIDER_CREDENTIAL_TENANT_DELETE,
             key=provider,
-            details={"tenant_id": str(tenant_id)},
+            details={"tenant_id": str(tenant_id), "secret_deleted": secret_deleted},
         )
 
     @router.delete("/tenants/{tenant_id}/tools/{tool}", status_code=204)
@@ -724,9 +814,19 @@ def build_platform_config_router() -> APIRouter:
         store: Annotated[PlatformSecretStore, Depends(_get_store)],
         service: Annotated[PlatformSecretsService, Depends(_get_service)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
     ) -> None:
         _require_system_admin(principal)
         async with bypass_rls_session():
+            target = next(
+                (r for r in await store.list_tenant_tools(tenant_id) if r.tool == tool),
+                None,
+            )
+            secret_deleted = await _delete_managed_secret(
+                secret_store,
+                secret_ref=target.secret_ref if target is not None else None,
+                canonical=_canonical_secret_name(tenant_id=tenant_id, tool=tool),
+            )
             deleted = await store.delete_tenant_tool(tenant_id=tenant_id, tool=cast(Tool, tool))
         if not deleted:
             raise HTTPException(status_code=404, detail="tenant tool override not found")
@@ -736,7 +836,7 @@ def build_platform_config_router() -> APIRouter:
             principal=principal,
             action=AuditAction.PLATFORM_TOOL_CREDENTIAL_TENANT_DELETE,
             key=tool,
-            details={"tenant_id": str(tenant_id)},
+            details={"tenant_id": str(tenant_id), "secret_deleted": secret_deleted},
         )
 
     return router
