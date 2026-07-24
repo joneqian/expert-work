@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -139,3 +140,109 @@ async def test_list_by_tenant_paginates() -> None:
     assert len(page) == 2
     full = await store.list_by_tenant(tenant, subject_type="user")
     assert [r.id for r in page] == [r.id for r in full[2:4]]
+
+
+# ---------------------------------------------------------------------------
+# PR1 Task 5 — hard_delete_deactivated() retention sweep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_deactivated_only_reaps_old_deactivated() -> None:
+    """Only rows deactivated before the cutoff are physically removed — an
+    active row and a recently-deactivated row are both left alone."""
+    store = InMemoryTenantUserStore()
+    tenant = uuid4()
+    active = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="active")
+    old = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="old")
+    recent = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="recent")
+
+    assert (
+        await store.deactivate(
+            old.id, tenant_id=tenant, now=datetime.now(UTC) - timedelta(days=100)
+        )
+        is True
+    )
+    assert (
+        await store.deactivate(
+            recent.id, tenant_id=tenant, now=datetime.now(UTC) - timedelta(days=10)
+        )
+        is True
+    )
+
+    cutoff = datetime.now(UTC) - timedelta(days=90)
+    assert await store.hard_delete_deactivated(before=cutoff, limit=100) == 1
+
+    assert await store.get(active.id, tenant_id=tenant) is not None
+    assert await store.get(old.id, tenant_id=tenant) is None
+    got_recent = await store.get(recent.id, tenant_id=tenant)
+    assert got_recent is not None
+    assert got_recent.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_deactivated_respects_limit() -> None:
+    """Two rows are both past the cutoff; ``limit=1`` only physically
+    removes the oldest one (``deleted_at`` ascending)."""
+    store = InMemoryTenantUserStore()
+    tenant = uuid4()
+    first = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="first")
+    second = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="second")
+    assert (
+        await store.deactivate(
+            first.id, tenant_id=tenant, now=datetime.now(UTC) - timedelta(days=100)
+        )
+        is True
+    )
+    assert (
+        await store.deactivate(
+            second.id, tenant_id=tenant, now=datetime.now(UTC) - timedelta(days=95)
+        )
+        is True
+    )
+
+    cutoff = datetime.now(UTC) - timedelta(days=90)
+    assert await store.hard_delete_deactivated(before=cutoff, limit=1) == 1
+
+    assert await store.get(first.id, tenant_id=tenant) is None
+    assert await store.get(second.id, tenant_id=tenant) is not None
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_deactivated_sweeps_across_tenants() -> None:
+    """``hard_delete_deactivated`` has no tenant predicate — a single call
+    reaps expired rows across every tenant."""
+    store = InMemoryTenantUserStore()
+    tenant_a, tenant_b = uuid4(), uuid4()
+    user_a = await store.resolve(tenant_id=tenant_a, subject_type="user", subject_id="a")
+    user_b = await store.resolve(tenant_id=tenant_b, subject_type="user", subject_id="b")
+    old = datetime.now(UTC) - timedelta(days=100)
+    assert await store.deactivate(user_a.id, tenant_id=tenant_a, now=old) is True
+    assert await store.deactivate(user_b.id, tenant_id=tenant_b, now=old) is True
+
+    cutoff = datetime.now(UTC) - timedelta(days=90)
+    assert await store.hard_delete_deactivated(before=cutoff, limit=100) == 2
+
+    assert await store.get(user_a.id, tenant_id=tenant_a) is None
+    assert await store.get(user_b.id, tenant_id=tenant_b) is None
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_deactivated_revival_not_swept() -> None:
+    """A deactivated identity that RE-``resolve``s before the sweep runs
+    clears ``deleted_at`` (reactivation) — the row must not be swept even
+    though it was deactivated long enough ago."""
+    store = InMemoryTenantUserStore()
+    tenant = uuid4()
+    u = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="x")
+    old = datetime.now(UTC) - timedelta(days=100)
+    assert await store.deactivate(u.id, tenant_id=tenant, now=old) is True
+
+    # The identity returns — resolve() clears deleted_at (reactivation).
+    revived = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="x")
+    assert revived.id == u.id
+    assert revived.deleted_at is None
+
+    cutoff = datetime.now(UTC) - timedelta(days=90)
+    assert await store.hard_delete_deactivated(before=cutoff, limit=100) == 0
+    assert await store.get(u.id, tenant_id=tenant) is not None
