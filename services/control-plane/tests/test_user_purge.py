@@ -39,6 +39,7 @@ from expert_work.persistence import (
 )
 from expert_work.persistence.agent_instance.memory import InMemoryAgentInstanceStore
 from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
 from expert_work.persistence.image_upload import InMemoryImageUploadStore
 from expert_work.persistence.memory.dlq import InMemoryMemoryWritebackDLQ
 from expert_work.persistence.skill import InMemorySkillStore
@@ -52,6 +53,7 @@ from expert_work.runtime.runs import (
     RunManager,
     RunStatus,
 )
+from expert_work.runtime.storage import InMemoryObjectStore, ObjectNotFoundError
 from orchestrator.tools.sandbox import RecordingSupervisorClient
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -119,6 +121,8 @@ async def test_purge_user_cascade_isolates_other_user_and_tenant_and_is_idempote
     webhook_endpoints = InMemoryWebhookEndpointStore()
     webhook_deliveries = InMemoryWebhookDeliveryStore()
     image_uploads = InMemoryImageUploadStore()
+    feedback = InMemoryFeedbackStore()
+    object_store = InMemoryObjectStore()
     volume_backup_dlq = InMemoryVolumeBackupDLQ()
     token_usage = InMemoryTokenUsageStore()
     runs = InMemoryRunStore()
@@ -163,12 +167,40 @@ async def test_purge_user_cascade_isolates_other_user_and_tenant_and_is_idempote
         tenant_id=t1, user_id="subj-a", catalog_id=uuid4(), name="c", resolved_url="https://x"
     )
     await skills.create_skill(skill_id=uuid4(), tenant_id=t1, name="s-a", created_by_user_id=a.id)
+    image_id = uuid4()
+    image_key = f"tenants/{t1}/uploads/{image_id}.png"
+    await image_uploads.insert(
+        image_id=image_id,
+        tenant_id=t1,
+        thread_id=t_a,
+        user_id=a.id,
+        object_key=image_key,
+        size_bytes=10,
+        mime_type="image/png",
+        sha256="deadbeef" * 8,
+    )
+    await object_store.put(image_key, b"bytes")
+    await feedback.insert(
+        FeedbackRecord(tenant_id=t1, thread_id=t_a, rating="up", actor_id="subj-a")
+    )
 
     # --- User B (same tenant) + User C (other tenant) — must survive intact. ---
     await memory.write([_mem(tenant=t1, user=b.id, content="b-keep")])
     await token_usage.insert(_tok(tenant=t1, user=b.id))
     await memory.write([_mem(tenant=t2, user=c.id, content="c-keep")])
     await token_usage.insert(_tok(tenant=t2, user=c.id))
+    b_thread = uuid4()
+    await threads.create(
+        thread_id=b_thread,
+        tenant_id=t1,
+        created_by="seed",
+        user_id=b.id,
+        agent_name="alpha",
+        agent_version="1.0.0",
+    )
+    await feedback.insert(
+        FeedbackRecord(tenant_id=t1, thread_id=b_thread, rating="down", actor_id="subj-b")
+    )
 
     deps = PurgeUserDeps(
         threads=threads,
@@ -184,6 +216,8 @@ async def test_purge_user_cascade_isolates_other_user_and_tenant_and_is_idempote
         webhook_endpoints=webhook_endpoints,
         webhook_deliveries=webhook_deliveries,
         image_uploads=image_uploads,
+        feedback=feedback,
+        object_store=object_store,
         volume_backup_dlq=volume_backup_dlq,
         token_usage=token_usage,
         runs=runs,
@@ -206,6 +240,20 @@ async def test_purge_user_cascade_isolates_other_user_and_tenant_and_is_idempote
     assert await artifacts.list_for_user(tenant_id=t1, user_id=a.id, include_deleted=True) == []
     assert await agent_instances.list_by_user(tenant_id=t1, user_id=a.id) == []
     assert await mcp_oauth.list_for_user(tenant_id=t1, user_id="subj-a") == []
+
+    # --- A's image blob is deleted from the object store + the row is gone. ---
+    assert summary.deleted["image_upload"] == 1
+    assert summary.image_blobs_removed == 1
+    assert summary.image_blobs_failed == 0
+    assert summary.image_blobs_skipped == 0
+    assert await image_uploads.list_for_user(tenant_id=t1, user_id=a.id) == []
+    with pytest.raises(ObjectNotFoundError):
+        await object_store.get(image_key)
+
+    # --- A's thread feedback is gone; B's (a different thread) survives. ---
+    assert summary.deleted["feedback"] == 1
+    assert await feedback.list_for_thread(thread_id=t_a) == []
+    assert len(await feedback.list_for_thread(thread_id=b_thread)) == 1
 
     # --- A's billing / tenant-asset rows are KEPT + anonymized. ---
     a_tokens = [
@@ -243,6 +291,196 @@ async def test_purge_user_cascade_isolates_other_user_and_tenant_and_is_idempote
     assert summary2.deleted["memory_item"] == 0
     assert summary2.anonymized["token_usage"] == 0
     assert summary2.deactivated is True  # idempotent-True
+    assert summary2.deleted["feedback"] == 0
+    assert summary2.deleted["image_upload"] == 0
+    assert summary2.image_blobs_removed == 0
+    assert summary2.image_blobs_failed == 0
+    assert summary2.image_blobs_skipped == 0
+
+
+@pytest.mark.asyncio
+async def test_purge_user_image_blobs_skipped_without_object_store() -> None:
+    """No object store wired: rows still hard-delete; blobs are counted as
+    'skipped' (not 'removed', not a failure) — the retention sweep reaps the
+    now-orphaned object-store key on its next pass."""
+    t1 = uuid4()
+    threads = InMemoryThreadMetaStore()
+    memory = InMemoryMemoryStore()
+    memory_dlq = InMemoryMemoryWritebackDLQ()
+    artifacts = InMemoryArtifactStore()
+    mcp_oauth = InMemoryMcpOAuthConnectionStore()
+    agent_instances = InMemoryAgentInstanceStore()
+    approvals = InMemoryApprovalStore()
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    webhook_endpoints = InMemoryWebhookEndpointStore()
+    webhook_deliveries = InMemoryWebhookDeliveryStore()
+    image_uploads = InMemoryImageUploadStore()
+    feedback = InMemoryFeedbackStore()
+    volume_backup_dlq = InMemoryVolumeBackupDLQ()
+    token_usage = InMemoryTokenUsageStore()
+    runs = InMemoryRunStore()
+    skills = InMemorySkillStore()
+    eval_datasets = InMemoryEvalDatasetStore()
+    curation = InMemoryCurationCandidateStore()
+    users = InMemoryTenantUserStore()
+    audit_store = InMemoryAuditLogStore()
+    supervisor = RecordingSupervisorClient()
+
+    a = await users.resolve(tenant_id=t1, subject_type="user", subject_id="subj-a")
+    image_id = uuid4()
+    await image_uploads.insert(
+        image_id=image_id,
+        tenant_id=t1,
+        thread_id=uuid4(),
+        user_id=a.id,
+        object_key=f"tenants/{t1}/uploads/{image_id}.png",
+        size_bytes=1,
+        mime_type="image/png",
+        sha256="x",
+    )
+
+    deps = PurgeUserDeps(
+        threads=threads,
+        runtime=SimpleNamespace(durable_checkpointer=None, run_manager=RunManager(store=runs)),  # type: ignore[arg-type]
+        memory=memory,
+        memory_dlq=memory_dlq,
+        artifacts=artifacts,
+        mcp_oauth=mcp_oauth,
+        agent_instances=agent_instances,
+        approvals=approvals,
+        triggers=triggers,
+        trigger_runs=trigger_runs,
+        webhook_endpoints=webhook_endpoints,
+        webhook_deliveries=webhook_deliveries,
+        image_uploads=image_uploads,
+        feedback=feedback,
+        object_store=None,
+        volume_backup_dlq=volume_backup_dlq,
+        token_usage=token_usage,
+        runs=runs,
+        skills=skills,
+        eval_datasets=eval_datasets,
+        curation_candidates=curation,
+        tenant_users=users,
+        audit=build_default_audit_logger(audit_store),
+        supervisor=supervisor,
+    )
+
+    summary = await purge_user(
+        tenant_id=t1, user_id=a.id, subject_id="subj-a", deps=deps, actor_id="admin"
+    )
+
+    assert "image_upload" not in summary.failures
+    assert summary.deleted["image_upload"] == 1
+    assert summary.image_blobs_skipped == 1
+    assert summary.image_blobs_removed == 0
+    assert summary.image_blobs_failed == 0
+    assert await image_uploads.list_for_user(tenant_id=t1, user_id=a.id) == []
+
+
+class _FailingObjectStore(InMemoryObjectStore):
+    """``delete`` always raises; every other op behaves like the real in-memory store.
+
+    Used to drive the ``_purge_images`` best-effort branch: a blob-delete
+    failure must be counted in ``image_blobs_failed`` and must NOT block the
+    row deletion that follows (``delete_all_for_user``) or fail the
+    ``image_upload`` purge step.
+    """
+
+    async def delete(self, key: str) -> None:
+        raise RuntimeError("blob store unavailable")
+
+
+@pytest.mark.asyncio
+async def test_purge_user_image_blob_delete_failure_still_deletes_rows() -> None:
+    """Blob delete raising for every image: rows are still hard-deleted.
+
+    Deletion-hygiene purge (Task 8) — ``_purge_images`` treats a blob-store
+    failure as best-effort: it's counted in ``image_blobs_failed`` but must
+    not prevent ``delete_all_for_user`` from running, and must not count as a
+    step failure (an orphaned object-store key is recoverable by the
+    retention sweep; a stuck ``image_upload`` row is not).
+    """
+    t1 = uuid4()
+    threads = InMemoryThreadMetaStore()
+    memory = InMemoryMemoryStore()
+    memory_dlq = InMemoryMemoryWritebackDLQ()
+    artifacts = InMemoryArtifactStore()
+    mcp_oauth = InMemoryMcpOAuthConnectionStore()
+    agent_instances = InMemoryAgentInstanceStore()
+    approvals = InMemoryApprovalStore()
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    webhook_endpoints = InMemoryWebhookEndpointStore()
+    webhook_deliveries = InMemoryWebhookDeliveryStore()
+    image_uploads = InMemoryImageUploadStore()
+    feedback = InMemoryFeedbackStore()
+    object_store = _FailingObjectStore()
+    volume_backup_dlq = InMemoryVolumeBackupDLQ()
+    token_usage = InMemoryTokenUsageStore()
+    runs = InMemoryRunStore()
+    skills = InMemorySkillStore()
+    eval_datasets = InMemoryEvalDatasetStore()
+    curation = InMemoryCurationCandidateStore()
+    users = InMemoryTenantUserStore()
+    audit_store = InMemoryAuditLogStore()
+    supervisor = RecordingSupervisorClient()
+
+    a = await users.resolve(tenant_id=t1, subject_type="user", subject_id="subj-a")
+    image_ids = [uuid4(), uuid4()]
+    for image_id in image_ids:
+        object_key = f"tenants/{t1}/uploads/{image_id}.png"
+        await image_uploads.insert(
+            image_id=image_id,
+            tenant_id=t1,
+            thread_id=uuid4(),
+            user_id=a.id,
+            object_key=object_key,
+            size_bytes=1,
+            mime_type="image/png",
+            sha256="x",
+        )
+        # No ``put`` needed — the store is never actually read; ``delete``
+        # always raises regardless of whether the key exists.
+
+    deps = PurgeUserDeps(
+        threads=threads,
+        runtime=SimpleNamespace(durable_checkpointer=None, run_manager=RunManager(store=runs)),  # type: ignore[arg-type]
+        memory=memory,
+        memory_dlq=memory_dlq,
+        artifacts=artifacts,
+        mcp_oauth=mcp_oauth,
+        agent_instances=agent_instances,
+        approvals=approvals,
+        triggers=triggers,
+        trigger_runs=trigger_runs,
+        webhook_endpoints=webhook_endpoints,
+        webhook_deliveries=webhook_deliveries,
+        image_uploads=image_uploads,
+        feedback=feedback,
+        object_store=object_store,
+        volume_backup_dlq=volume_backup_dlq,
+        token_usage=token_usage,
+        runs=runs,
+        skills=skills,
+        eval_datasets=eval_datasets,
+        curation_candidates=curation,
+        tenant_users=users,
+        audit=build_default_audit_logger(audit_store),
+        supervisor=supervisor,
+    )
+
+    summary = await purge_user(
+        tenant_id=t1, user_id=a.id, subject_id="subj-a", deps=deps, actor_id="admin"
+    )
+
+    assert summary.image_blobs_failed == len(image_ids)
+    assert summary.image_blobs_removed == 0
+    assert summary.image_blobs_skipped == 0
+    assert summary.deleted["image_upload"] == len(image_ids)
+    assert "image_upload" not in summary.failures
+    assert await image_uploads.list_for_user(tenant_id=t1, user_id=a.id) == []
 
 
 # --------------------------------------------------------------------------- #

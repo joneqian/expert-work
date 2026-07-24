@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from expert_work.persistence.image_upload.base import ImageUploadStore
@@ -116,7 +116,7 @@ class SqlImageUploadStore(ImageUploadStore):
             )
         return [_row_to_dto(r) for r in rows]
 
-    async def list_expired(
+    async def list_reapable(
         self,
         *,
         before: datetime,
@@ -127,7 +127,12 @@ class SqlImageUploadStore(ImageUploadStore):
                 (
                     await session.execute(
                         select(ImageUploadRow)
-                        .where(ImageUploadRow.created_at < before)
+                        .where(
+                            or_(
+                                ImageUploadRow.created_at < before,
+                                ImageUploadRow.deleted_at.is_not(None),
+                            )
+                        )
                         .order_by(ImageUploadRow.created_at.asc())
                         .limit(limit)
                     )
@@ -157,3 +162,28 @@ class SqlImageUploadStore(ImageUploadStore):
             )
             await session.commit()
             return int(getattr(result, "rowcount", 0) or 0)
+
+    async def list_for_user(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int = 10000,
+    ) -> list[ImageUpload]:
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ImageUploadRow)
+                        .where(
+                            ImageUploadRow.tenant_id == tenant_id,
+                            ImageUploadRow.user_id == user_id,
+                        )
+                        .order_by(ImageUploadRow.created_at.asc())
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_dto(r) for r in rows]

@@ -15,8 +15,8 @@ Three endpoints, all per-user scoped:
   ``kind``). Triggers a re-embed against the configured embedder so
   subsequent recall ranks the updated text correctly.
 * ``DELETE /v1/memory/{id}`` — soft-delete (the forget action). The
-  row is hidden from recall / list immediately; a future retention
-  sweep hard-deletes 30+ days after.
+  row is hidden from recall / list immediately; the retention sweep
+  hard-deletes 90 days after (``retention-cleanup-job``).
 
 Per-user enforcement: every call resolves the caller's ``user_id``
 via ``resolve_caller_user_id`` and the store filters

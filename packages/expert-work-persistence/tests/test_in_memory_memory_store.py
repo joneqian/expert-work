@@ -1209,3 +1209,88 @@ async def test_list_for_user_as_of_time_travel() -> None:
     await store.write([later])
     assert [m.content for m in await store.list_for_user(tenant_id=t, user_id=u)] == ["later"]
     assert await store.list_for_user(tenant_id=t, user_id=u, as_of=past) == []
+
+
+# ---------------------------------------------------------------------------
+# PR1 Task 1 — hard_delete_expired() retention sweep (mirrors SQL fixture)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_expired_only_reaps_old_soft_deleted() -> None:
+    """Only rows soft-deleted before the cutoff are physically removed —
+    an active row and a recently soft-deleted row are both left alone
+    (the retention window has not closed for the latter yet)."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    active = _item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="active")
+    old = _item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="old")
+    recent = _item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="recent")
+    await store.write([active, old, recent])
+
+    assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=old.id)
+    assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=recent.id)
+    now = datetime.now(UTC)
+    for idx, row in enumerate(store._rows):
+        if row.id == old.id:
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=100)})
+        elif row.id == recent.id:
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=10)})
+
+    cutoff = now - timedelta(days=90)
+    assert await store.hard_delete_expired(before=cutoff, limit=100) == 1
+
+    remaining_ids = {row.id for row in store._rows}
+    assert remaining_ids == {active.id, recent.id}
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_expired_respects_limit() -> None:
+    """Two rows are both past the cutoff; ``limit=1`` only physically
+    removes the oldest one (``deleted_at`` ascending)."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    first = _item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="first")
+    second = _item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="second")
+    await store.write([first, second])
+    assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=first.id)
+    assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=second.id)
+    now = datetime.now(UTC)
+    for idx, row in enumerate(store._rows):
+        if row.id == first.id:
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=100)})
+        elif row.id == second.id:
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=95)})
+
+    cutoff = now - timedelta(days=90)
+    assert await store.hard_delete_expired(before=cutoff, limit=1) == 1
+
+    # The older row (100 days) is reaped first; the 95-day row survives.
+    assert [row.id for row in store._rows] == [second.id]
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_expired_sweeps_across_tenants() -> None:
+    """hard_delete_expired() has no tenant predicate — it is a cross-tenant
+    retention sweep. Two different tenants each have one expired soft-deleted
+    row; a single call reaps both."""
+    store = InMemoryMemoryStore()
+    tenant_a, user_a = uuid4(), uuid4()
+    tenant_b, user_b = uuid4(), uuid4()
+    item_a = _item(tenant=tenant_a, user=user_a, embedding=(1.0, 0.0), content="tenant-a")
+    item_b = _item(tenant=tenant_b, user=user_b, embedding=(1.0, 0.0), content="tenant-b")
+    await store.write([item_a, item_b])
+
+    assert await store.soft_delete(tenant_id=tenant_a, user_id=user_a, memory_id=item_a.id)
+    assert await store.soft_delete(tenant_id=tenant_b, user_id=user_b, memory_id=item_b.id)
+    now = datetime.now(UTC)
+    for idx, row in enumerate(store._rows):
+        if row.id in (item_a.id, item_b.id):
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=100)})
+
+    cutoff = now - timedelta(days=90)
+    assert await store.hard_delete_expired(before=cutoff, limit=100) == 2
+
+    remaining_ids = {row.id for row in store._rows}
+    assert item_a.id not in remaining_ids
+    assert item_b.id not in remaining_ids

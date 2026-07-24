@@ -399,6 +399,17 @@ class InMemoryMemoryStore(MemoryStore):
                 removed += 1
         return removed
 
+    async def hard_delete_expired(self, *, before: datetime, limit: int = 1000) -> int:
+        expired = sorted(
+            (row for row in self._rows if row.deleted_at is not None and row.deleted_at < before),
+            key=lambda row: row.deleted_at or datetime.min.replace(tzinfo=UTC),
+        )[:limit]
+        if not expired:
+            return 0
+        expired_ids = {row.id for row in expired}
+        self._rows = [row for row in self._rows if row.id not in expired_ids]
+        return len(expired_ids)
+
     # ------------------------------------------------------------------
     # Capability Uplift Sprint #7 — MemoryConsolidator interface
     # ------------------------------------------------------------------

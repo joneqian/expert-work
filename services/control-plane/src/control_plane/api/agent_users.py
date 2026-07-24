@@ -286,9 +286,9 @@ def build_agent_users_router() -> APIRouter:
 def _build_purge_deps(request: Request) -> PurgeUserDeps:
     """Assemble the ``purge_user`` deps from ``request.app.state`` (Phase 3a).
 
-    The supervisor client + the supervisor-owned volume-backup DLQ are optional
-    (a deployment may not wire them); every other store is a hard dependency of
-    the cascade purge."""
+    The supervisor client, the supervisor-owned volume-backup DLQ, and the
+    object store are optional (a deployment may not wire them); every other
+    store is a hard dependency of the cascade purge."""
     state = request.app.state
     return PurgeUserDeps(
         threads=state.thread_meta_repo,
@@ -304,6 +304,8 @@ def _build_purge_deps(request: Request) -> PurgeUserDeps:
         webhook_endpoints=state.webhook_endpoint_store,
         webhook_deliveries=state.webhook_delivery_store,
         image_uploads=state.image_upload_store,
+        feedback=state.feedback_store,
+        object_store=getattr(state, "object_store", None),
         volume_backup_dlq=getattr(state, "volume_backup_dlq", None),
         token_usage=state.token_usage_store,
         runs=state.run_store,

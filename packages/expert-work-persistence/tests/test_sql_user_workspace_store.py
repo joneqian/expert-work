@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -101,5 +102,88 @@ async def test_resolve_distinguishes_tenant_and_user(sql_store: SqlStoreFixture)
 
         assert len({w1.id, w2.id, w3.id}) == 3
         assert len({w1.volume_name, w2.volume_name, w3.volume_name}) == 3
+    finally:
+        await engine.dispose()
+
+
+# --- Phase 3b 地基 (list_archived_expired + hard_delete) -------------------
+
+
+@pytest.mark.asyncio
+async def test_list_archived_expired_filters_correctly(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant = uuid4()
+        now = datetime.now(UTC)
+        before = now - timedelta(days=90)
+
+        active = await store.resolve(tenant_id=tenant, user_id=uuid4())
+
+        hit = await store.resolve(tenant_id=tenant, user_id=uuid4())
+        await store.soft_delete(workspace_id=hit.id, now=now - timedelta(days=100))
+        await store.mark_archived(workspace_id=hit.id, archived_object_key="k-hit")
+
+        stuck = await store.resolve(tenant_id=tenant, user_id=uuid4())
+        await store.soft_delete(workspace_id=stuck.id, now=now - timedelta(days=100))
+        # Archive job hasn't run yet — archived_object_key still None.
+
+        recent = await store.resolve(tenant_id=tenant, user_id=uuid4())
+        await store.soft_delete(workspace_id=recent.id, now=now - timedelta(days=10))
+        await store.mark_archived(workspace_id=recent.id, archived_object_key="k-recent")
+
+        rows = await store.list_archived_expired(before=before)
+        ids = {r.id for r in rows}
+
+        # postgres_container is session-scoped (shared across every test in
+        # the file/session) and list_archived_expired has no tenant filter
+        # (matches list_pending_archive/list_active precedent) — so assert
+        # membership, not exact-set equality, to stay robust against rows
+        # other tests leave behind.
+        assert hit.id in ids
+        assert active.id not in ids
+        assert stuck.id not in ids
+        assert recent.id not in ids
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_archived_expired_orders_by_deleted_at_ascending(
+    sql_store: SqlStoreFixture,
+) -> None:
+    store, engine = sql_store
+    try:
+        tenant = uuid4()
+        now = datetime.now(UTC)
+
+        newer = await store.resolve(tenant_id=tenant, user_id=uuid4())
+        await store.soft_delete(workspace_id=newer.id, now=now - timedelta(days=100))
+        await store.mark_archived(workspace_id=newer.id, archived_object_key="k1")
+
+        older = await store.resolve(tenant_id=tenant, user_id=uuid4())
+        await store.soft_delete(workspace_id=older.id, now=now - timedelta(days=200))
+        await store.mark_archived(workspace_id=older.id, archived_object_key="k2")
+
+        rows = await store.list_archived_expired(before=now - timedelta(days=90))
+        # Filter down to this test's own rows before checking relative
+        # order — the shared session container may hold rows from other
+        # tests, but the global ordering they don't disturb is theirs.
+        mine = [r.id for r in rows if r.id in {older.id, newer.id}]
+        assert mine == [older.id, newer.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_removes_row_and_is_idempotent(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        workspace = await store.resolve(tenant_id=uuid4(), user_id=uuid4())
+
+        assert await store.hard_delete(workspace_id=workspace.id) is True
+        assert await store.get(tenant_id=workspace.tenant_id, user_id=workspace.user_id) is None
+
+        # Row is truly gone — a second delete is a no-op, not an error.
+        assert await store.hard_delete(workspace_id=workspace.id) is False
     finally:
         await engine.dispose()

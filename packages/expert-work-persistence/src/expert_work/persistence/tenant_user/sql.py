@@ -6,7 +6,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -157,3 +157,19 @@ class SqlTenantUserStore(TenantUserStore):
                 )
             ).first()
         return exists is not None
+
+    async def hard_delete_deactivated(self, *, before: datetime, limit: int = 1000) -> int:
+        subq = (
+            select(TenantUserRow.id)
+            .where(
+                TenantUserRow.deleted_at.is_not(None),
+                TenantUserRow.deleted_at < before,
+            )
+            .order_by(TenantUserRow.deleted_at.asc())
+            .limit(limit)
+        )
+        stmt = delete(TenantUserRow).where(TenantUserRow.id.in_(subq))
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
