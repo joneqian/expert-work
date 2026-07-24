@@ -2759,6 +2759,7 @@ const zhCN: TranslationKeys = {
     status_deleted: "已删除",
     search_placeholder: "按名称搜索",
     filter_status: "按状态筛选",
+    filter_status_default: "默认(不含已删除)",
     filter_status_all: "全部状态",
     action_playground: "试玩",
     action_edit: "编辑清单",

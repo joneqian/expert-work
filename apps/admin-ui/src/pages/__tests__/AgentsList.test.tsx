@@ -147,6 +147,21 @@ describe("AgentsList", () => {
     renderAgentsList();
     expect(await screen.findByTestId("agents-error")).toHaveTextContent("DB_DOWN");
   });
+
+  // Soft-deleted versions are history, not working agents — the everyday
+  // ("default") view drops them client-side even though the unfiltered
+  // fetch returns them.
+  it("the default view hides soft-deleted rows", async () => {
+    const deletedRow = { ...sampleRow, name: "retired-bot", status: "deleted" };
+    listAgentsMock.mockResolvedValue({
+      items: [sampleRow, deletedRow],
+      total: 2,
+      cross_tenant: false,
+    });
+    renderAgentsList();
+    await screen.findByText("customer-support-bot");
+    expect(screen.queryByText("retired-bot")).toBeNull();
+  });
 });
 
 describe("AgentsList row actions", () => {
@@ -184,6 +199,38 @@ describe("AgentsList row actions", () => {
     expect(screen.queryByText(i18n.t("agents_page.action_enable"))).not.toBeInTheDocument();
     // Pre-existing actions are unaffected.
     expect(screen.getByText(i18n.t("agents_page.action_playground"))).toBeInTheDocument();
+  });
+
+  // A soft-deleted version can't be played/edited/disabled/re-deleted —
+  // its menu keeps only the read-only run history entry. (Reached via the
+  // "deleted" status filter; the default view hides such rows entirely.)
+  it("a deleted row's menu offers only the run history action", async () => {
+    const user = userEvent.setup();
+    const deletedRow = { ...sampleRow, status: "deleted" };
+    listAgentsMock.mockResolvedValue({
+      items: [deletedRow],
+      total: 1,
+      cross_tenant: false,
+    });
+    renderAgentsList();
+    // The default view hides deleted rows — switch the status filter to
+    // "deleted" to surface it (mirrors how a user reaches such a row).
+    await waitFor(() => expect(listAgentsMock).toHaveBeenCalled());
+    const selector = screen
+      .getByTestId("agents-status-filter")
+      .querySelector(".ant-select-selector");
+    fireEvent.mouseDown(selector as Element);
+    await user.click(
+      await screen.findByTitle(i18n.t("agents_page.status_deleted")),
+    );
+    await screen.findByText("customer-support-bot");
+    await user.click(screen.getByTestId(`agent-row-actions-${deletedRow.name}`));
+
+    expect(await screen.findByText(i18n.t("agents_page.action_runs"))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("agents_page.action_delete"))).toBeNull();
+    expect(screen.queryByText(i18n.t("agents_page.action_disable"))).toBeNull();
+    expect(screen.queryByText(i18n.t("agents_page.action_playground"))).toBeNull();
+    expect(screen.queryByText(i18n.t("agents_page.action_edit"))).toBeNull();
   });
 
   it("arms the delete confirm only once the exact agent name is typed", async () => {
