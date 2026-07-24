@@ -1037,7 +1037,7 @@ def build_mcp_servers_router() -> APIRouter:
                 try:
                     await secret_store.delete(parse_secret_ref(ref))
                 except Exception:
-                    logger.warning("mcp_servers.delete_secret_failed", extra={"name": name})
+                    logger.warning("mcp_servers.delete_secret_failed", extra={"server_name": name})
         # (d) Audit with the row UUID (consistent with POST/PATCH), name in details.
         await emit(
             audit,

@@ -397,6 +397,94 @@ async def test_delete_removes_token_and_headers_secrets(monkeypatch: pytest.Monk
         await app.state.secret_store.get(headers_name)  # type: ignore[attr-defined]
 
 
+class _DeleteAlwaysFailsSecretStore:
+    """Wraps a real ``SecretStore`` but makes ``delete`` always raise.
+
+    Used to prove the (c2) best-effort secret cleanup in the DELETE handler
+    never lets a secret-store failure escape as a 500 — it must be caught,
+    logged, and the request must still complete (204 + row gone + audit
+    written). Regression guard for the ``extra={"name": ...}`` LogRecord
+    collision that used to turn this into an unhandled ``KeyError``.
+    """
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    async def get(self, name: str, *, version: str | None = None) -> str:
+        return await self._inner.get(name, version=version)  # type: ignore[attr-defined]
+
+    async def put(self, name: str, value: str) -> None:
+        await self._inner.put(name, value)  # type: ignore[attr-defined]
+
+    async def delete(self, name: str) -> None:
+        raise RuntimeError("boom: secret store unavailable")
+
+
+@pytest.mark.asyncio
+async def test_delete_best_effort_secret_cleanup_does_not_abort_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DELETE must still 204 + remove the row + write the audit row even when
+    secret_store.delete raises. This also regression-guards the fixed
+    logger.warning(..., extra={"server_name": name}) call: before the fix,
+    ``extra={"name": name}`` collided with the reserved ``LogRecord.name``
+    attribute and raised ``KeyError`` from inside the except-block, turning
+    a best-effort cleanup failure into an unhandled 500.
+    """
+    from control_plane.audit import build_default_audit_logger
+    from expert_work.persistence.audit_log import InMemoryAuditLogStore
+    from expert_work.protocol import AuditAction, AuditQuery
+
+    lifecycle = Lifecycle()
+    lifecycle.mark_ready()
+    audit_store = InMemoryAuditLogStore()
+    app = create_app(
+        settings=_build_settings(),
+        lifecycle=lifecycle,
+        jwt_verifier=build_test_jwt_verifier(),
+        audit_logger=build_default_audit_logger(audit_store),
+    )
+    tenant_id = uuid4()
+    token = make_test_jwt(tenant_id=tenant_id, subject=str(uuid4()), roles=("admin",))
+    admin_headers = {"Authorization": f"Bearer {token}"}
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        create_resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "github",
+                "transport": "streamable_http",
+                "url": "https://mcp.example.com/mcp",
+                "auth_type": "bearer",
+                "token": "ghp_REALTOKEN",
+                "timeout_s": 30.0,
+            },
+            headers=admin_headers,
+        )
+        assert create_resp.status_code == 201, create_resp.text
+
+        # Swap in a secret store whose delete() always raises, *after* the
+        # create above so the token secret is genuinely persisted first.
+        app.state.secret_store = _DeleteAlwaysFailsSecretStore(app.state.secret_store)  # type: ignore[attr-defined]
+
+        delete_resp = await client.delete("/v1/mcp-servers/github", headers=admin_headers)
+
+    # (1) The request completes with the normal success status — the
+    # secret-store failure never escapes as a 500.
+    assert delete_resp.status_code == 204
+
+    # (2) The row is really gone (delete happened before the best-effort
+    # secret cleanup, so this is unaffected by the injected failure).
+    assert await app.state.tenant_mcp_server_store.get(tenant_id=tenant_id, name="github") is None  # type: ignore[attr-defined]
+
+    # (3) The audit row was written — best-effort cleanup failing does not
+    # block the audit trail either.
+    page = await audit_store.query(AuditQuery(tenant_id=tenant_id))
+    actions = {r.action for r in page.entries}
+    assert AuditAction.MCP_SERVER_DELETE in actions
+
+
 @pytest.mark.asyncio
 async def test_test_connection_probes_without_persisting(monkeypatch: pytest.MonkeyPatch) -> None:
     """POST /test probes the connection and returns tool_count — nothing is persisted."""

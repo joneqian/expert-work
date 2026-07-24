@@ -95,3 +95,40 @@ uv run mypy packages
   best-effort(`try/except Exception` + `logger.warning`），与 spec §B5/§错误处理
   一致；未额外加 metrics/告警（brief 未要求，且该端点无先例告警可比照，不同于
   PR1 retention job 的 `image_object_keys_failed` 场景）。
+
+## Review 修复(T7 review Critical C-1 + 变异回归)
+
+- **[C-1] 修复**:`mcp_servers.py:1040` 的
+  `logger.warning("mcp_servers.delete_secret_failed", extra={"name": name})` ——
+  `extra` 里的 `name` 撞 `logging.LogRecord` 保留属性（`makeRecord` 对
+  `key in rv.__dict__` 的 `name` 直接 `raise KeyError("Attempt to overwrite
+  'name' in LogRecord")`），真跑到这条 warning 会把 (c2) best-effort 清理失败
+  升级成整个 DELETE 请求 500——完全违背 (c2) 段落自己写的 "best-effort，不阻断
+  主删除流程" 设计意图。改为 `extra={"server_name": name}`；未把 `name` 内嵌进
+  消息字符串（`name` 是请求路径参数，字符串插值会触发 CodeQL
+  `py/log-injection`）。
+- **变异测试**:`test_mcp_servers_api.py` 新增
+  `test_delete_best_effort_secret_cleanup_does_not_abort_request` ——
+  用 `_DeleteAlwaysFailsSecretStore`（真实 secret_store 的 wrapper，`get`/`put`
+  透传，`delete` 恒抛 `RuntimeError`）替换 `app.state.secret_store`，创建带
+  token 的 server 后调用 DELETE，断言：①响应 204；②
+  `tenant_mcp_server_store.get(...)` 查行真没了；③audit_store 里
+  `AuditAction.MCP_SERVER_DELETE` 已写；④异常未外抛。钉死 (c2) 的
+  best-effort 不变式，顺带证明修复后 `logger.warning` 不再炸。
+- **红态验证**:`git stash` 掉 src 改动、单独跑新测试 → 复现
+  `KeyError: "Attempt to overwrite 'name' in LogRecord"`（栈顶在
+  `logging/__init__.py:makeRecord`），与 review 描述的故障模式完全一致；
+  `stash pop` 恢复修复后重跑转绿。
+
+### 验证
+
+```
+uv run pytest services/control-plane/tests/test_mcp_servers_api.py -q
+# 34 passed
+
+uv run ruff check services/control-plane
+# All checks passed!
+
+uv run ruff format --check services/control-plane
+# 395 files already formatted
+```
