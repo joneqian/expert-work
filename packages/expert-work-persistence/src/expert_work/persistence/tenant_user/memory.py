@@ -103,3 +103,18 @@ class InMemoryTenantUserStore(TenantUserStore):
         if row.deleted_at is None:
             self._rows[user_id] = row.model_copy(update={"deleted_at": now})
         return True
+
+    async def hard_delete_deactivated(self, *, before: datetime, limit: int = 1000) -> int:
+        expired = sorted(
+            (
+                row
+                for row in self._rows.values()
+                if row.deleted_at is not None and row.deleted_at < before
+            ),
+            key=lambda row: row.deleted_at or datetime.min.replace(tzinfo=UTC),
+        )[:limit]
+        if not expired:
+            return 0
+        for row in expired:
+            del self._rows[row.id]
+        return len(expired)

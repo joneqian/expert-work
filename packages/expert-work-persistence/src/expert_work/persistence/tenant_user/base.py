@@ -93,3 +93,18 @@ class TenantUserStore(abc.ABC):
         within the retention window); ``resolve`` leaves ``deleted_at`` as-is
         so a returning purged identity stays deactivated.
         """
+
+    @abc.abstractmethod
+    async def hard_delete_deactivated(self, *, before: datetime, limit: int = 1000) -> int:
+        """PR1 Task 5 — retention job: physically DELETE deactivated rows
+        whose ``deleted_at`` is older than ``before``.
+
+        Cross-tenant: NO ``tenant_id`` predicate — mirrors
+        :meth:`expert_work.persistence.memory.base.MemoryStore.hard_delete_expired`,
+        this is the platform-wide retention sweep's own method (consumed by
+        the ``retention-cleanup-job``), not a per-tenant repository call.
+        Deletes at most ``limit`` rows, oldest ``deleted_at`` first, and
+        returns the number of rows actually removed. Active rows
+        (``deleted_at IS NULL``) — including one that re-``resolve``d after
+        being deactivated — are never touched.
+        """
