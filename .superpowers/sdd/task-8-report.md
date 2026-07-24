@@ -95,3 +95,33 @@ uv run mypy packages/expert-work-persistence/src/expert_work/persistence/image_u
   `_purge_images` 里的 `except Exception` 主要兜网络/后端层失败,不是"key 已不存在"这类正常
   幂等路径——重跑时 `list_for_user` 本身返回空列表(行已在首次 purge 删光),所以幂等靠"没有
   行可循环"而不是靠 delete 的幂等语义,两者共同保证重跑三个 image_blobs_* 计数都是 0。
+
+## T8 review Minor 补测(2026-07-24)
+
+**问题**:review 指出 `_purge_images` 的 `object_store.delete` 抛异常分支
+(`image_blobs_failed` 计数,行照删不阻断)没有被任何测试驱动过——既有三处
+`image_blobs_failed` 断言全是 `== 0`。
+
+**修法**:`test_user_purge.py` 新增 `_FailingObjectStore`(继承
+`InMemoryObjectStore`,`delete` 恒抛 `RuntimeError`)+
+`test_purge_user_image_blob_delete_failure_still_deletes_rows`——用户 A 挂 2 张
+image_upload 行,object_store 用 `_FailingObjectStore`,purge 后断言:
+`image_blobs_failed == 2`、`image_blobs_removed == 0`、
+`deleted["image_upload"] == 2`(行照删)、`"image_upload" not in summary.failures`
+(不算步骤失败)、`image_uploads.list_for_user` 真的空。
+
+**变异自验**:临时把 `_purge_images` 循环里 `except Exception: summary.image_blobs_failed
++= 1; logger.warning(...)` 改成 `except Exception: raise`(让异常穿透到 `_step`
+把整个 `image_upload` 步骤标记失败,`delete_all_for_user` 不会被跑到)→
+`pytest -k blob_delete_failure` 变红(`AssertionError`:`deleted["image_upload"]`
+不存在 + `"image_upload" in summary.failures`)→ 改回原样 → `git diff` 确认源码
+无残留改动 → 全量 8 个测试复跑绿。
+
+**验证**:
+```
+uv run pytest services/control-plane/tests/test_user_purge.py -q
+# 8 passed
+
+uv run ruff check services/control-plane
+# All checks passed!
+```
