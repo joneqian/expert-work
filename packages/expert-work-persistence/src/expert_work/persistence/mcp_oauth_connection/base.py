@@ -103,3 +103,32 @@ class McpOAuthConnectionStore(abc.ABC):
         connections. ``user_id`` is the app-layer string scope on this table
         (Text column). The encrypted token *values* referenced by
         ``secret://`` refs are reaped separately by the secret store's TTL."""
+
+    @abc.abstractmethod
+    async def count_for_catalog(self, *, catalog_id: UUID) -> int:
+        """Count connections for a catalog connector, across EVERY tenant.
+
+        Platform-scope caller only (MCP catalog delete-guard, Task 8) — no
+        ``tenant_id`` predicate by design. There is no existing bypass-RLS
+        session precedent on this store, so a SQL implementation runs under
+        the caller's ordinary session; the caller must be a platform-scope
+        path (e.g. a superuser/BYPASSRLS DB connection) or RLS filters every
+        row out."""
+
+    @abc.abstractmethod
+    async def list_for_catalog(
+        self, *, catalog_id: UUID, limit: int = 1000
+    ) -> list[McpOAuthConnectionRecord]:
+        """List connections for a catalog connector, across EVERY tenant.
+
+        Platform-scope caller only (see :meth:`count_for_catalog`). Ordered
+        by ``created_at`` ascending, capped at ``limit``."""
+
+    @abc.abstractmethod
+    async def delete_for_catalog(self, *, catalog_id: UUID) -> int:
+        """Hard-delete every connection for a catalog connector, across EVERY
+        tenant. Returns the count deleted (0 when none).
+
+        Platform-scope caller only (see :meth:`count_for_catalog`). Used by
+        the MCP catalog delete-guard (Task 8) to force-clear lingering
+        connections before removing a catalog entry."""
