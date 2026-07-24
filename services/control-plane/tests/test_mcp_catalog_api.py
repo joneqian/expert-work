@@ -24,7 +24,8 @@ from control_plane.settings import Settings
 from expert_work.common.lifecycle import Lifecycle
 from expert_work.persistence import McpConnectorCatalogInUseError
 from expert_work.persistence.audit_log import InMemoryAuditLogStore
-from expert_work.protocol import AuditQuery, Role
+from expert_work.protocol import AuditQuery, McpOAuthConnectionPatch, Role
+from expert_work.runtime.secret_store.base import SecretNotFoundError
 from orchestrator.tools.mcp import MCPToolDef
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -470,6 +471,154 @@ async def test_delete_in_use_409(ctx: _Ctx) -> None:
     ctx.app.state.mcp_connector_catalog_store = _InUseStore(real_store)  # type: ignore[attr-defined]
     resp = await ctx.client.delete(
         f"/v1/platform/mcp-catalog/{catalog_id}", headers=ctx.admin_headers
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "CATALOG_IN_USE"
+
+
+# ---------------------------------------------------------------------------
+# Delete guard: user OAuth connections (deletion-hygiene PR2 Task 8)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_oauth_connection(
+    ctx: _Ctx, *, catalog_id: UUID, tenant_id: UUID, user_id: str, name: str
+) -> tuple[UUID, str, str]:
+    """Seed a ``connected`` OAuth connection with real token secrets in the
+    app's in-memory stores (bypasses the authorize/callback HTTP flow, which
+    this endpoint's delete-guard doesn't need). Returns
+    ``(connection_id, access_secret_name, refresh_secret_name)``."""
+    oauth_store = ctx.app.state.mcp_oauth_connection_store  # type: ignore[attr-defined]
+    secret_store = ctx.app.state.secret_store  # type: ignore[attr-defined]
+    conn = await oauth_store.create(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        catalog_id=catalog_id,
+        name=name,
+        resolved_url="https://mcp.example.com/sse",
+    )
+    access_name = f"expert-work/oauth/{conn.id}/access"
+    refresh_name = f"expert-work/oauth/{conn.id}/refresh"
+    await secret_store.put(access_name, "access-token-value")
+    await secret_store.put(refresh_name, "refresh-token-value")
+    await oauth_store.update(
+        connection_id=conn.id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        patch=McpOAuthConnectionPatch(
+            status="connected",
+            access_token_ref=f"secret://{access_name}",
+            refresh_token_ref=f"secret://{refresh_name}",
+        ),
+    )
+    return conn.id, access_name, refresh_name
+
+
+@pytest.mark.asyncio
+async def test_delete_no_oauth_connections_deletes_normally(ctx: _Ctx) -> None:
+    create = await ctx.client.post(
+        "/v1/platform/mcp-catalog", json=_valid_entry(), headers=ctx.admin_headers
+    )
+    catalog_id = create.json()["data"]["id"]
+    resp = await ctx.client.delete(
+        f"/v1/platform/mcp-catalog/{catalog_id}", headers=ctx.admin_headers
+    )
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_with_oauth_connections_409_without_force(ctx: _Ctx) -> None:
+    create = await ctx.client.post(
+        "/v1/platform/mcp-catalog", json=_valid_entry(), headers=ctx.admin_headers
+    )
+    catalog_id = UUID(create.json()["data"]["id"])
+    await _seed_oauth_connection(
+        ctx, catalog_id=catalog_id, tenant_id=uuid4(), user_id="user-1", name="github"
+    )
+    await _seed_oauth_connection(
+        ctx, catalog_id=catalog_id, tenant_id=uuid4(), user_id="user-2", name="github"
+    )
+
+    resp = await ctx.client.delete(
+        f"/v1/platform/mcp-catalog/{catalog_id}", headers=ctx.admin_headers
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "CATALOG_HAS_OAUTH_CONNECTIONS"
+    assert resp.json()["detail"]["count"] == 2
+
+    # Connections + the catalog row both survive the blocked delete.
+    oauth_store = ctx.app.state.mcp_oauth_connection_store  # type: ignore[attr-defined]
+    assert await oauth_store.count_for_catalog(catalog_id=catalog_id) == 2
+    still_there = await ctx.client.get(
+        f"/v1/platform/mcp-catalog/{catalog_id}", headers=ctx.admin_headers
+    )
+    assert still_there.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_force_cascades_connections_and_secrets(ctx: _Ctx) -> None:
+    create = await ctx.client.post(
+        "/v1/platform/mcp-catalog", json=_valid_entry(), headers=ctx.admin_headers
+    )
+    catalog_id = UUID(create.json()["data"]["id"])
+    _, access_1, refresh_1 = await _seed_oauth_connection(
+        ctx, catalog_id=catalog_id, tenant_id=uuid4(), user_id="user-1", name="github"
+    )
+    _, access_2, refresh_2 = await _seed_oauth_connection(
+        ctx, catalog_id=catalog_id, tenant_id=uuid4(), user_id="user-2", name="github"
+    )
+
+    resp = await ctx.client.delete(
+        f"/v1/platform/mcp-catalog/{catalog_id}",
+        params={"force": "true"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 204, resp.text
+
+    oauth_store = ctx.app.state.mcp_oauth_connection_store  # type: ignore[attr-defined]
+    secret_store = ctx.app.state.secret_store  # type: ignore[attr-defined]
+    assert await oauth_store.count_for_catalog(catalog_id=catalog_id) == 0
+    for name in (access_1, refresh_1, access_2, refresh_2):
+        with pytest.raises(SecretNotFoundError):
+            await secret_store.get(name)
+
+    page = await ctx.audit_store.query(AuditQuery(tenant_id=ctx.admin_tenant))
+    delete_entries = [r for r in page.entries if r.action.value == "mcp_catalog:delete"]
+    assert len(delete_entries) == 1
+    details = delete_entries[0].details
+    assert details["connections_removed"] == 2
+    assert details["secrets_removed"] == 4
+    assert details["secrets_failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_tenant_mcp_server_in_use_blocks_even_with_force(ctx: _Ctx) -> None:
+    """``?force=true`` only cascades OAuth connections — it never bypasses the
+    tenant_mcp_server RESTRICT guard; an instantiated instance must still be
+    removed first."""
+    create = await ctx.client.post(
+        "/v1/platform/mcp-catalog", json=_valid_entry(), headers=ctx.admin_headers
+    )
+    assert create.status_code == 201
+    catalog_id = create.json()["data"]["id"]
+
+    real_store = ctx.app.state.mcp_connector_catalog_store  # type: ignore[attr-defined]
+
+    class _InUseStore:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        async def get_by_id(self, cid: UUID) -> object:
+            return await self._inner.get_by_id(cid)
+
+        async def delete(self, cid: UUID) -> None:
+            raise McpConnectorCatalogInUseError(catalog_id=cid)
+
+    ctx.app.state.mcp_connector_catalog_store = _InUseStore(real_store)  # type: ignore[attr-defined]
+    resp = await ctx.client.delete(
+        f"/v1/platform/mcp-catalog/{catalog_id}",
+        params={"force": "true"},
+        headers=ctx.admin_headers,
     )
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "CATALOG_IN_USE"

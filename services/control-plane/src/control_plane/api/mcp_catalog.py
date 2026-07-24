@@ -16,6 +16,7 @@ handler:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Annotated
 from uuid import UUID
@@ -32,6 +33,7 @@ from expert_work.persistence import (
     McpConnectorCatalogInUseError,
     McpConnectorCatalogNotFoundError,
     McpConnectorCatalogStore,
+    McpOAuthConnectionStore,
 )
 from expert_work.protocol import (
     AuditAction,
@@ -44,11 +46,17 @@ from expert_work.runtime.audit.logger import AuditLogger
 from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
 from orchestrator.tools.mcp import MCPToolDef
 
+logger = logging.getLogger("expert_work.control_plane.mcp_catalog")
+
 _DEFAULT_PROBE_TIMEOUT_S = 30.0
 
 
 def _get_catalog_store(request: Request) -> McpConnectorCatalogStore:
     return request.app.state.mcp_connector_catalog_store  # type: ignore[no-any-return]
+
+
+def _get_oauth_store(request: Request) -> McpOAuthConnectionStore:
+    return request.app.state.mcp_oauth_connection_store  # type: ignore[no-any-return]
 
 
 def _get_secret_store(request: Request) -> SecretStore:
@@ -404,9 +412,12 @@ def build_mcp_catalog_router() -> APIRouter:
         catalog_id: Annotated[UUID, Path()],
         principal: Annotated[Principal, Depends(require("mcp_catalog", "delete"))],
         store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
+        oauth_store: Annotated[McpOAuthConnectionStore, Depends(_get_oauth_store)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         pool_service: Annotated[object, Depends(_get_platform_mcp_pool_service)],
         agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
+        force: Annotated[bool, Query()] = False,
     ) -> None:
         _require_system_admin(principal)
         # Resolve the row first so the audit record carries the stable name.
@@ -417,6 +428,50 @@ def build_mcp_catalog_router() -> APIRouter:
                 status_code=404,
                 detail={"code": "CATALOG_NOT_FOUND", "message": "not found"},
             )
+
+        # Users may still hold live OAuth connections to this connector — the
+        # tenant_mcp_server RESTRICT guard below never fires for oauth2
+        # connectors (no tenant_mcp_server row is ever created for them), so
+        # this is the only app-level protection. Default: 409 with the count
+        # so the admin sees the blast radius; ``?force=true`` opts into the
+        # cascade (delete every connection + its token secrets).
+        async with bypass_rls_session():
+            connection_count = await oauth_store.count_for_catalog(catalog_id=catalog_id)
+        if connection_count > 0 and not force:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CATALOG_HAS_OAUTH_CONNECTIONS",
+                    "message": (
+                        f"{connection_count} user OAuth connection(s) still reference this "
+                        "connector — pass ?force=true to delete them along with the catalog "
+                        "entry"
+                    ),
+                    "count": connection_count,
+                },
+            )
+
+        connections_removed = 0
+        secrets_removed = 0
+        secrets_failed = 0
+        if force and connection_count > 0:
+            async with bypass_rls_session():
+                connections = await oauth_store.list_for_catalog(catalog_id=catalog_id)
+            for connection in connections:
+                for ref in (connection.access_token_ref, connection.refresh_token_ref):
+                    if not ref:
+                        continue
+                    try:
+                        await secret_store.delete(parse_secret_ref(ref))
+                        secrets_removed += 1
+                    except Exception:
+                        secrets_failed += 1
+                        logger.warning(
+                            "mcp_catalog.delete_force_secret_cleanup_failed", exc_info=True
+                        )
+            async with bypass_rls_session():
+                connections_removed = await oauth_store.delete_for_catalog(catalog_id=catalog_id)
+
         try:
             async with bypass_rls_session():
                 await store.delete(catalog_id)
@@ -441,7 +496,12 @@ def build_mcp_catalog_router() -> APIRouter:
             resource_type="mcp_connector_catalog",
             resource_id=existing.name,
             trace_id=current_trace_id_hex(),
-            details={"name": existing.name},
+            details={
+                "name": existing.name,
+                "connections_removed": connections_removed,
+                "secrets_removed": secrets_removed,
+                "secrets_failed": secrets_failed,
+            },
         )
         await _invalidate_platform_mcp(pool_service, agent_runtime)
 
