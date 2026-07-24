@@ -7,7 +7,14 @@ from uuid import uuid4
 
 import pytest
 
-from expert_work.persistence import InMemoryArtifactStore, InMemoryImageUploadStore
+from expert_work.persistence import (
+    InMemoryArtifactStore,
+    InMemoryImageUploadStore,
+    InMemoryMemoryStore,
+    InMemoryTenantUserStore,
+    InMemoryUserWorkspaceStore,
+)
+from expert_work.protocol import MemoryItem
 from expert_work.runtime.storage import InMemoryObjectStore
 from retention_cleanup_job.job import CleanupReport, RetentionCleanupJob
 
@@ -24,6 +31,12 @@ def test_cleanup_report_default_is_all_zero() -> None:
     assert report.artifacts_soft_deleted == 0
     assert report.artifacts_hard_deleted == 0
     assert report.approvals_timed_out == 0
+    assert report.memory_hard_deleted == 0
+    assert report.workspaces_hard_deleted == 0
+    assert report.workspace_archives_removed == 0
+    assert report.workspace_archives_failed == 0
+    assert report.workspaces_pending_archive == 0
+    assert report.tenant_users_hard_deleted == 0
     assert report.duration_seconds == 0.0
     assert report.audit_deleted_by_tenant == {}
 
@@ -58,6 +71,30 @@ def test_job_rejects_non_positive_artifact_hard_delete_grace_days() -> None:
         RetentionCleanupJob(
             db_session_factory=lambda: None,  # type: ignore[arg-type]
             artifact_hard_delete_grace_days=0,
+        )
+
+
+def test_job_rejects_non_positive_memory_hard_delete_grace_days() -> None:
+    with pytest.raises(ValueError, match="memory_hard_delete_grace_days"):
+        RetentionCleanupJob(
+            db_session_factory=lambda: None,  # type: ignore[arg-type]
+            memory_hard_delete_grace_days=0,
+        )
+
+
+def test_job_rejects_non_positive_workspace_archive_retention_days() -> None:
+    with pytest.raises(ValueError, match="workspace_archive_retention_days"):
+        RetentionCleanupJob(
+            db_session_factory=lambda: None,  # type: ignore[arg-type]
+            workspace_archive_retention_days=0,
+        )
+
+
+def test_job_rejects_non_positive_tenant_user_hard_delete_grace_days() -> None:
+    with pytest.raises(ValueError, match="tenant_user_hard_delete_grace_days"):
+        RetentionCleanupJob(
+            db_session_factory=lambda: None,  # type: ignore[arg-type]
+            tenant_user_hard_delete_grace_days=0,
         )
 
 
@@ -369,3 +406,226 @@ async def _tenant_of(store: object, run_id: object) -> object:
     """Test helper — pull a seeded record's tenant_id back out."""
     rows = store._rows  # type: ignore[attr-defined]
     return rows[run_id].tenant_id
+
+
+# ---------------------------------------------------------------------------
+# Deletion hygiene PR1 (Task 7) — memory hard-delete sweep
+# ---------------------------------------------------------------------------
+
+
+def _memory_item(*, tenant: object, user: object, content: str = "c") -> MemoryItem:
+    return MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,  # type: ignore[arg-type]
+        user_id=user,  # type: ignore[arg-type]
+        kind="fact",
+        content=content,
+        embedding=(1.0, 0.0),
+    )
+
+
+@pytest.mark.asyncio
+async def test_sweep_memory_hard_deletes_only_old_soft_deleted() -> None:
+    """A row soft-deleted 100 days ago is reaped; one soft-deleted only
+    10 days ago is left alone (still inside the grace window)."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    old = _memory_item(tenant=tenant, user=user, content="old")
+    recent = _memory_item(tenant=tenant, user=user, content="recent")
+    await store.write([old, recent])
+    assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=old.id)
+    assert await store.soft_delete(tenant_id=tenant, user_id=user, memory_id=recent.id)
+    now = datetime.now(UTC)
+    for idx, row in enumerate(store._rows):
+        if row.id == old.id:
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=100)})
+        elif row.id == recent.id:
+            store._rows[idx] = row.model_copy(update={"deleted_at": now - timedelta(days=10)})
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        memory_store=store,
+        memory_hard_delete_grace_days=90,
+    )
+    assert await job._sweep_memory() == 1
+    remaining_ids = {row.id for row in store._rows}
+    assert remaining_ids == {recent.id}
+
+
+@pytest.mark.asyncio
+async def test_sweep_memory_noop_without_store() -> None:
+    """Job constructed without a MemoryStore skips the memory pass cleanly."""
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+    )
+    assert await job._sweep_memory() == 0
+
+
+# ---------------------------------------------------------------------------
+# Deletion hygiene PR1 (Task 7) — tenant_user hard-delete sweep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sweep_tenant_users_hard_deletes_only_old_deactivated() -> None:
+    """A user deactivated 100 days ago is reaped; one deactivated only 10
+    days ago is left alone (still inside the grace window)."""
+    store = InMemoryTenantUserStore()
+    tenant = uuid4()
+    old = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="old")
+    recent = await store.resolve(tenant_id=tenant, subject_type="user", subject_id="recent")
+    now = datetime.now(UTC)
+    assert await store.deactivate(old.id, tenant_id=tenant, now=now - timedelta(days=100))
+    assert await store.deactivate(recent.id, tenant_id=tenant, now=now - timedelta(days=10))
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        tenant_user_store=store,
+        tenant_user_hard_delete_grace_days=90,
+    )
+    assert await job._sweep_tenant_users() == 1
+    assert await store.get(old.id, tenant_id=tenant) is None
+    assert await store.get(recent.id, tenant_id=tenant) is not None
+
+
+@pytest.mark.asyncio
+async def test_sweep_tenant_users_noop_without_store() -> None:
+    """Job constructed without a TenantUserStore skips the pass cleanly."""
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+    )
+    assert await job._sweep_tenant_users() == 0
+
+
+# ---------------------------------------------------------------------------
+# Deletion hygiene PR1 (Task 7) — workspace archive hard-delete sweep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sweep_workspaces_removes_archive_key_and_hard_deletes_row() -> None:
+    """An archived row past retention gets its ObjectStore key removed and
+    the row physically deleted."""
+    store = InMemoryUserWorkspaceStore()
+    object_store = InMemoryObjectStore()
+    tenant = uuid4()
+    now = datetime.now(UTC)
+
+    ws = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=ws.id, now=now - timedelta(days=100))
+    await store.mark_archived(workspace_id=ws.id, archived_object_key="ws-archives/x.tar.zst")
+    await object_store.put("ws-archives/x.tar.zst", b"ARCHIVE")
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        workspace_store=store,
+        object_store=object_store,
+        workspace_archive_retention_days=90,
+    )
+    hard, keys_ok, keys_failed, pending = await job._sweep_workspaces()
+    assert (hard, keys_ok, keys_failed, pending) == (1, 1, 0, 0)
+    assert await store.get(tenant_id=tenant, user_id=ws.user_id) is None
+    from expert_work.runtime.storage.base import ObjectNotFoundError
+
+    with pytest.raises(ObjectNotFoundError):
+        await object_store.get("ws-archives/x.tar.zst")
+
+
+@pytest.mark.asyncio
+async def test_sweep_workspaces_keeps_row_when_key_delete_fails() -> None:
+    """A real object-store failure keeps the row (it's the only lookup
+    back to the orphaned key) and is tallied as failed — the opposite
+    tradeoff from the image-upload pass."""
+    store = InMemoryUserWorkspaceStore()
+    tenant = uuid4()
+    now = datetime.now(UTC)
+    ws = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=ws.id, now=now - timedelta(days=100))
+    await store.mark_archived(workspace_id=ws.id, archived_object_key="ws-archives/y.tar.zst")
+
+    class _FailingStore:
+        async def delete(self, key: str) -> None:
+            raise RuntimeError("boom")
+
+        async def put(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        async def get(self, key: str) -> bytes | None:
+            return None
+
+        async def list_prefix(self, prefix: str) -> list[str]:
+            return []
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        workspace_store=store,
+        object_store=_FailingStore(),  # type: ignore[arg-type]
+        workspace_archive_retention_days=90,
+    )
+    hard, keys_ok, keys_failed, pending = await job._sweep_workspaces()
+    assert (hard, keys_ok, keys_failed, pending) == (0, 0, 1, 0)
+    # Row survives — it's the only remaining lookup back to the key.
+    assert await store.get(tenant_id=tenant, user_id=ws.user_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_sweep_workspaces_treats_missing_key_as_success() -> None:
+    """The archive key is already gone from ObjectStore (e.g. a previous
+    sweep removed it but crashed before the row hard-delete committed).
+    ``ObjectStore.delete`` is idempotent for a missing key, so this reads
+    as success and the row is reaped."""
+    store = InMemoryUserWorkspaceStore()
+    object_store = InMemoryObjectStore()
+    tenant = uuid4()
+    now = datetime.now(UTC)
+    ws = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=ws.id, now=now - timedelta(days=100))
+    await store.mark_archived(workspace_id=ws.id, archived_object_key="ws-archives/gone.tar.zst")
+    # Deliberately never ``put`` the key — it's already absent.
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        workspace_store=store,
+        object_store=object_store,
+        workspace_archive_retention_days=90,
+    )
+    hard, keys_ok, keys_failed, pending = await job._sweep_workspaces()
+    assert (hard, keys_ok, keys_failed, pending) == (1, 1, 0, 0)
+    assert await store.get(tenant_id=tenant, user_id=ws.user_id) is None
+
+
+@pytest.mark.asyncio
+async def test_sweep_workspaces_counts_pending_archive_without_deleting() -> None:
+    """A soft-deleted row whose J.15 archive job hasn't run yet
+    (``archived_object_key IS NULL``) is not a hard-delete candidate even
+    once its ``deleted_at`` is past the retention cutoff — it only shows
+    up in the ``pending_archive`` tally."""
+    store = InMemoryUserWorkspaceStore()
+    object_store = InMemoryObjectStore()
+    tenant = uuid4()
+    now = datetime.now(UTC)
+    stuck = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=stuck.id, now=now - timedelta(days=100))
+    # No mark_archived() call — the archive job hasn't run yet.
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        workspace_store=store,
+        object_store=object_store,
+        workspace_archive_retention_days=90,
+    )
+    hard, keys_ok, keys_failed, pending = await job._sweep_workspaces()
+    assert (hard, keys_ok, keys_failed, pending) == (0, 0, 0, 1)
+    assert await store.get(tenant_id=tenant, user_id=stuck.user_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_sweep_workspaces_noop_without_object_store() -> None:
+    """Job constructed with a workspace store but no object store skips
+    the pass cleanly (the pass has its own object-store gate)."""
+    store = InMemoryUserWorkspaceStore()
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        workspace_store=store,
+    )
+    assert await job._sweep_workspaces() == (0, 0, 0, 0)

@@ -32,6 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from expert_work.persistence.approval import ApprovalStore
 from expert_work.persistence.artifact import ArtifactStore
 from expert_work.persistence.image_upload import ImageUploadStore
+from expert_work.persistence.memory import MemoryStore
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.persistence.workspace import UserWorkspaceStore
 from expert_work.protocol import ApprovalStatus
 from expert_work.runtime.storage import ObjectStore
 
@@ -67,6 +70,13 @@ class CleanupReport:
     # Mini-ADR J-24 (J.8-step3b) — approvals auto-rejected past their
     # 24h ``timeout_at``.
     approvals_timed_out: int = 0
+    # Deletion hygiene PR1 (Task 7) — 90-day physical hard-delete sweeps.
+    memory_hard_deleted: int = 0
+    workspaces_hard_deleted: int = 0
+    workspace_archives_removed: int = 0
+    workspace_archives_failed: int = 0
+    workspaces_pending_archive: int = 0
+    tenant_users_hard_deleted: int = 0
     duration_seconds: float = 0.0
     # Per-tenant breakdown of audit deletes (for observability).
     audit_deleted_by_tenant: dict[str, int] = field(default_factory=dict)
@@ -87,6 +97,12 @@ class RetentionCleanupJob:
         artifact_retention_days: int = 90,
         artifact_hard_delete_grace_days: int = 60,
         approval_store: ApprovalStore | None = None,
+        memory_store: MemoryStore | None = None,
+        memory_hard_delete_grace_days: int = 90,
+        workspace_store: UserWorkspaceStore | None = None,
+        workspace_archive_retention_days: int = 90,
+        tenant_user_store: TenantUserStore | None = None,
+        tenant_user_hard_delete_grace_days: int = 90,
     ) -> None:
         if batch_size <= 0:
             msg = "batch_size must be positive"
@@ -100,6 +116,15 @@ class RetentionCleanupJob:
         if artifact_hard_delete_grace_days < 1:
             msg = "artifact_hard_delete_grace_days must be >= 1"
             raise ValueError(msg)
+        if memory_hard_delete_grace_days < 1:
+            msg = "memory_hard_delete_grace_days must be >= 1"
+            raise ValueError(msg)
+        if workspace_archive_retention_days < 1:
+            msg = "workspace_archive_retention_days must be >= 1"
+            raise ValueError(msg)
+        if tenant_user_hard_delete_grace_days < 1:
+            msg = "tenant_user_hard_delete_grace_days must be >= 1"
+            raise ValueError(msg)
         self._sf = db_session_factory
         self._batch_size = batch_size
         self._image_upload_store = image_upload_store
@@ -109,6 +134,12 @@ class RetentionCleanupJob:
         self._artifact_retention_days = artifact_retention_days
         self._artifact_hard_delete_grace_days = artifact_hard_delete_grace_days
         self._approval_store = approval_store
+        self._memory_store = memory_store
+        self._memory_grace_days = memory_hard_delete_grace_days
+        self._workspace_store = workspace_store
+        self._workspace_retention_days = workspace_archive_retention_days
+        self._tenant_user_store = tenant_user_store
+        self._tenant_user_grace_days = tenant_user_hard_delete_grace_days
 
     async def run_once(self) -> CleanupReport:
         """Run the retention passes once and return a tally.
@@ -134,6 +165,14 @@ class RetentionCleanupJob:
         image_rows, image_keys_ok, image_keys_failed = await self._delete_expired_images()
         artifact_soft, artifact_hard = await self._sweep_artifacts()
         approvals_timed_out = await self._sweep_approval_timeouts()
+        memory_hard_deleted = await self._sweep_memory()
+        tenant_users_hard_deleted = await self._sweep_tenant_users()
+        (
+            workspaces_hard_deleted,
+            workspace_archives_removed,
+            workspace_archives_failed,
+            workspaces_pending_archive,
+        ) = await self._sweep_workspaces()
 
         return CleanupReport(
             audit_deleted=audit_deleted,
@@ -147,6 +186,12 @@ class RetentionCleanupJob:
             artifacts_soft_deleted=artifact_soft,
             artifacts_hard_deleted=artifact_hard,
             approvals_timed_out=approvals_timed_out,
+            memory_hard_deleted=memory_hard_deleted,
+            workspaces_hard_deleted=workspaces_hard_deleted,
+            workspace_archives_removed=workspace_archives_removed,
+            workspace_archives_failed=workspace_archives_failed,
+            workspaces_pending_archive=workspaces_pending_archive,
+            tenant_users_hard_deleted=tenant_users_hard_deleted,
             duration_seconds=time.monotonic() - started,
         )
 
@@ -179,6 +224,85 @@ class RetentionCleanupJob:
             if ok:
                 timed_out += 1
         return timed_out
+
+    async def _sweep_memory(self) -> int:
+        """Deletion hygiene PR1 (Task 7) — physically remove memory rows
+        soft-deleted (K.K6 forget) past ``memory_hard_delete_grace_days``.
+
+        No-op when no :class:`MemoryStore` is wired (unit-test path /
+        deployments not running this pass).
+        """
+        if self._memory_store is None:
+            return 0
+        cutoff = datetime.now(UTC) - timedelta(days=self._memory_grace_days)
+        return await self._memory_store.hard_delete_expired(before=cutoff, limit=self._batch_size)
+
+    async def _sweep_tenant_users(self) -> int:
+        """Deletion hygiene PR1 (Task 7) — physically remove tenant_user rows
+        deactivated (Phase 3a purge_user) past
+        ``tenant_user_hard_delete_grace_days``.
+
+        No-op when no :class:`TenantUserStore` is wired (unit-test path /
+        deployments not running this pass).
+        """
+        if self._tenant_user_store is None:
+            return 0
+        cutoff = datetime.now(UTC) - timedelta(days=self._tenant_user_grace_days)
+        return await self._tenant_user_store.hard_delete_deactivated(
+            before=cutoff, limit=self._batch_size
+        )
+
+    async def _sweep_workspaces(self) -> tuple[int, int, int, int]:
+        """Deletion hygiene PR1 (Task 7) — physically remove ``user_workspace``
+        rows whose archive (J.15) has aged past
+        ``workspace_archive_retention_days``.
+
+        Returns ``(rows_hard_deleted, keys_removed, keys_failed,
+        pending_archive)``.
+
+        The takeaway with the image-upload pass (:meth:`_delete_expired_images`)
+        is reversed here: a failed archive-key delete **keeps** the row
+        (the row is the only remaining lookup for the orphaned key —
+        losing it would leak the archive forever), and the row is retried
+        on the next nightly sweep. ``ObjectStore.delete`` is itself
+        idempotent — deleting an already-gone key does not raise — so a
+        genuinely missing archive is silently absorbed as success; only a
+        real failure (permission / network / backend error) trips the
+        ``except`` branch. Rows still awaiting their J.15 archive job
+        (``archived_object_key IS NULL``) are counted separately as
+        ``pending_archive`` — they are not candidates for this sweep at all.
+
+        No-op when either :class:`UserWorkspaceStore` or
+        :class:`~expert_work.runtime.storage.ObjectStore` is missing
+        (unit-test path / deployments without an object store wired).
+        """
+        if self._workspace_store is None or self._object_store is None:
+            return 0, 0, 0, 0
+        cutoff = datetime.now(UTC) - timedelta(days=self._workspace_retention_days)
+        pending = [
+            w
+            for w in await self._workspace_store.list_pending_archive()
+            if w.deleted_at is not None and w.deleted_at < cutoff
+        ]
+        rows = await self._workspace_store.list_archived_expired(
+            before=cutoff, limit=self._batch_size
+        )
+        hard = keys_ok = keys_failed = 0
+        for ws in rows:
+            assert ws.archived_object_key is not None  # noqa: S101 - list_archived_expired 谓词保证
+            try:
+                await self._object_store.delete(ws.archived_object_key)
+                keys_ok += 1
+            except Exception:
+                keys_failed += 1
+                logger.exception(
+                    "retention.workspace_archive_delete_failed key=%s",
+                    ws.archived_object_key,
+                )
+                continue
+            if await self._workspace_store.hard_delete(workspace_id=ws.id):
+                hard += 1
+        return hard, keys_ok, keys_failed, len(pending)
 
     async def _sweep_artifacts(self) -> tuple[int, int]:
         """Mini-ADR J-25 (J.9-step1) — two-stage artifact lifecycle sweep.

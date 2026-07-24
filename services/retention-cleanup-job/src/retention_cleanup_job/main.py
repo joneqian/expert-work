@@ -16,6 +16,9 @@ from expert_work.persistence import (
     SqlApprovalStore,
     SqlArtifactStore,
     SqlImageUploadStore,
+    SqlMemoryStore,
+    SqlTenantUserStore,
+    SqlUserWorkspaceStore,
     create_async_engine_from_config,
     create_async_session_factory,
 )
@@ -74,6 +77,16 @@ async def _amain() -> None:
         # metadata-only, safe to wire unconditionally.
         approval_store = SqlApprovalStore(session_factory)
 
+        # Deletion hygiene PR1 (Task 7) — memory / tenant_user hard-delete
+        # sweeps are metadata-only (no object store), safe to wire
+        # unconditionally like artifact_store / approval_store above. The
+        # workspace-archive sweep is metadata-only too, but its own pass
+        # still gates on ``object_store`` being wired (it deletes the
+        # archive's ObjectStore key before dropping the row).
+        memory_store = SqlMemoryStore(session_factory)
+        tenant_user_store = SqlTenantUserStore(session_factory)
+        workspace_store = SqlUserWorkspaceStore(session_factory)
+
         job = RetentionCleanupJob(
             db_session_factory=session_factory,
             batch_size=settings.batch_size,
@@ -84,13 +97,22 @@ async def _amain() -> None:
             artifact_retention_days=settings.artifact_retention_days,
             artifact_hard_delete_grace_days=settings.artifact_hard_delete_grace_days,
             approval_store=approval_store,
+            memory_store=memory_store,
+            memory_hard_delete_grace_days=settings.memory_hard_delete_grace_days,
+            workspace_store=workspace_store,
+            workspace_archive_retention_days=settings.workspace_archive_retention_days,
+            tenant_user_store=tenant_user_store,
+            tenant_user_hard_delete_grace_days=settings.tenant_user_hard_delete_grace_days,
         )
         logger.info("retention_cleanup_job.start batch=%d", settings.batch_size)
         report = await job.run_once()
         logger.info(
             "retention_cleanup_job.done audit=%d audit_skipped_unacked=%d "
             "event=%d jwt=%d image_rows=%d image_keys_ok=%d image_keys_failed=%d "
-            "artifact_soft=%d artifact_hard=%d approvals_timed_out=%d duration=%.2fs",
+            "artifact_soft=%d artifact_hard=%d approvals_timed_out=%d "
+            "memory_hard_deleted=%d workspaces_hard_deleted=%d "
+            "workspace_archives_removed=%d workspace_archives_failed=%d "
+            "workspaces_pending_archive=%d tenant_users_hard_deleted=%d duration=%.2fs",
             report.audit_deleted,
             report.audit_skipped_unacked,
             report.event_deleted,
@@ -101,6 +123,12 @@ async def _amain() -> None:
             report.artifacts_soft_deleted,
             report.artifacts_hard_deleted,
             report.approvals_timed_out,
+            report.memory_hard_deleted,
+            report.workspaces_hard_deleted,
+            report.workspace_archives_removed,
+            report.workspace_archives_failed,
+            report.workspaces_pending_archive,
+            report.tenant_users_hard_deleted,
             report.duration_seconds,
         )
         if report.audit_skipped_unacked > 0:
@@ -112,6 +140,11 @@ async def _amain() -> None:
             logger.warning(
                 "retention.image_object_keys_failed count=%d — object store unhealthy?",
                 report.image_object_keys_failed,
+            )
+        if report.workspace_archives_failed > 0:
+            logger.warning(
+                "retention.workspace_archives_failed count=%d — object store unhealthy?",
+                report.workspace_archives_failed,
             )
 
     await engine.dispose()

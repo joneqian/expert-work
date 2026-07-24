@@ -51,6 +51,16 @@ class RetentionCleanupSettings(BaseSettings):
     artifact_retention_days: int = Field(default=90, ge=1, le=3650)
     artifact_hard_delete_grace_days: int = Field(default=60, ge=1, le=3650)
 
+    # --------------------------------------------------- deletion hygiene PR1 (Task 7)
+    # Three 90-day physical hard-delete sweeps, each gated on its own
+    # soft-delete / deactivation timestamp already reached by the upstream
+    # (K.K6 memory forget, J.15 workspace archive, Phase 3a purge_user)
+    # flows. No per-tenant override in M0 — same rationale as the image
+    # retention knob above.
+    memory_hard_delete_grace_days: int = Field(default=90, ge=1, le=3650)
+    workspace_archive_retention_days: int = Field(default=90, ge=1, le=3650)
+    tenant_user_hard_delete_grace_days: int = Field(default=90, ge=1, le=3650)
+
     # Object-store backend that owns the uploaded image bytes. ``memory``
     # (default) skips the image pass — useful for unit-tested local cron
     # ticks and for envs that haven't deployed J.6 yet. ``s3-compatible``
