@@ -43,6 +43,7 @@ from expert_work.persistence.agent_instance.base import AgentInstanceStore
 from expert_work.persistence.approval import ApprovalStore
 from expert_work.persistence.artifact import ArtifactStore
 from expert_work.persistence.curation import CurationCandidateStore, EvalDatasetStore
+from expert_work.persistence.feedback_store import FeedbackStore
 from expert_work.persistence.image_upload import ImageUploadStore
 from expert_work.persistence.mcp_oauth_connection.base import McpOAuthConnectionStore
 from expert_work.persistence.memory import MemoryStore, MemoryWritebackDLQ
@@ -56,6 +57,7 @@ from expert_work.persistence.workspace.dlq import VolumeBackupDLQ
 from expert_work.protocol import AuditAction, AuditResult
 from expert_work.runtime.audit.logger import AuditLogger
 from expert_work.runtime.runs import RunStore
+from expert_work.runtime.storage import ObjectStore
 from orchestrator.tools import SupervisorClient
 
 logger = logging.getLogger("expert_work.control_plane.purge.user")
@@ -85,6 +87,12 @@ class PurgeUserDeps:
     webhook_endpoints: WebhookEndpointStore
     webhook_deliveries: WebhookDeliveryStore
     image_uploads: ImageUploadStore
+    #: Deletion-hygiene purge (Task 8) — feedback rows on the user's threads.
+    feedback: FeedbackStore
+    #: ``None`` when no object store is wired (e.g. some dev/test deployments)
+    #: — the image-blob purge step then hard-deletes rows only and counts them
+    #: as skipped (the retention sweep reaps the orphaned keys later).
+    object_store: ObjectStore | None
     #: ``None`` in control-plane deployments — the volume-backup DLQ is a
     #: supervisor-owned store (like ``sandbox_instance``); wire it if present.
     volume_backup_dlq: VolumeBackupDLQ | None
@@ -118,6 +126,11 @@ class PurgeSummary:
     deactivated: bool = False
     #: step name → error string, for the steps that raised (best-effort).
     failures: dict[str, str] = field(default_factory=dict)
+    #: Deletion-hygiene purge (Task 8) — object-store blob cleanup counts for
+    #: the user's image uploads (row deletion itself is ``deleted["image_upload"]``).
+    image_blobs_removed: int = 0
+    image_blobs_failed: int = 0
+    image_blobs_skipped: int = 0
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -132,6 +145,9 @@ class PurgeSummary:
             "workspace_marked_deleted": self.workspace_marked_deleted,
             "deactivated": self.deactivated,
             "failures": dict(self.failures),
+            "image_blobs_removed": self.image_blobs_removed,
+            "image_blobs_failed": self.image_blobs_failed,
+            "image_blobs_skipped": self.image_blobs_skipped,
             "ok": not self.failures,
         }
 
@@ -180,6 +196,19 @@ async def _purge_threads(
         # No request-derived value in the message (CodeQL py/log-injection).
         logger.warning("purge_user.threads_capped hit the %d-thread cap", _MAX_THREADS)
 
+    # Feedback on the user's threads, deleted BEFORE the per-thread purge loop
+    # below: if a thread's delete fails partway through, we don't want to be
+    # left with "the thread is gone but its feedback rows survive" — cascading
+    # the comments first means a failed thread purge still leaves a consistent
+    # (feedback-free) state to retry.
+    try:
+        summary.deleted["feedback"] = await deps.feedback.delete_for_threads(
+            tenant_id=tenant_id, thread_ids=thread_ids
+        )
+    except Exception as exc:  # best-effort, same failure-recording shape as _step
+        logger.warning("purge_user.feedback_failed", exc_info=True)
+        summary.failures["feedback"] = f"{type(exc).__name__}: {exc}"
+
     checkpointer = deps.runtime.durable_checkpointer
     adelete = getattr(checkpointer, "adelete_thread", None)
     for thread_id in thread_ids:
@@ -222,6 +251,34 @@ async def _purge_webhooks(
     summary.deleted["webhook_endpoint"] = len(endpoint_ids)
     summary.deleted["webhook_delivery"] = await deps.webhook_deliveries.delete_for_endpoints(
         endpoint_ids=endpoint_ids, tenant_id=tenant_id
+    )
+
+
+async def _purge_images(
+    deps: PurgeUserDeps, summary: PurgeSummary, *, tenant_id: UUID, user_id: UUID
+) -> None:
+    """Delete the user's image-upload object-store blobs, then their rows.
+
+    Deletion-hygiene purge (Task 8) — ``list_for_user`` returns every row
+    (active AND soft-deleted, per its docstring) so a soft-deleted image's
+    blob is cleaned up too, not just the ones still visible in the UI.
+    Row deletion always runs (even with no ``object_store`` wired) — an
+    orphaned object-store key is recoverable by the retention sweep, a
+    stuck ``image_upload`` row is not.
+    """
+    rows = await deps.image_uploads.list_for_user(tenant_id=tenant_id, user_id=user_id)
+    if deps.object_store is None:
+        summary.image_blobs_skipped = len(rows)
+    else:
+        for row in rows:
+            try:
+                await deps.object_store.delete(row.object_key)
+                summary.image_blobs_removed += 1
+            except Exception:  # best-effort: orphaned key beats a stuck purge
+                summary.image_blobs_failed += 1
+                logger.warning("purge_user.image_blob_failed", exc_info=True)
+    summary.deleted["image_upload"] = await deps.image_uploads.delete_all_for_user(
+        tenant_id=tenant_id, user_id=user_id
     )
 
 
@@ -303,11 +360,11 @@ async def purge_user(
         _purge_webhooks(deps, summary, tenant_id=tenant_id, user_id=user_id),
         default=None,
     )
-    summary.deleted["image_upload"] = await _step(
+    await _step(
         summary,
         "image_upload",
-        deps.image_uploads.delete_all_for_user(tenant_id=tenant_id, user_id=user_id),
-        default=0,
+        _purge_images(deps, summary, tenant_id=tenant_id, user_id=user_id),
+        default=None,
     )
     if deps.volume_backup_dlq is not None:
         summary.deleted["volume_backup_dlq"] = await _step(

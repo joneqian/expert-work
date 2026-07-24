@@ -139,3 +139,74 @@ async def test_list_reapable_respects_limit(sql_store: SqlStoreFixture) -> None:
         assert len(reapable) == 2
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_for_user_includes_soft_deleted_rows_and_scopes_by_tenant_and_user(
+    sql_store: SqlStoreFixture,
+) -> None:
+    """Deletion-hygiene purge (Task 8) — ``list_for_user`` must return
+    soft-deleted rows too (purge needs their ``object_key``), and its
+    predicate must be byte-identical to the in-memory implementation's:
+    tenant- and user-scoped, no ``deleted_at`` filter."""
+    store, engine = sql_store
+    try:
+        tenant_id = uuid4()
+        user_id = uuid4()
+        active_id = uuid4()
+        soft_deleted_id = uuid4()
+        other_user_id = uuid4()
+        other_tenant_id = uuid4()
+
+        await store.insert(
+            image_id=active_id,
+            tenant_id=tenant_id,
+            thread_id=uuid4(),
+            user_id=user_id,
+            object_key="tenants/x/uploads/active.png",
+            size_bytes=1,
+            mime_type="image/png",
+            sha256="x",
+        )
+        await store.insert(
+            image_id=soft_deleted_id,
+            tenant_id=tenant_id,
+            thread_id=uuid4(),
+            user_id=user_id,
+            object_key="tenants/x/uploads/soft-deleted.png",
+            size_bytes=1,
+            mime_type="image/png",
+            sha256="x",
+        )
+        await store.soft_delete(
+            image_id=soft_deleted_id, tenant_id=tenant_id, now=datetime.now(UTC)
+        )
+        # Another user in the same tenant — must not appear.
+        await store.insert(
+            image_id=other_user_id,
+            tenant_id=tenant_id,
+            thread_id=uuid4(),
+            user_id=uuid4(),
+            object_key="tenants/x/uploads/other-user.png",
+            size_bytes=1,
+            mime_type="image/png",
+            sha256="x",
+        )
+        # Same user id, different tenant — must not appear.
+        await store.insert(
+            image_id=other_tenant_id,
+            tenant_id=uuid4(),
+            thread_id=uuid4(),
+            user_id=user_id,
+            object_key="tenants/x/uploads/other-tenant.png",
+            size_bytes=1,
+            mime_type="image/png",
+            sha256="x",
+        )
+
+        rows = await store.list_for_user(tenant_id=tenant_id, user_id=user_id)
+        assert {r.id for r in rows} == {active_id, soft_deleted_id}
+        # created_at ascending.
+        assert [r.created_at for r in rows] == sorted(r.created_at for r in rows)
+    finally:
+        await engine.dispose()

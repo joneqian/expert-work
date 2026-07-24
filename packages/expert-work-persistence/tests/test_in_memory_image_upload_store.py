@@ -173,3 +173,86 @@ async def test_list_reapable_predicate_covers_old_and_soft_deleted() -> None:
     assert new_active not in reapable_ids
     # created_at ascending.
     assert [r.created_at for r in reapable] == sorted(r.created_at for r in reapable)
+
+
+@pytest.mark.asyncio
+async def test_list_for_user_includes_soft_deleted_rows_and_scopes_by_tenant_and_user() -> None:
+    """Deletion-hygiene purge (Task 8) — ``list_for_user`` must return
+    soft-deleted rows too (purge needs their ``object_key`` to clean up the
+    blob), and must not leak another tenant's or another user's rows."""
+    store = InMemoryImageUploadStore()
+    tenant = uuid4()
+    user = uuid4()
+    active_id = uuid4()
+    soft_deleted_id = uuid4()
+    other_user_id = uuid4()
+    other_tenant_id = uuid4()
+
+    await store.insert(
+        image_id=active_id,
+        tenant_id=tenant,
+        thread_id=uuid4(),
+        user_id=user,
+        object_key="active",
+        size_bytes=1,
+        mime_type="image/png",
+        sha256="x",
+    )
+    await store.insert(
+        image_id=soft_deleted_id,
+        tenant_id=tenant,
+        thread_id=uuid4(),
+        user_id=user,
+        object_key="soft-deleted",
+        size_bytes=1,
+        mime_type="image/png",
+        sha256="x",
+    )
+    await store.soft_delete(image_id=soft_deleted_id, tenant_id=tenant, now=datetime.now(UTC))
+    # Another user in the same tenant — must not appear.
+    await store.insert(
+        image_id=other_user_id,
+        tenant_id=tenant,
+        thread_id=uuid4(),
+        user_id=uuid4(),
+        object_key="other-user",
+        size_bytes=1,
+        mime_type="image/png",
+        sha256="x",
+    )
+    # Same user id, different tenant — must not appear.
+    await store.insert(
+        image_id=other_tenant_id,
+        tenant_id=uuid4(),
+        thread_id=uuid4(),
+        user_id=user,
+        object_key="other-tenant",
+        size_bytes=1,
+        mime_type="image/png",
+        sha256="x",
+    )
+
+    rows = await store.list_for_user(tenant_id=tenant, user_id=user)
+    assert {r.id for r in rows} == {active_id, soft_deleted_id}
+    # created_at ascending.
+    assert [r.created_at for r in rows] == sorted(r.created_at for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_list_for_user_respects_limit() -> None:
+    store = InMemoryImageUploadStore()
+    tenant = uuid4()
+    user = uuid4()
+    for _ in range(3):
+        await store.insert(
+            image_id=uuid4(),
+            tenant_id=tenant,
+            thread_id=uuid4(),
+            user_id=user,
+            object_key="k",
+            size_bytes=1,
+            mime_type="image/png",
+            sha256="x",
+        )
+    rows = await store.list_for_user(tenant_id=tenant, user_id=user, limit=2)
+    assert len(rows) == 2
