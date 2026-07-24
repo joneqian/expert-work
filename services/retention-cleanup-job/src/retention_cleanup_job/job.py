@@ -226,11 +226,12 @@ class RetentionCleanupJob:
     async def _delete_expired_images(self) -> tuple[int, int, int]:
         """Remove image rows past their retention window + their bytes.
 
-        Mini-ADR J-32 — finds ``image_upload`` rows whose ``created_at``
-        is older than ``now - image_retention_days`` (regardless of
-        ``deleted_at`` state — both never-deleted-but-old and
-        already-soft-deleted rows leave at the same horizon), removes
-        the object-store key for each, and hard-deletes the row.
+        Mini-ADR J-32 — finds the reapable ``image_upload`` rows: those
+        whose ``created_at`` is older than ``now - image_retention_days``,
+        plus **any already-soft-deleted row regardless of age** (a user
+        delete means the blob should leave at the next sweep, not at the
+        original retention horizon). Removes the object-store key for
+        each, then hard-deletes the row.
 
         Object-store failures don't block row hard-delete: an orphaned
         key is a far smaller correctness problem than a stuck row
