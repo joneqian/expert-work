@@ -244,7 +244,7 @@ class RetentionCleanupJob:
         if self._image_upload_store is None or self._object_store is None:
             return 0, 0, 0
         cutoff = datetime.now(UTC) - timedelta(days=self._image_retention_days)
-        expired = await self._image_upload_store.list_expired(
+        expired = await self._image_upload_store.list_reapable(
             before=cutoff,
             limit=self._batch_size,
         )

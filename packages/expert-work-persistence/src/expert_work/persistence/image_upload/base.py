@@ -29,9 +29,10 @@ class ImageUploadStore(abc.ABC):
 
     Two outward-facing read shapes: ``get`` (one row by id) and
     ``list_active`` (rows for a thread / tenant where ``deleted_at IS
-    NULL``). The retention sweep uses :meth:`list_expired` to find rows
-    past their tenant's retention window + :meth:`hard_delete` to remove
-    them once the object-store key is cleared.
+    NULL``). The retention sweep uses :meth:`list_reapable` to find rows
+    past their tenant's retention window (or already soft-deleted) +
+    :meth:`hard_delete` to remove them once the object-store key is
+    cleared.
     """
 
     @abc.abstractmethod
@@ -77,18 +78,22 @@ class ImageUploadStore(abc.ABC):
         path. Sorted by ``created_at`` descending."""
 
     @abc.abstractmethod
-    async def list_expired(
+    async def list_reapable(
         self,
         *,
         before: datetime,
         limit: int = 1000,
     ) -> list[ImageUpload]:
-        """Rows older than ``before`` AND still alive OR already soft-deleted.
+        """Rows the retention sweep may remove: ``created_at < before`` OR
+        ``deleted_at IS NOT NULL``.
 
-        The retention sweep calls this with ``now - retention_days``;
-        any row with ``created_at < before`` is eligible to be removed
-        from the object store + hard-deleted, regardless of
-        ``deleted_at`` state.
+        The retention sweep calls this with ``now - retention_days``.
+        Rows past the age horizon are eligible regardless of
+        ``deleted_at`` state (same as before); additionally, ANY
+        soft-deleted row is eligible even when it's too young to be
+        caught by the age predicate alone — a user's manual delete no
+        longer waits out the retention window before the next sweep
+        reaps it. Sorted by ``created_at`` ascending.
         """
 
     @abc.abstractmethod
